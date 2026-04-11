@@ -1,0 +1,69 @@
+:root {
+  --scrollbar-size: 11px;
+  --scrollbar-track: rgba(255, 255, 255, 0.045);
+  --scrollbar-track-edge: rgba(147, 173, 255, 0.14);
+  --scrollbar-thumb: rgba(255, 224, 138, 0.34);
+  --scrollbar-thumb-hover: rgba(115, 247, 255, 0.42);
+  --scrollbar-thumb-active: rgba(255, 164, 92, 0.56);
+  --scrollbar-thumb-outline: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-shadow: rgba(10, 12, 32, 0.52);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(115, 247, 255, 0.02)),
+    var(--scrollbar-track);
+  box-shadow: inset 0 0 0 1px var(--scrollbar-track-edge);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.68), rgba(115, 247, 255, 0.52));
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 0 0 1px var(--scrollbar-thumb-outline),
+    0 0 0 1px rgba(8, 10, 24, 0.28),
+    0 0 18px rgba(115, 247, 255, 0.08);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.82), rgba(115, 247, 255, 0.7));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px rgba(8, 10, 24, 0.34),
+    0 0 22px rgba(115, 247, 255, 0.12);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar-thumb:active {
+  background:
+    linear-gradient(180deg, rgba(255, 164, 92, 0.9), rgba(255, 103, 140, 0.78));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(8, 10, 24, 0.38),
+    0 0 24px rgba(255, 103, 140, 0.16);
+}
+
+:where(body, .app-shell, .app-shell *, .orbital-overlay, .orbital-overlay *)::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --scrollbar-size: 9px;
+  }
+}

@@ -1,0 +1,704 @@
+import Dexie, { type EntityTable } from "dexie";
+
+import {
+  COLOR_PALETTE,
+  DEFAULT_FOLDER_COLOR,
+  DEFAULT_NOTE_COLOR,
+  DEFAULT_PROJECT_COLOR
+} from "../lib/palette";
+import {
+  buildExcerpt,
+  createStarterContent,
+  extractPlainText,
+  extractReferencedAssetIds,
+  getFolderCascade,
+  normalizeNoteContent,
+  getUntitledTitle
+} from "../lib/notes";
+import type {
+  AppLanguage,
+  AppSettings,
+  Asset,
+  AssetKind,
+  Folder,
+  Note,
+  NoteContent,
+  Project,
+  SyncProvider,
+  Tag
+} from "../types";
+
+const assetUrlCache = new Map<string, string>();
+
+function now() {
+  return Date.now();
+}
+
+function createColor(colorPool: string[], seedIndex: number) {
+  return colorPool[seedIndex % colorPool.length];
+}
+
+const NODE_COLORS = COLOR_PALETTE.map((entry) => entry.hex);
+
+function createDeviceId() {
+  return `device-${crypto.randomUUID()}`;
+}
+
+function nextSyncState(currentSyncState: Note["syncState"] | undefined): Note["syncState"] {
+  return currentSyncState === "conflict" ? "conflict" : "dirty";
+}
+
+function detectLanguage(): AppLanguage {
+  if (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ru")) {
+    return "ru";
+  }
+
+  return "en";
+}
+
+class ZenNotesDatabase extends Dexie {
+  projects!: EntityTable<Project, "id">;
+  folders!: EntityTable<Folder, "id">;
+  tags!: EntityTable<Tag, "id">;
+  notes!: EntityTable<Note, "id">;
+  assets!: EntityTable<Asset, "id">;
+  settings!: EntityTable<AppSettings, "id">;
+
+  constructor() {
+    super("zen-notes-db");
+
+    this.version(1).stores({
+      projects: "id,updatedAt",
+      folders: "id,parentId,updatedAt",
+      tags: "id,name,updatedAt",
+      notes: "id,folderId,*tagIds,updatedAt,createdAt,pinned,archived",
+      assets: "id,noteId,updatedAt",
+      settings: "id"
+    });
+
+    this.version(2)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes: "id,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("notes")
+          .toCollection()
+          .modify((note) => {
+            note.favorite ??= false;
+            note.trashedAt ??= null;
+            note.syncState ??= "local";
+            note.conflictOriginId ??= null;
+          });
+
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.syncEnabled ??= false;
+            settings.syncStatus ??= "disabled";
+            settings.selfHostedToken ??= "";
+            settings.conflictStrategy ??= "duplicate";
+            settings.encryptionEnabled ??= false;
+            settings.lastSyncAt ??= null;
+            settings.localDeviceId ??= createDeviceId();
+          });
+      });
+
+    this.version(3)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes: "id,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("notes")
+          .toCollection()
+          .modify((note) => {
+            note.color ??= DEFAULT_NOTE_COLOR;
+          });
+      });
+
+    this.version(4)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes: "id,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("folders")
+          .toCollection()
+          .modify((folder) => {
+            folder.color ??= DEFAULT_FOLDER_COLOR;
+          });
+
+        await transaction
+          .table("tags")
+          .toCollection()
+          .modify((tag) => {
+            tag.color = "";
+          });
+
+        await transaction
+          .table("notes")
+          .toCollection()
+          .modify((note) => {
+            note.color ??= DEFAULT_NOTE_COLOR;
+          });
+      });
+
+    this.version(5)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        const language = detectLanguage();
+        const projectId = crypto.randomUUID();
+        const timestamp = now();
+
+        await transaction.table("projects").add({
+          id: projectId,
+          name: language === "ru" ? "Проект 1" : "Project 1",
+          x: 0,
+          y: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        });
+
+        await transaction
+          .table("folders")
+          .toCollection()
+          .modify((folder) => {
+            folder.projectId ??= projectId;
+            folder.color ??= DEFAULT_FOLDER_COLOR;
+          });
+
+        await transaction
+          .table("notes")
+          .toCollection()
+          .modify((note) => {
+            note.projectId ??= projectId;
+            note.color ??= DEFAULT_NOTE_COLOR;
+          });
+      });
+
+    this.version(6)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("projects")
+          .toCollection()
+          .modify((project) => {
+            project.color ??= DEFAULT_PROJECT_COLOR;
+          });
+      });
+  }
+}
+
+export const db = new ZenNotesDatabase();
+
+export async function ensureSeedData() {
+  const existingSettings = await db.settings.get("app");
+
+  if (existingSettings) {
+    return;
+  }
+
+  const language = detectLanguage();
+  const timestamp = now();
+  const project: Project = {
+    id: crypto.randomUUID(),
+    name: language === "ru" ? "Проект 1" : "Project 1",
+    color: DEFAULT_PROJECT_COLOR,
+    x: 0,
+    y: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  const folders: Folder[] = [
+    {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      name: language === "ru" ? "Входящие" : "Inbox",
+      parentId: null,
+      color: createColor(NODE_COLORS, 0),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    },
+    {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      name: language === "ru" ? "Исследования" : "Research",
+      parentId: null,
+      color: createColor(NODE_COLORS, 1),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    },
+    {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      name: language === "ru" ? "Прототипы" : "Prototypes",
+      parentId: null,
+      color: createColor(NODE_COLORS, 2),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+  ];
+
+  const tags: Tag[] = [
+    {
+      id: crypto.randomUUID(),
+      name: language === "ru" ? "идея" : "idea",
+      color: "",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    },
+    {
+      id: crypto.randomUUID(),
+      name: language === "ru" ? "дизайн" : "design",
+      color: "",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    },
+    {
+      id: crypto.randomUUID(),
+      name: language === "ru" ? "локально" : "offline",
+      color: "",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+  ];
+
+  const starterContent = createStarterContent(language);
+  const note: Note = {
+    id: crypto.randomUUID(),
+    title: language === "ru" ? "Стартовая заметка" : "Starter note",
+    projectId: project.id,
+    folderId: folders[0].id,
+    color: DEFAULT_NOTE_COLOR,
+    tagIds: [tags[0].id, tags[2].id],
+    content: starterContent,
+    excerpt: buildExcerpt(starterContent),
+    plainText: extractPlainText(starterContent),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    pinned: true,
+    favorite: false,
+    archived: false,
+    trashedAt: null,
+    syncState: "local",
+    conflictOriginId: null
+  };
+
+  await db.transaction("rw", [db.projects, db.folders, db.tags, db.notes, db.settings], async () => {
+    await db.projects.add(project);
+    await db.folders.bulkAdd(folders);
+    await db.tags.bulkAdd(tags);
+    await db.notes.add(note);
+    await db.settings.add({
+      id: "app",
+      language,
+      syncEnabled: false,
+      syncStatus: "disabled",
+      syncProvider: "none",
+      selfHostedUrl: "",
+      selfHostedToken: "",
+      conflictStrategy: "duplicate",
+      encryptionEnabled: false,
+      lastSyncAt: null,
+      localDeviceId: createDeviceId(),
+      lastOpenedNoteId: note.id
+    });
+  });
+}
+
+export async function patchSettings(patch: Partial<Omit<AppSettings, "id">>) {
+  await db.settings.update("app", patch);
+}
+
+export async function createProject(name: string, x: number, y: number, color?: string) {
+  const timestamp = now();
+  const count = await db.projects.count();
+  const project: Project = {
+    id: crypto.randomUUID(),
+    name,
+    color: color ?? createColor(NODE_COLORS, count + 5),
+    x,
+    y,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  await db.projects.add(project);
+  return project;
+}
+
+export async function updateProjectPosition(projectId: string, x: number, y: number) {
+  await db.projects.update(projectId, {
+    x,
+    y,
+    updatedAt: now()
+  });
+}
+
+export async function updateProjectColor(projectId: string, color: string) {
+  await db.projects.update(projectId, {
+    color,
+    updatedAt: now()
+  });
+}
+
+export async function createFolder(
+  name: string,
+  parentId: string | null,
+  color?: string,
+  projectId?: string
+) {
+  const timestamp = now();
+  const count = await db.folders.count();
+  let resolvedProjectId = projectId ?? null;
+
+  if (parentId) {
+    const parentFolder = await db.folders.get(parentId);
+
+    if (parentFolder?.parentId) {
+      throw new Error("FOLDER_DEPTH_LIMIT");
+    }
+
+    resolvedProjectId = parentFolder?.projectId ?? null;
+  }
+
+  if (!resolvedProjectId) {
+    throw new Error("PROJECT_REQUIRED");
+  }
+
+  const folder: Folder = {
+    id: crypto.randomUUID(),
+    projectId: resolvedProjectId,
+    name,
+    parentId,
+    color: color ?? createColor(NODE_COLORS, count),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  await db.folders.add(folder);
+  return folder;
+}
+
+export async function renameFolder(folderId: string, name: string) {
+  await db.folders.update(folderId, {
+    name,
+    updatedAt: now()
+  });
+}
+
+export async function updateFolderColor(folderId: string, color: string) {
+  await db.folders.update(folderId, {
+    color,
+    updatedAt: now()
+  });
+}
+
+export async function removeFolder(folderId: string) {
+  const folders = await db.folders.toArray();
+  const notes = await db.notes.toArray();
+  const cascade = getFolderCascade(folderId, folders, notes);
+  const timestamp = now();
+
+  await db.transaction("rw", db.folders, db.notes, async () => {
+    await db.folders.bulkDelete(cascade.folderIds);
+
+    await Promise.all(
+      cascade.noteIds.map((noteId) =>
+        db.notes.update(noteId, {
+          folderId: null,
+          trashedAt: timestamp,
+          archived: false,
+          updatedAt: timestamp,
+          syncState: "dirty"
+        })
+      )
+    );
+  });
+}
+
+export async function inspectFolderRemoval(folderId: string) {
+  const folders = await db.folders.toArray();
+  const notes = await db.notes.toArray();
+  const cascade = getFolderCascade(folderId, folders, notes);
+
+  return {
+    folderCount: cascade.folderIds.length,
+    noteCount: cascade.noteIds.length
+  };
+}
+
+export async function createTag(name: string) {
+  const timestamp = now();
+  const tag: Tag = {
+    id: crypto.randomUUID(),
+    name,
+    color: "",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  await db.tags.add(tag);
+  return tag;
+}
+
+export async function renameTag(tagId: string, name: string) {
+  await db.tags.update(tagId, {
+    name,
+    updatedAt: now()
+  });
+}
+
+export async function removeTag(tagId: string) {
+  await db.transaction("rw", db.tags, db.notes, async () => {
+    await db.tags.delete(tagId);
+
+    const impactedNotes = await db.notes.where("tagIds").equals(tagId).toArray();
+
+    await Promise.all(
+      impactedNotes.map((note) =>
+        db.notes.update(note.id, {
+          tagIds: note.tagIds.filter((currentTagId) => currentTagId !== tagId),
+          updatedAt: now()
+        })
+      )
+    );
+  });
+}
+
+export async function createNote(
+  language: AppLanguage,
+  folderId: string | null,
+  tagIds: string[],
+  projectId?: string
+) {
+  const timestamp = now();
+  const content = createStarterContent(language);
+  const folder = folderId ? await db.folders.get(folderId) : null;
+  const resolvedProjectId = folder?.projectId ?? projectId ?? null;
+
+  if (!resolvedProjectId) {
+    throw new Error("PROJECT_REQUIRED");
+  }
+
+  const note: Note = {
+    id: crypto.randomUUID(),
+    title: getUntitledTitle(language),
+    projectId: resolvedProjectId,
+    folderId,
+    color: DEFAULT_NOTE_COLOR,
+    tagIds,
+    content,
+    excerpt: buildExcerpt(content),
+    plainText: extractPlainText(content),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    pinned: false,
+    favorite: false,
+    archived: false,
+    trashedAt: null,
+    syncState: "local",
+    conflictOriginId: null
+  };
+
+  await db.transaction("rw", db.notes, db.settings, async () => {
+    await db.notes.add(note);
+    await db.settings.update("app", {
+      lastOpenedNoteId: note.id
+    });
+  });
+
+  return note;
+}
+
+export async function updateNoteMeta(
+  noteId: string,
+  patch: Partial<
+    Pick<
+      Note,
+      | "title"
+      | "projectId"
+      | "folderId"
+      | "color"
+      | "tagIds"
+      | "pinned"
+      | "favorite"
+      | "archived"
+      | "trashedAt"
+    >
+  >
+) {
+  const existingNote = await db.notes.get(noteId);
+  const nextFolder = patch.folderId ? await db.folders.get(patch.folderId) : null;
+  const nextProjectId =
+    patch.folderId !== undefined
+      ? nextFolder?.projectId ?? patch.projectId ?? existingNote?.projectId
+      : patch.projectId ?? existingNote?.projectId;
+
+  await db.notes.update(noteId, {
+    ...patch,
+    projectId: nextProjectId,
+    updatedAt: now(),
+    syncState: nextSyncState(existingNote?.syncState)
+  });
+}
+
+export async function saveNoteContent(noteId: string, content: NoteContent) {
+  const normalizedContent = normalizeNoteContent(content);
+  const plainText = extractPlainText(normalizedContent);
+  const excerpt = buildExcerpt(normalizedContent);
+  const activeAssetIds = new Set(extractReferencedAssetIds(normalizedContent));
+
+  await db.transaction("rw", db.notes, db.assets, async () => {
+    const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
+    const staleAssets = noteAssets.filter((asset) => !activeAssetIds.has(asset.id));
+
+    if (staleAssets.length > 0) {
+      staleAssets.forEach((asset) => {
+        const cachedUrl = assetUrlCache.get(asset.id);
+
+        if (cachedUrl) {
+          URL.revokeObjectURL(cachedUrl);
+          assetUrlCache.delete(asset.id);
+        }
+      });
+
+      await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
+    }
+
+    await db.notes.update(noteId, {
+      content: normalizedContent,
+      plainText,
+      excerpt,
+      updatedAt: now(),
+      syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
+    });
+  });
+}
+
+export async function moveNoteToTrash(noteId: string) {
+  await updateNoteMeta(noteId, {
+    trashedAt: now(),
+    archived: false
+  });
+}
+
+export async function restoreNoteFromTrash(noteId: string) {
+  await updateNoteMeta(noteId, {
+    trashedAt: null
+  });
+}
+
+export async function removeNote(noteId: string) {
+  await db.transaction("rw", db.notes, db.assets, async () => {
+    await db.notes.delete(noteId);
+    const assetIds = await db.assets.where("noteId").equals(noteId).primaryKeys();
+    const normalizedIds = assetIds.map((id) => String(id));
+
+    normalizedIds.forEach((assetId) => {
+      const cachedUrl = assetUrlCache.get(assetId);
+
+      if (cachedUrl) {
+        URL.revokeObjectURL(cachedUrl);
+        assetUrlCache.delete(assetId);
+      }
+    });
+
+    await db.assets.bulkDelete(normalizedIds);
+  });
+}
+
+function detectAssetKind(file: File): AssetKind {
+  if (file.type.startsWith("image/")) {
+    return "image";
+  }
+
+  if (file.type.startsWith("audio/")) {
+    return "audio";
+  }
+
+  if (file.type.startsWith("video/")) {
+    return "video";
+  }
+
+  return "file";
+}
+
+export async function storeAsset(noteId: string, file: File) {
+  const timestamp = now();
+  const asset: Asset = {
+    id: crypto.randomUUID(),
+    noteId,
+    name: file.name,
+    mimeType: file.type,
+    size: file.size,
+    kind: detectAssetKind(file),
+    blob: file,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+
+  await db.assets.add(asset);
+  return `asset://${asset.id}`;
+}
+
+export async function resolveAssetUrl(url: string) {
+  if (!url.startsWith("asset://")) {
+    return url;
+  }
+
+  const assetId = url.replace("asset://", "");
+  const cachedUrl = assetUrlCache.get(assetId);
+
+  if (cachedUrl) {
+    return cachedUrl;
+  }
+
+  const asset = await db.assets.get(assetId);
+
+  if (!asset) {
+    return url;
+  }
+
+  const objectUrl = URL.createObjectURL(asset.blob);
+  assetUrlCache.set(assetId, objectUrl);
+  return objectUrl;
+}
+
+export function isSyncProvider(value: string): value is SyncProvider {
+  return value === "none" || value === "googleDrive" || value === "selfHosted";
+}

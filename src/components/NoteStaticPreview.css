@@ -1,0 +1,243 @@
+.note-static-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.72;
+}
+
+.note-static-preview.is-compact {
+  gap: 8px;
+  font-size: 0.84rem;
+  line-height: 1.68;
+}
+
+.note-static-preview:not(.is-interactive) {
+  pointer-events: none;
+  user-select: none;
+}
+
+.note-static-empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.note-static-heading,
+.note-static-paragraph,
+.note-static-quote,
+.note-static-code {
+  margin: 0;
+}
+
+.note-static-heading {
+  color: var(--text);
+  font-family: "Azeret Mono", "IBM Plex Mono", monospace;
+  font-size: 1rem;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+
+.note-static-preview.is-compact .note-static-heading {
+  font-size: 0.92rem;
+}
+
+.note-static-paragraph {
+  color: inherit;
+  word-break: break-word;
+}
+
+.note-static-link {
+  color: color-mix(in srgb, var(--text) 84%, #8db7ff);
+  text-decoration: underline;
+  text-decoration-color: rgba(141, 183, 255, 0.42);
+  text-underline-offset: 0.16em;
+}
+
+.note-static-quote {
+  padding: 0.78rem 0.9rem;
+  border-left: 2px solid rgba(141, 183, 255, 0.34);
+  border-radius: 0 0.9rem 0.9rem 0;
+  background: rgba(255, 255, 255, 0.035);
+  color: color-mix(in srgb, var(--text) 88%, rgba(255, 255, 255, 0.16));
+}
+
+.note-static-code {
+  padding: 0.92rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(5, 8, 18, 0.82);
+  color: color-mix(in srgb, var(--text) 92%, rgba(141, 183, 255, 0.12));
+  overflow: auto;
+  font-family: "IBM Plex Mono", "Azeret Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.note-static-divider {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.note-static-list {
+  margin: 0;
+  padding-left: 1.18rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.note-static-list-check,
+.note-static-list-toggle {
+  padding-left: 0;
+  list-style: none;
+}
+
+.note-static-list-item {
+  min-width: 0;
+}
+
+.note-static-list-check .note-static-list-item,
+.note-static-list-toggle .note-static-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+}
+
+.note-static-checkmark {
+  padding-top: 0.14rem;
+}
+
+.note-static-checkmark input {
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0;
+  accent-color: color-mix(in srgb, var(--text) 72%, #5fb3ff);
+}
+
+.note-static-toggle-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  min-height: 1rem;
+  padding-top: 0.04rem;
+  color: var(--text-dim);
+  font-family: "IBM Plex Mono", "Azeret Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.note-static-list-body {
+  display: grid;
+  gap: 0.46rem;
+  min-width: 0;
+}
+
+.note-static-list-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.note-static-children {
+  display: grid;
+  gap: 0.62rem;
+  margin-left: 1rem;
+  padding-left: 0.88rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.note-static-table-wrap {
+  overflow: auto;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 12, 24, 0.56);
+}
+
+.note-static-table {
+  width: 100%;
+  min-width: 260px;
+  border-collapse: collapse;
+}
+
+.note-static-table-cell {
+  min-width: 88px;
+  padding: 0.62rem 0.74rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-weight: 400;
+  vertical-align: top;
+}
+
+.note-static-table th.note-static-table-cell {
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.note-static-figure,
+.note-static-attachment {
+  display: grid;
+  gap: 0.52rem;
+  margin: 0;
+}
+
+.note-static-figure {
+  width: min(100%, var(--note-static-preview-width, 100%));
+}
+
+.note-static-image,
+.note-static-video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.note-static-preview.is-compact .note-static-image {
+  max-height: 148px;
+  object-fit: cover;
+}
+
+.note-static-video {
+  max-height: 220px;
+}
+
+.note-static-audio {
+  width: 100%;
+}
+
+.note-static-caption {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.note-static-attachment-link {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.82rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 24, 0.62);
+  color: inherit;
+  text-decoration: none;
+}
+
+.note-static-attachment-kind {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.note-static-attachment-name {
+  color: var(--text);
+  word-break: break-word;
+}

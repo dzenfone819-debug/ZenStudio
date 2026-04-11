@@ -1,0 +1,619 @@
+.orbital-overlay {
+  gap: 12px;
+}
+
+.orbital-overlay .orbital-topbar-minimal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 224, 138, 0.06), transparent 28%),
+    linear-gradient(180deg, rgba(18, 19, 40, 0.92), rgba(8, 10, 22, 0.9)),
+    rgba(8, 10, 22, 0.88);
+  backdrop-filter: blur(18px) saturate(120%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 14px 34px rgba(3, 5, 14, 0.2);
+}
+
+.orbital-topbar-brand {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.orbital-topbar-copy {
+  gap: 4px;
+}
+
+.orbital-topbar-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+}
+
+.orbital-overlay .orbital-topbar-minimal .orbital-title {
+  margin: 0;
+  max-width: none;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.orbital-topbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.orbital-context-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orbital-overlay .orbital-topbar-minimal .status-chip {
+  min-height: 28px;
+  padding: 5px 9px;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.orbital-toolbar-shell {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+.orbital-toolbar-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overlay .orbital-toolbar-action {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  transform: none;
+}
+
+.orbital-overlay .orbital-toolbar-action:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: transparent;
+}
+
+.orbital-overlay .orbital-toolbar-action.accent {
+  color: #bdfdd4;
+}
+
+.orbital-toolbar-action-icon {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.orbital-toolbar-close {
+  color: #ffc1d0;
+}
+
+.orbital-overlay .orbital-layout {
+  gap: 12px;
+  grid-template-columns: 308px minmax(0, 1fr);
+}
+
+.orbital-overlay .orbital-inspector.panel {
+  padding: 10px 0 12px;
+  border-radius: 26px;
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(255, 224, 138, 0.06), transparent 24%),
+    linear-gradient(180deg, rgba(18, 20, 38, 0.88), rgba(8, 10, 21, 0.9)),
+    rgba(8, 10, 21, 0.86);
+  backdrop-filter: blur(18px) saturate(118%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 38px rgba(2, 4, 12, 0.18);
+}
+
+.orbital-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 12px 10px;
+}
+
+.orbital-inspector-header-subview {
+  padding-top: 0;
+}
+
+.orbital-inspector-heading {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.orbital-inspector-heading-subview {
+  flex: 1;
+}
+
+.orbital-inspector-kicker {
+  color: rgba(255, 224, 138, 0.82);
+}
+
+.orbital-overlay .orbital-inspector-title {
+  margin: 0;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.92rem;
+  line-height: 1.32;
+}
+
+.orbital-inspector-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.orbital-inline-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.orbital-icon-action {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.orbital-overview-switcher {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+  margin: 0 12px 10px;
+}
+
+.orbital-overlay .orbital-overview-nav {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1;
+  transform: none;
+}
+
+.orbital-overlay .orbital-overview-nav:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--preview-accent, rgba(255, 224, 138, 0.32)) 42%, rgba(255, 255, 255, 0.14));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--preview-accent, rgba(255, 224, 138, 0.08)) 12%, rgba(255, 255, 255, 0.02)), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overview-preview-stage {
+  display: grid;
+  --preview-accent: var(--gold);
+  animation: orbital-preview-shift 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.orbital-overlay .orbital-overview-preview-stage .topology-activator {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--preview-accent) 20%, rgba(147, 173, 255, 0.12));
+  background:
+    radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--preview-accent) 10%, transparent), transparent 56%),
+    linear-gradient(180deg, rgba(22, 24, 40, 0.78), rgba(10, 12, 24, 0.76)),
+    rgba(10, 12, 24, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 36px rgba(0, 0, 0, 0.18);
+}
+
+.orbital-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.orbital-overview-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.orbital-overview-link:hover {
+  border-color: rgba(255, 224, 138, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.05), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overview-link-label {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.orbital-overview-link-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1;
+}
+
+.orbital-hints-quiet {
+  margin-top: 10px;
+}
+
+.orbital-overlay .orbital-inspector-search {
+  margin: 0 12px 10px;
+}
+
+.orbital-overlay .orbital-inspector-search .orbital-searchbar {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border-color: rgba(147, 173, 255, 0.1);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.orbital-overlay .orbital-inspector-search .orbital-searchbar-mark {
+  color: rgba(255, 224, 138, 0.76);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+}
+
+.orbital-overlay .orbital-menu-list {
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.orbital-overlay .orbital-folder-group {
+  gap: 6px;
+}
+
+.orbital-overlay .orbital-menu-item {
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 15px;
+  border-color: rgba(147, 173, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.orbital-overlay .orbital-menu-item:hover,
+.orbital-overlay .orbital-menu-item.is-active {
+  transform: none;
+  border-color: rgba(255, 224, 138, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.045), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.024);
+}
+
+.orbital-overlay .orbital-menu-item-child {
+  margin-left: 12px;
+  width: calc(100% - 12px);
+}
+
+.orbital-overlay .orbital-menu-item-title {
+  font-size: 0.82rem;
+  line-height: 1.38;
+  font-weight: 600;
+}
+
+.orbital-overlay .orbital-menu-item-meta {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.orbital-menu-item-richmeta {
+  min-width: 0;
+  max-height: 140px;
+  overflow: hidden;
+}
+
+.orbital-overlay .orbital-menu-note-preview {
+  gap: 6px;
+  font-size: 0.74rem;
+  line-height: 1.54;
+}
+
+.orbital-overlay .orbital-menu-note-preview .note-static-heading {
+  font-size: 0.82rem;
+  line-height: 1.34;
+}
+
+.orbital-overlay .orbital-menu-note-preview .note-static-code,
+.orbital-overlay .orbital-menu-note-preview .note-static-quote,
+.orbital-overlay .orbital-menu-note-preview .note-static-attachment-link,
+.orbital-overlay .orbital-menu-note-preview .note-static-table-cell {
+  font-size: 0.72rem;
+}
+
+.orbital-overlay .orbital-menu-note-preview .note-static-table-wrap,
+.orbital-overlay .orbital-menu-note-preview .note-static-code {
+  border-radius: 0.9rem;
+}
+
+.orbital-overlay .orbital-menu-note-preview .note-static-image,
+.orbital-overlay .orbital-menu-note-preview .note-static-video {
+  max-height: 124px;
+  object-fit: cover;
+}
+
+.orbital-overlay .orbital-menu-colorchip {
+  width: 11px;
+  height: 11px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch-color) 14%, transparent);
+}
+
+.orbital-overlay .orbital-menu-empty {
+  margin-top: 4px;
+  padding: 14px 12px;
+  border-radius: 18px;
+}
+
+.orbital-overlay .orbital-selection-shell,
+.orbital-overlay .orbital-meta-card,
+.orbital-overlay .orbital-create-card {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+.orbital-overlay .orbital-selection-shell {
+  gap: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 30px rgba(3, 4, 14, 0.12);
+}
+
+.orbital-overlay .orbital-selection-shell-note {
+  margin-top: 6px;
+}
+
+.orbital-overlay .orbital-selection-preview-note {
+  max-height: 286px;
+}
+
+.orbital-overlay .orbital-meta-card,
+.orbital-overlay .orbital-create-card {
+  padding: 12px;
+  border-radius: 18px;
+  border-color: rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+}
+
+.orbital-overlay .orbital-focus-card {
+  border-color: rgba(255, 224, 138, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.05), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+}
+
+.orbital-overlay .panel-head {
+  padding: 2px 12px 10px;
+}
+
+.orbital-overlay .orbital-fact-row {
+  padding-top: 8px;
+}
+
+.orbital-overlay .orbital-fact-row span,
+.orbital-overlay .orbital-hints {
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.orbital-overlay .orbital-color-field {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.orbital-overlay .orbital-custom-color-picker {
+  gap: 6px;
+}
+
+.orbital-overlay .orbital-custom-color-control {
+  min-height: 40px;
+  padding: 6px 8px;
+  border-radius: 13px;
+}
+
+.orbital-overlay .orbital-custom-color-value {
+  font-size: 0.74rem;
+}
+
+.orbital-overlay .orbital-action-stack,
+.orbital-overlay .orbital-create-actions {
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.orbital-overlay .orbital-action-stack .primary-action,
+.orbital-overlay .orbital-action-stack .toolbar-action,
+.orbital-overlay .orbital-create-actions .micro-action {
+  min-width: 0;
+}
+
+.orbital-overlay .primary-action {
+  padding: 10px 12px;
+  min-width: 0;
+  border-radius: 13px;
+  font-size: 0.78rem;
+}
+
+.orbital-overlay .micro-action {
+  min-height: 34px;
+  border-radius: 12px;
+}
+
+.orbital-overlay .orbital-hints {
+  margin: 10px 12px 0;
+  color: rgba(183, 176, 216, 0.72);
+}
+
+@media (max-width: 1320px) {
+  .orbital-overlay .orbital-layout {
+    grid-template-columns: 292px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .orbital-overlay .orbital-topbar-minimal {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .orbital-toolbar-shell {
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .orbital-toolbar-shell::-webkit-scrollbar {
+    display: none;
+  }
+
+  .orbital-toolbar-cluster {
+    flex: 0 0 auto;
+  }
+
+  .orbital-overlay .orbital-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .orbital-overlay {
+    gap: 10px;
+  }
+
+  .orbital-overlay .orbital-topbar-minimal,
+  .orbital-overlay .orbital-inspector.panel {
+    border-radius: 22px;
+  }
+
+  .orbital-overlay .orbital-topbar-minimal .orbital-title,
+  .orbital-overlay .orbital-inspector-title {
+    font-size: 0.86rem;
+  }
+
+  .orbital-overlay .orbital-toolbar-action {
+    padding: 7px 9px;
+    font-size: 0.72rem;
+  }
+
+  .orbital-toolbar-action-icon,
+  .orbital-icon-action,
+  .orbital-overlay .orbital-overview-nav {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+  }
+
+  .orbital-overview-switcher {
+    grid-template-columns: 30px minmax(0, 1fr) 30px;
+    gap: 6px;
+  }
+
+  .orbital-overview-grid {
+    gap: 6px;
+  }
+
+  .orbital-overview-link {
+    min-height: 40px;
+    padding: 9px 10px;
+  }
+}

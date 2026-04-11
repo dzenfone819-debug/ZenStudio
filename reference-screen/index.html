@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P-adic Value Cascade Interface</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;700&family=Orbitron:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="background-grid" aria-hidden="true"></div>
+      <div class="screen-glow" aria-hidden="true"></div>
+
+      <header class="hud">
+        <span>Value flows on T² -> p-adic solenoid settlement lattice</span>
+        <span>The layers of value extraction and capture</span>
+      </header>
+
+      <main class="dashboard">
+        <section class="left-column">
+          <article class="panel orbit-panel">
+            <div class="panel-kicker">Toroidal value surface</div>
+            <svg
+              id="toroid-svg"
+              viewBox="0 0 480 290"
+              role="img"
+              aria-label="Wireframe torus with value nodes"
+            ></svg>
+          </article>
+
+          <article class="panel legend-panel">
+            <ul class="legend-list">
+              <li>
+                <span class="swatch token"></span>
+                <span>Token flow (value transfer on T²)</span>
+              </li>
+              <li>
+                <span class="swatch value"></span>
+                <span>Value component <strong>v</strong> (head)</span>
+              </li>
+              <li>
+                <span class="swatch derivative"></span>
+                <span>Derivative component <strong>∂v/∂θ</strong> (tail)</span>
+              </li>
+              <li>
+                <span class="swatch layers"></span>
+                <span>Value flow -> infrastructure layers</span>
+              </li>
+            </ul>
+          </article>
+
+          <div class="left-bottom">
+            <article class="panel theorem-panel">
+              <div class="panel-kicker">Settlement theorem</div>
+              <h2>Dual Number Settlement</h2>
+              <div class="equation">
+                T = v + (∂v/∂θ) ε
+                <span>where ε² = 0</span>
+              </div>
+              <div class="equation-notes">
+                <span>value</span>
+                <span>derivative</span>
+                <span>chain rule = free</span>
+              </div>
+              <p>
+                What you transfer is both the asset and the state transition.
+                No reconciliation step.
+              </p>
+            </article>
+
+            <article class="panel theorem-panel">
+              <div class="panel-kicker">Topology invariant</div>
+              <h2>Toroidal Fundamental Group</h2>
+              <div class="equation large">π₁(T²) = ℤ × ℤ</div>
+              <p>Two independent, non-collapsible winding numbers.</p>
+              <div class="winding-grid">
+                <span>W₁ = 0</span>
+                <span>= compute</span>
+                <span>W₂ = 0</span>
+                <span>= revenue</span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="center-column">
+          <div class="center-heading">Cross-layer relay</div>
+          <div id="signal-field" class="signal-field" aria-hidden="true"></div>
+
+          <article class="panel fiber-panel">
+            <div class="panel-kicker">Compact bundle</div>
+            <div class="fiber-head">
+              <h2>P-adic Solenoid Fiber</h2>
+              <span>ℤ₅ x ℤ x S¹</span>
+            </div>
+            <svg
+              id="fiber-chart"
+              viewBox="0 0 260 120"
+              role="img"
+              aria-label="Miniature layer propagation chart"
+            ></svg>
+          </article>
+        </section>
+
+        <aside class="right-column">
+          <div class="column-heading">The layers of value extraction and capture</div>
+
+          <div class="layer-stack">
+            <article class="panel layer-card layer-compute">
+              <h3>L1: Compute</h3>
+              <p>$100B+ contracted infrastructure</p>
+              <p>Silicon + kilowatts</p>
+            </article>
+
+            <article class="panel layer-card layer-intelligence">
+              <h3>L2: Intelligence</h3>
+              <p>Claude Opus / Sonnet / Haiku</p>
+              <p>Token pricing, $0.25-$75 / MTok</p>
+            </article>
+
+            <article class="panel layer-card layer-protocol">
+              <h3>L3: Protocol (MCP)</h3>
+              <p>10,000+ servers, open SDK downloads</p>
+              <p>Agent-to-tool connectivity</p>
+            </article>
+
+            <article class="panel layer-card layer-agents">
+              <h3>L4: Agents</h3>
+              <p>Claude Code, computer use, research</p>
+              <p>Autonomous economic actors</p>
+            </article>
+
+            <article class="panel layer-card layer-applications">
+              <h3>L5: Applications</h3>
+              <p>$9B ARR, 300K+ enterprises</p>
+              <p>Value capture layer</p>
+            </article>
+          </div>
+
+          <article class="panel settlement-panel">
+            <h2>Settlement: Metronome/Stripe + AI Clearing House</h2>
+            <div id="settlement-dots" class="settlement-dots" aria-hidden="true"></div>
+            <p>Enterprise + Token + MCP + Agent + Settlement</p>
+            <p>Sub-second + multi-asset pricing + real-time revenue</p>
+          </article>
+
+          <article class="panel cascade-panel">
+            <h2>Five-Layer Value Cascade (Single Operation)</h2>
+            <div class="tab-strip">
+              <span class="tab active">Compute</span>
+              <span class="tab">Model</span>
+              <span class="tab">Protocol</span>
+              <span class="tab">Agent</span>
+              <span class="tab">App</span>
+            </div>
+            <p>Each step: T = v + (∂v/∂θ)ε</p>
+            <p>Cascade: Tᵢ∘Tᵢ₊₁∘Tᵢ₊₂. Chain rule is algebraic.</p>
+          </article>
+
+          <article class="panel benchmark-panel">
+            <h2>Crypto Promised vs Math Delivers</h2>
+            <div id="benchmark-bars" class="benchmark-bars"></div>
+          </article>
+        </aside>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
