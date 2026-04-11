@@ -1,0 +1,414 @@
+.canvas-pane {
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 10px 10px;
+}
+
+.canvas-pane.is-immersive {
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+
+.canvas-pane-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.canvas-pane.is-immersive .canvas-pane-toolbar {
+  gap: 6px;
+}
+
+.canvas-pane-toolbar-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.canvas-pane.is-immersive .canvas-pane-toolbar-main {
+  gap: 6px;
+}
+
+.canvas-pane-toolbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  align-items: center;
+}
+
+.canvas-pane.is-immersive .canvas-pane-toolbar-meta {
+  gap: 4px 6px;
+}
+
+.canvas-title-field {
+  flex: 1 1 320px;
+  width: auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 24, 0.82);
+  color: var(--text);
+  font-size: 0.94rem;
+}
+
+.canvas-pane.is-immersive .canvas-title-field {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+
+.canvas-pane-contextmeta {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.canvas-pane.is-immersive .canvas-pane-contextmeta {
+  font-size: 0.64rem;
+}
+
+.canvas-pane-toolbar .editor-save-pill {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+}
+
+.canvas-pane.is-immersive .canvas-pane-toolbar .editor-save-pill {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 0.6rem;
+}
+
+.canvas-surface-switcher {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.canvas-pane.is-immersive .canvas-surface-switcher {
+  gap: 4px;
+  padding: 2px;
+}
+
+.canvas-surface-tab {
+  min-height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.canvas-pane.is-immersive .canvas-surface-tab {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 0.7rem;
+}
+
+.canvas-surface-tab:hover,
+.canvas-surface-tab.is-active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.canvas-pane-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+}
+
+.canvas-pane.is-details-open .canvas-pane-shell {
+  grid-template-columns: minmax(0, 1fr) 288px;
+}
+
+.canvas-stage-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.canvas-stage-frame {
+  height: min(76vh, 860px);
+  min-height: 0;
+}
+
+.canvas-pane.is-immersive .canvas-stage-frame {
+  height: min(calc(100vh - 96px), 940px);
+}
+
+.canvas-stage-shell {
+  position: relative;
+  height: 100%;
+  min-height: 460px;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background:
+    radial-gradient(circle at top, rgba(79, 157, 255, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(12, 14, 30, 0.96), rgba(6, 8, 18, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.canvas-pane.is-immersive .canvas-stage-shell {
+  border-radius: 24px;
+}
+
+.canvas-stage-shell .excalidraw {
+  --color-primary: #ffe08a;
+  --color-primary-darker: #f1b460;
+  --color-primary-darkest: #d67c3a;
+  --color-primary-light: #f4d6a0;
+  height: 100%;
+}
+
+.canvas-stage-shell .excalidraw.theme--dark {
+  --color-primary: #d8b26a;
+  --color-primary-darker: #e19f57;
+  --color-primary-darkest: #ff8a42;
+  --color-primary-light: #d9c09e;
+}
+
+.canvas-stage-shell .excalidraw .App-menu_top,
+.canvas-stage-shell .excalidraw .layer-ui__wrapper__footer {
+  background: rgba(11, 13, 28, 0.78);
+  backdrop-filter: blur(16px);
+}
+
+.canvas-stage-shell .excalidraw .Island {
+  box-shadow:
+    0 14px 42px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.canvas-sidepanel {
+  display: none;
+  min-width: 0;
+}
+
+.canvas-pane.is-details-open .canvas-sidepanel {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.canvas-detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 24, 0.78);
+}
+
+.canvas-detail-card-actions {
+  padding-top: 10px;
+}
+
+.canvas-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.canvas-detail-row-meta {
+  padding-bottom: 2px;
+}
+
+.canvas-detail-label {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canvas-detail-value {
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.canvas-detail-field {
+  display: grid;
+  gap: 9px;
+}
+
+.canvas-detail-select {
+  width: 100%;
+}
+
+.canvas-tag-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.canvas-action-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.orbital-editor-modal-window.is-canvas-mode .canvas-pane {
+  padding: 8px 10px 10px;
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-pane {
+  padding:
+    4px
+    max(6px, env(safe-area-inset-right))
+    max(6px, env(safe-area-inset-bottom))
+    max(6px, env(safe-area-inset-left));
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-pane-toolbar {
+  gap: 5px;
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-title-field {
+  min-height: 34px;
+  padding-inline: 11px;
+  border-radius: 11px;
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-stage-frame {
+  height: calc(100vh - 76px);
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-surface-switcher {
+  padding: 2px;
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-surface-tab {
+  min-height: 24px;
+  padding-inline: 8px;
+  font-size: 0.68rem;
+}
+
+.orbital-editor-modal-window.is-canvas-fullscreen .canvas-pane-toolbar .editor-save-pill {
+  min-height: 20px;
+  padding: 2px 6px;
+  font-size: 0.58rem;
+}
+
+@media (max-width: 1180px) {
+  .canvas-pane.is-details-open .canvas-pane-shell {
+    grid-template-columns: minmax(0, 1fr) 272px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .canvas-pane.is-details-open .canvas-pane-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .canvas-pane.is-details-open .canvas-stage-column {
+    display: none;
+  }
+
+  .canvas-pane.is-details-open .canvas-sidepanel {
+    display: grid;
+  }
+
+  .canvas-stage-frame,
+  .canvas-pane.is-immersive .canvas-stage-frame {
+    height: min(70vh, 720px);
+  }
+}
+
+@media (max-width: 860px) {
+  .canvas-pane {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .canvas-pane-toolbar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .canvas-surface-switcher {
+    width: fit-content;
+    margin-left: auto;
+  }
+
+  .canvas-title-field {
+    min-height: 38px;
+    padding-inline: 13px;
+    border-radius: 13px;
+  }
+
+  .canvas-stage-frame,
+  .canvas-pane.is-immersive .canvas-stage-frame {
+    height: min(64vh, 600px);
+  }
+
+  .canvas-stage-shell {
+    min-height: 340px;
+    border-radius: 20px;
+  }
+
+  .canvas-detail-card {
+    padding: 11px;
+    border-radius: 18px;
+  }
+}
+
+@media (max-width: 720px) {
+  .canvas-pane {
+    padding: 6px;
+  }
+
+  .canvas-pane.is-immersive {
+    padding: 4px 6px 6px;
+  }
+
+  .canvas-pane-toolbar-meta {
+    gap: 4px 6px;
+  }
+
+  .canvas-pane-contextmeta,
+  .canvas-detail-value {
+    font-size: 0.68rem;
+  }
+
+  .canvas-stage-frame,
+  .canvas-pane.is-immersive .canvas-stage-frame {
+    height: min(62vh, 580px);
+  }
+
+  .canvas-stage-shell {
+    min-height: 300px;
+    border-radius: 18px;
+  }
+}

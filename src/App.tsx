@@ -9,6 +9,7 @@ import SyncPanel from "./components/SyncPanel";
 import TagPanel from "./components/TagPanel";
 import TrashPanel from "./components/TrashPanel";
 import {
+  createCanvas,
   createProject,
   createFolder,
   createNote,
@@ -24,7 +25,9 @@ import {
   restoreNoteFromTrash,
   renameFolder,
   renameTag,
+  loadCanvasFiles,
   resolveAssetUrl,
+  saveCanvasContent,
   saveNoteContent,
   storeAsset,
   updateFolderColor,
@@ -50,6 +53,7 @@ import type {
 } from "./types";
 
 const EditorPane = lazy(() => import("./components/EditorPane"));
+const CanvasPane = lazy(() => import("./components/CanvasPane"));
 const OrbitalMapView = lazy(() => import("./components/OrbitalMapView"));
 type LibrarySection = "folders" | "tags" | "sync";
 
@@ -190,7 +194,7 @@ export default function App() {
     filteredNotes.find((note) => note.id === selectedNoteId) ??
     filteredNotes[0] ??
     null;
-  const orbitalEditorNote =
+  const orbitalEditorEntry =
     notes.find(
       (note) => note.id === orbitalEditorNoteId && note.trashedAt === null && !note.archived
     ) ?? null;
@@ -252,10 +256,10 @@ export default function App() {
       return;
     }
 
-    if (!orbitalEditorNote) {
+    if (!orbitalEditorEntry) {
       setOrbitalEditorNoteId(null);
     }
-  }, [orbitalEditorNote, orbitalEditorNoteId]);
+  }, [orbitalEditorEntry, orbitalEditorNoteId]);
 
   const handleSelectNote = async (noteId: string) => {
     setSelectedNoteId(noteId);
@@ -287,6 +291,18 @@ export default function App() {
     setSelectedNoteId(note.id);
     setSaveState("saved");
     return note;
+  };
+
+  const handleCreateCanvasAt = async (
+    folderId: string | null,
+    tagIds: string[] = [],
+    projectId?: string
+  ) => {
+    const language = (settings?.language ?? "en") as AppLanguage;
+    const canvas = await createCanvas(language, folderId, tagIds, projectId);
+    setSelectedNoteId(canvas.id);
+    setSaveState("saved");
+    return canvas;
   };
 
   const handleCreateProjectNode = async (x: number, y: number) => {
@@ -469,57 +485,115 @@ export default function App() {
         assets={assets}
         assetCount={assets.length}
         language={settings.language}
-        editorOpen={Boolean(orbitalEditorNote)}
-        editorTitle={orbitalEditorNote?.title?.trim() || t("note.untitled")}
+        editorOpen={Boolean(orbitalEditorEntry)}
+        editorTitle={
+          orbitalEditorEntry?.title?.trim() ||
+          (orbitalEditorEntry?.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled"))
+        }
+        editorMode={orbitalEditorEntry?.contentType ?? null}
         editorSlot={
-          orbitalEditorNote ? (
-            <EditorPane
-              key={`orbital-${orbitalEditorNote.id}-${settings.language}`}
-              note={orbitalEditorNote}
-              folders={folders}
-              tags={tags}
-              language={settings.language}
-              saveState={saveState}
-              onTitleChange={(title) =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  title
-                })
-              }
-              onFolderChange={(folderId) =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  folderId
-                })
-              }
-              onNoteColorChange={(color) =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  color
-                })
-              }
-              onToggleTag={(tagId) => void handleToggleTagForNote(orbitalEditorNote.id, tagId)}
-              onDelete={() => void handleDeleteNoteById(orbitalEditorNote.id)}
-              onRestore={() => void restoreNoteFromTrash(orbitalEditorNote.id)}
-              onTogglePin={() =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  pinned: !orbitalEditorNote.pinned
-                })
-              }
-              onToggleFavorite={() =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  favorite: !orbitalEditorNote.favorite
-                })
-              }
-              onToggleArchive={() =>
-                void updateNoteMeta(orbitalEditorNote.id, {
-                  archived: !orbitalEditorNote.archived,
-                  trashedAt: null
-                })
-              }
-              onContentChange={(content, state) =>
-                void handleContentChangeForNote(orbitalEditorNote.id, content, state)
-              }
-              onUploadFile={(file) => storeAsset(orbitalEditorNote.id, file)}
-              onResolveFileUrl={resolveAssetUrl}
-            />
+          orbitalEditorEntry ? (
+            orbitalEditorEntry.contentType === "canvas" ? (
+              <CanvasPane
+                key={`orbital-canvas-${orbitalEditorEntry.id}-${settings.language}`}
+                note={orbitalEditorEntry}
+                folders={folders}
+                tags={tags}
+                language={settings.language}
+                saveState={saveState}
+                immersive
+                onTitleChange={(title) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    title
+                  })
+                }
+                onFolderChange={(folderId) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    folderId
+                  })
+                }
+                onNoteColorChange={(color) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    color
+                  })
+                }
+                onToggleTag={(tagId) => void handleToggleTagForNote(orbitalEditorEntry.id, tagId)}
+                onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
+                onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
+                onTogglePin={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    pinned: !orbitalEditorEntry.pinned
+                  })
+                }
+                onToggleFavorite={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    favorite: !orbitalEditorEntry.favorite
+                  })
+                }
+                onToggleArchive={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    archived: !orbitalEditorEntry.archived,
+                    trashedAt: null
+                  })
+                }
+                onContentChange={(content, files, fileNames, state) => {
+                  setSaveState(state);
+
+                  if (state === "saved") {
+                    void saveCanvasContent(orbitalEditorEntry.id, content, files, fileNames);
+                  }
+                }}
+                onLoadFiles={() => loadCanvasFiles(orbitalEditorEntry.id)}
+              />
+            ) : (
+              <EditorPane
+                key={`orbital-note-${orbitalEditorEntry.id}-${settings.language}`}
+                note={orbitalEditorEntry}
+                folders={folders}
+                tags={tags}
+                language={settings.language}
+                saveState={saveState}
+                onTitleChange={(title) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    title
+                  })
+                }
+                onFolderChange={(folderId) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    folderId
+                  })
+                }
+                onNoteColorChange={(color) =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    color
+                  })
+                }
+                onToggleTag={(tagId) => void handleToggleTagForNote(orbitalEditorEntry.id, tagId)}
+                onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
+                onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
+                onTogglePin={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    pinned: !orbitalEditorEntry.pinned
+                  })
+                }
+                onToggleFavorite={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    favorite: !orbitalEditorEntry.favorite
+                  })
+                }
+                onToggleArchive={() =>
+                  void updateNoteMeta(orbitalEditorEntry.id, {
+                    archived: !orbitalEditorEntry.archived,
+                    trashedAt: null
+                  })
+                }
+                onContentChange={(content, state) =>
+                  void handleContentChangeForNote(orbitalEditorEntry.id, content, state)
+                }
+                onUploadFile={(file) => storeAsset(orbitalEditorEntry.id, file)}
+                onResolveFileUrl={resolveAssetUrl}
+              />
+            )
           ) : null
         }
         trashModalSlot={
@@ -598,6 +672,11 @@ export default function App() {
           setOrbitalEditorNoteId(note.id);
           return note;
         }}
+        onCreateCanvas={async (folderId, projectId) => {
+          const canvas = await handleCreateCanvasAt(folderId, [], projectId);
+          setOrbitalEditorNoteId(canvas.id);
+          return canvas;
+        }}
         onOpenNote={(noteId) => void handleOpenOrbitalNote(noteId)}
         onResolveFileUrl={resolveAssetUrl}
         labels={{
@@ -617,10 +696,14 @@ export default function App() {
           hiddenBodies: t("orbit.hiddenBodies"),
           focusedSystem: t("orbit.focusedSystem"),
           openNote: t("orbit.openNote"),
+          openCanvas: t("orbit.openCanvas"),
+          enterFullscreen: t("canvas.enterFullscreen"),
+          exitFullscreen: t("canvas.exitFullscreen"),
           closeEditor: t("orbit.closeEditor"),
           addRootFolder: t("orbit.addRootFolder"),
           addChildFolder: t("orbit.addChildFolder"),
           addNote: t("orbit.addNote"),
+          addCanvas: t("orbit.addCanvas"),
           create: t("orbit.create"),
           cancel: t("orbit.cancel"),
           folderNamePlaceholder: t("orbit.folderNamePlaceholder"),
@@ -632,6 +715,7 @@ export default function App() {
           core: t("orbit.core"),
           folder: t("orbit.folder"),
           note: t("orbit.note"),
+          canvas: t("orbit.canvas"),
           uncategorized: t("orbit.uncategorized"),
           rootFolders: t("orbit.rootFolders"),
           directNotes: t("orbit.directNotes"),
@@ -639,6 +723,7 @@ export default function App() {
           descendants: t("orbit.descendants"),
           updated: t("orbit.updated"),
           empty: t("orbit.empty"),
+          emptyCanvas: t("orbit.emptyCanvas"),
           hints: t("orbit.hints"),
           sync: t("orbit.sync"),
           trash: t("orbit.trash"),
@@ -660,6 +745,7 @@ export default function App() {
           chooseColor: t("orbit.chooseColor"),
           customColor: t("orbit.customColor"),
           notesStat: t("stats.notes"),
+          elementsStat: t("stats.elements"),
           foldersStat: t("stats.folders"),
           tagsStat: t("stats.tags"),
           assetsStat: t("stats.assets"),

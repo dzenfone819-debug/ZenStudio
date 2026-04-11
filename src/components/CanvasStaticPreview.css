@@ -1,0 +1,65 @@
+.canvas-static-preview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.canvas-static-preview.is-compact {
+  gap: 8px;
+}
+
+.canvas-static-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.canvas-static-kind,
+.canvas-static-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(141, 183, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canvas-static-kind {
+  color: var(--text);
+  border-color: rgba(255, 224, 138, 0.18);
+  background: rgba(255, 224, 138, 0.08);
+}
+
+.canvas-static-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.canvas-static-text,
+.canvas-static-empty {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.canvas-static-empty {
+  color: var(--text-dim);
+}
+
+.canvas-static-preview.is-compact .canvas-static-text,
+.canvas-static-preview.is-compact .canvas-static-empty {
+  font-size: 0.8rem;
+  line-height: 1.58;
+}

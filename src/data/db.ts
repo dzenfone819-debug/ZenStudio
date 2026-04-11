@@ -15,11 +15,20 @@ import {
   normalizeNoteContent,
   getUntitledTitle
 } from "../lib/notes";
+import {
+  buildCanvasExcerpt,
+  createStarterCanvasContent,
+  extractCanvasPlainText,
+  extractCanvasReferencedFileIds,
+  getUntitledCanvasTitle,
+  normalizeCanvasContent
+} from "../lib/canvas";
 import type {
   AppLanguage,
   AppSettings,
   Asset,
   AssetKind,
+  CanvasContent,
   Folder,
   Note,
   NoteContent,
@@ -27,6 +36,7 @@ import type {
   SyncProvider,
   Tag
 } from "../types";
+import type { BinaryFileData, BinaryFiles } from "@excalidraw/excalidraw/types";
 
 const assetUrlCache = new Map<string, string>();
 
@@ -54,6 +64,16 @@ function detectLanguage(): AppLanguage {
   }
 
   return "en";
+}
+
+async function dataUrlToBlob(dataUrl: string) {
+  const response = await fetch(dataUrl);
+  return response.blob();
+}
+
+function getCanvasAssetName(fileId: string, mimeType: string) {
+  const subtype = mimeType.split("/")[1] ?? "bin";
+  return `canvas-${fileId.slice(0, 8)}.${subtype.replace(/[^a-z0-9]/gi, "") || "bin"}`;
 }
 
 class ZenNotesDatabase extends Dexie {
@@ -219,6 +239,33 @@ class ZenNotesDatabase extends Dexie {
             project.color ??= DEFAULT_PROJECT_COLOR;
           });
       });
+
+    this.version(7)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("notes")
+          .toCollection()
+          .modify((note) => {
+            note.contentType ??= "note";
+            note.canvasContent ??= null;
+          });
+
+        await transaction
+          .table("assets")
+          .toCollection()
+          .modify((asset) => {
+            asset.version ??= 0;
+          });
+      });
   }
 }
 
@@ -301,11 +348,13 @@ export async function ensureSeedData() {
   const note: Note = {
     id: crypto.randomUUID(),
     title: language === "ru" ? "Стартовая заметка" : "Starter note",
+    contentType: "note",
     projectId: project.id,
     folderId: folders[0].id,
     color: DEFAULT_NOTE_COLOR,
     tagIds: [tags[0].id, tags[2].id],
     content: starterContent,
+    canvasContent: null,
     excerpt: buildExcerpt(starterContent),
     plainText: extractPlainText(starterContent),
     createdAt: timestamp,
@@ -518,13 +567,62 @@ export async function createNote(
   const note: Note = {
     id: crypto.randomUUID(),
     title: getUntitledTitle(language),
+    contentType: "note",
     projectId: resolvedProjectId,
     folderId,
     color: DEFAULT_NOTE_COLOR,
     tagIds,
     content,
+    canvasContent: null,
     excerpt: buildExcerpt(content),
     plainText: extractPlainText(content),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    pinned: false,
+    favorite: false,
+    archived: false,
+    trashedAt: null,
+    syncState: "local",
+    conflictOriginId: null
+  };
+
+  await db.transaction("rw", db.notes, db.settings, async () => {
+    await db.notes.add(note);
+    await db.settings.update("app", {
+      lastOpenedNoteId: note.id
+    });
+  });
+
+  return note;
+}
+
+export async function createCanvas(
+  language: AppLanguage,
+  folderId: string | null,
+  tagIds: string[],
+  projectId?: string
+) {
+  const timestamp = now();
+  const canvasContent = createStarterCanvasContent();
+  const folder = folderId ? await db.folders.get(folderId) : null;
+  const resolvedProjectId = folder?.projectId ?? projectId ?? null;
+
+  if (!resolvedProjectId) {
+    throw new Error("PROJECT_REQUIRED");
+  }
+
+  const note: Note = {
+    id: crypto.randomUUID(),
+    title: getUntitledCanvasTitle(language),
+    contentType: "canvas",
+    projectId: resolvedProjectId,
+    folderId,
+    color: DEFAULT_NOTE_COLOR,
+    tagIds,
+    content: [],
+    canvasContent,
+    excerpt: buildCanvasExcerpt(canvasContent),
+    plainText: extractCanvasPlainText(canvasContent),
     createdAt: timestamp,
     updatedAt: timestamp,
     pinned: false,
@@ -610,6 +708,121 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
   });
 }
 
+export async function loadCanvasFiles(noteId: string): Promise<BinaryFiles> {
+  const assets = await db.assets.where("noteId").equals(noteId).toArray();
+  const files: BinaryFiles = {};
+
+  await Promise.all(
+    assets.map(async (asset) => {
+      files[asset.id] = {
+        id: asset.id as BinaryFileData["id"],
+        dataURL: (await getDataUrlFromBlob(asset.blob)) as BinaryFileData["dataURL"],
+        mimeType: asset.mimeType as BinaryFileData["mimeType"],
+        created: asset.createdAt,
+        lastRetrieved: asset.updatedAt,
+        version: asset.version ?? 0
+      };
+    })
+  );
+
+  return files;
+}
+
+async function getDataUrlFromBlob(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("FILE_READ_FAILED"));
+    };
+
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("FILE_READ_FAILED"));
+    };
+
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function saveCanvasContent(
+  noteId: string,
+  content: CanvasContent,
+  files: BinaryFiles,
+  fileNames: Record<string, string> = {}
+) {
+  const normalizedContent = normalizeCanvasContent(content);
+  const plainText = extractCanvasPlainText(normalizedContent);
+  const excerpt = buildCanvasExcerpt(normalizedContent);
+  const activeFileIds = new Set(extractCanvasReferencedFileIds(normalizedContent));
+
+  await db.transaction("rw", db.notes, db.assets, async () => {
+    const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
+    const assetsById = new Map(noteAssets.map((asset) => [asset.id, asset]));
+    const staleAssets = noteAssets.filter((asset) => !activeFileIds.has(asset.id));
+
+    if (staleAssets.length > 0) {
+      staleAssets.forEach((asset) => {
+        const cachedUrl = assetUrlCache.get(asset.id);
+
+        if (cachedUrl) {
+          URL.revokeObjectURL(cachedUrl);
+          assetUrlCache.delete(asset.id);
+        }
+      });
+
+      await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
+    }
+
+    for (const fileId of activeFileIds) {
+      const file = files[fileId];
+
+      if (!file) {
+        continue;
+      }
+
+      const existingAsset = assetsById.get(fileId);
+      const nextVersion = file.version ?? 0;
+
+      if (existingAsset && (existingAsset.version ?? 0) === nextVersion) {
+        continue;
+      }
+
+      const blob = await dataUrlToBlob(file.dataURL);
+      const timestamp = now();
+      const nextAsset: Asset = {
+        id: fileId,
+        noteId,
+        name:
+          fileNames[fileId] ??
+          existingAsset?.name ??
+          getCanvasAssetName(fileId, file.mimeType),
+        mimeType: file.mimeType,
+        size: blob.size,
+        kind: file.mimeType.startsWith("image/") ? "image" : "file",
+        blob,
+        version: nextVersion,
+        createdAt: existingAsset?.createdAt ?? file.created ?? timestamp,
+        updatedAt: timestamp
+      };
+
+      await db.assets.put(nextAsset);
+    }
+
+    await db.notes.update(noteId, {
+      canvasContent: normalizedContent,
+      plainText,
+      excerpt,
+      updatedAt: now(),
+      syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
+    });
+  });
+}
+
 export async function moveNoteToTrash(noteId: string) {
   await updateNoteMeta(noteId, {
     trashedAt: now(),
@@ -668,6 +881,7 @@ export async function storeAsset(noteId: string, file: File) {
     size: file.size,
     kind: detectAssetKind(file),
     blob: file,
+    version: 0,
     createdAt: timestamp,
     updatedAt: timestamp
   };

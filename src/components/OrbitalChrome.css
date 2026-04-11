@@ -14,10 +14,9 @@
     radial-gradient(circle at top right, rgba(255, 224, 138, 0.06), transparent 28%),
     linear-gradient(180deg, rgba(18, 19, 40, 0.92), rgba(8, 10, 22, 0.9)),
     rgba(8, 10, 22, 0.88);
-  backdrop-filter: blur(18px) saturate(120%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 14px 34px rgba(3, 5, 14, 0.2);
+    0 10px 24px rgba(3, 5, 14, 0.14);
 }
 
 .orbital-topbar-brand {
@@ -141,10 +140,9 @@
     radial-gradient(circle at top right, rgba(255, 224, 138, 0.06), transparent 24%),
     linear-gradient(180deg, rgba(18, 20, 38, 0.88), rgba(8, 10, 21, 0.9)),
     rgba(8, 10, 21, 0.86);
-  backdrop-filter: blur(18px) saturate(118%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 16px 38px rgba(2, 4, 12, 0.18);
+    0 12px 26px rgba(2, 4, 12, 0.14);
 }
 
 .orbital-inspector-header {
@@ -454,6 +452,12 @@
 
 .orbital-overlay .orbital-selection-shell-note {
   margin-top: 6px;
+}
+
+.orbital-overlay .orbital-menu-item-badge {
+  min-height: 22px;
+  padding: 3px 7px;
+  font-size: 0.62rem;
 }
 
 .orbital-overlay .orbital-selection-preview-note {

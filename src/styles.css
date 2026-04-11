@@ -2420,6 +2420,10 @@ button {
   cursor: pointer;
 }
 
+.orbital-selection-shell-note.is-canvas {
+  --selection-accent: color-mix(in srgb, var(--selection-accent) 58%, #8db7ff);
+}
+
 .orbital-selection-head {
   display: grid;
   gap: 10px;
@@ -2629,6 +2633,28 @@ button {
 
 .orbital-note-hovercard-copy {
   margin: 0;
+}
+
+.orbital-menu-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.orbital-menu-item-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(141, 183, 255, 0.14);
+  background: rgba(141, 183, 255, 0.08);
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .orbital-selection-tag {
@@ -2848,8 +2874,7 @@ button {
   background:
     linear-gradient(180deg, rgba(17, 18, 42, 0.9), rgba(8, 10, 23, 0.88)),
     rgba(9, 11, 26, 0.88);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 16px 42px rgba(4, 6, 16, 0.26);
+  box-shadow: 0 10px 26px rgba(4, 6, 16, 0.18);
 }
 
 .orbital-filter-topline {
@@ -3146,17 +3171,44 @@ button {
   fill: color-mix(in srgb, var(--node-color) 32%, rgba(16, 16, 40, 0.96));
   stroke: color-mix(in srgb, var(--node-color) 84%, rgba(255, 255, 255, 0.14));
   stroke-width: 1.55;
-  filter: drop-shadow(0 0 20px color-mix(in srgb, var(--node-color) 26%, transparent));
 }
 
 .orbital-node-note.is-passive-highlight .orbital-note-core {
   stroke: color-mix(in srgb, var(--node-color) 42%, rgba(255, 255, 255, 0.22));
 }
 
+.orbital-node-note.is-canvas-entry .orbital-canvas-disc {
+  fill: color-mix(in srgb, var(--node-color) 18%, rgba(12, 18, 34, 0.96));
+  stroke: color-mix(in srgb, var(--node-color) 64%, rgba(255, 255, 255, 0.16));
+  stroke-width: 1.2;
+}
+
+.orbital-node-note.is-canvas-entry .orbital-canvas-core {
+  fill: rgba(8, 11, 30, 0.84);
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 0.9;
+}
+
+.orbital-node-note.is-canvas-entry .orbital-canvas-lines {
+  fill: none;
+  stroke: color-mix(in srgb, var(--node-color) 42%, rgba(255, 255, 255, 0.42));
+  stroke-width: 1.05;
+  stroke-linecap: round;
+}
+
+.orbital-node-note.is-canvas-entry .orbital-canvas-beacon {
+  fill: color-mix(in srgb, var(--node-color) 78%, rgba(255, 255, 255, 0.26));
+}
+
+.orbital-node-note.is-canvas-entry.is-passive-highlight .orbital-canvas-disc {
+  fill: color-mix(in srgb, var(--node-color) 26%, rgba(16, 16, 40, 0.96));
+  stroke: color-mix(in srgb, var(--node-color) 82%, rgba(255, 255, 255, 0.14));
+  stroke-width: 1.5;
+}
+
 .orbital-core-corona {
   fill: color-mix(in srgb, var(--node-color) 36%, transparent);
-  opacity: 0.84;
-  filter: blur(8px);
+  opacity: 0.66;
 }
 
 .orbital-core-flare {
@@ -3174,7 +3226,6 @@ button {
   fill: color-mix(in srgb, var(--node-color) 86%, white 14%);
   stroke: color-mix(in srgb, var(--node-color) 62%, rgba(255, 255, 255, 0.48));
   stroke-width: 2.2;
-  filter: drop-shadow(0 0 24px color-mix(in srgb, var(--node-color) 38%, transparent));
 }
 
 .orbital-core-pulse {
@@ -3301,11 +3352,26 @@ button {
   gap: 4px;
 }
 
+.orbital-editor-topmeta.is-canvas-mode {
+  gap: 0;
+  min-width: 0;
+}
+
 .orbital-editor-title {
   color: var(--text);
   font-family: "Azeret Mono", "IBM Plex Mono", monospace;
   font-size: 0.96rem;
   line-height: 1.35;
+}
+
+.orbital-editor-topactions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.orbital-editor-topactions.is-canvas-mode {
+  gap: 4px;
 }
 
 .orbital-editor-scroll {
@@ -3314,6 +3380,12 @@ button {
   overflow: auto;
   overscroll-behavior: contain;
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+.orbital-editor-scroll.is-canvas-mode {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .orbital-editor-modal-layer {
@@ -3398,6 +3470,68 @@ button {
     linear-gradient(180deg, rgba(12, 13, 32, 0.98), rgba(6, 8, 18, 0.99)),
     rgba(6, 8, 18, 0.99);
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.42);
+}
+
+.orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
+  width: min(1480px, calc(100vw - 12px));
+  background:
+    radial-gradient(circle at top, rgba(115, 247, 255, 0.05), transparent 24%),
+    linear-gradient(180deg, rgba(10, 11, 28, 0.98), rgba(5, 7, 16, 0.995)),
+    rgba(5, 7, 16, 0.995);
+}
+
+.orbital-modal-layer.orbital-editor-modal-layer.is-canvas-fullscreen {
+  padding: 0;
+}
+
+.orbital-modal-window.orbital-editor-modal-window.is-canvas-fullscreen {
+  width: 100vw;
+  max-width: 100vw;
+  max-height: 100vh;
+  height: 100vh;
+  min-height: 100vh;
+  width: 100dvw;
+  max-width: 100dvw;
+  max-height: 100dvh;
+  height: 100dvh;
+  min-height: 100dvh;
+  border-radius: 0;
+  border: 0;
+  border-left: 0;
+  border-right: 0;
+  box-shadow: none;
+}
+
+.orbital-editor-topbar.is-canvas-mode {
+  padding:
+    max(6px, env(safe-area-inset-top))
+    8px
+    6px;
+  justify-content: space-between;
+  gap: 6px;
+  background:
+    linear-gradient(180deg, rgba(5, 7, 16, 0.9), rgba(5, 7, 16, 0.7)),
+    rgba(5, 7, 16, 0.8);
+  border-bottom-color: rgba(147, 173, 255, 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.orbital-editor-topbar.is-canvas-mode .panel-kicker {
+  margin: 0;
+  font-size: 0.54rem;
+  line-height: 1.1;
+  letter-spacing: 0.18em;
+  opacity: 0.84;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orbital-editor-topbar.is-canvas-mode .toolbar-action {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 0.68rem;
 }
 
 .orbital-modal-close {
@@ -3509,6 +3643,17 @@ button {
     width: min(1040px, calc(100vw - 36px));
   }
 
+  .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
+    width: min(1280px, calc(100vw - 24px));
+  }
+
+  .orbital-editor-topbar.is-canvas-mode {
+    padding:
+      max(6px, env(safe-area-inset-top))
+      8px
+      6px;
+  }
+
   .orbital-modal-window {
     width: min(720px, calc(100vw - 44px));
   }
@@ -3583,6 +3728,17 @@ button {
     max-height: 100vh;
     height: 100vh;
     border-radius: 0;
+  }
+
+  .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
+    width: 100vw;
+  }
+
+  .orbital-editor-topbar.is-canvas-mode {
+    padding:
+      max(6px, env(safe-area-inset-top))
+      8px
+      6px;
   }
 
   .orbital-editor-modal-window .editor-shell .bn-container,
@@ -3716,6 +3872,36 @@ button {
       max(14px, env(safe-area-inset-top))
       16px
       12px;
+  }
+
+  .orbital-editor-topactions {
+    width: 100%;
+  }
+
+  .orbital-editor-topactions .toolbar-action {
+    flex: 1 1 0;
+  }
+
+  .orbital-editor-topbar.is-canvas-mode {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .orbital-editor-topactions.is-canvas-mode {
+    width: auto;
+    margin-left: auto;
+  }
+
+  .orbital-editor-topactions.is-canvas-mode .toolbar-action {
+    flex: 0 0 auto;
+  }
+
+  .orbital-editor-topbar.is-canvas-mode .toolbar-action {
+    min-height: 25px;
+    padding: 4px 7px;
+    font-size: 0.66rem;
   }
 
   .editor-quiet-actions {

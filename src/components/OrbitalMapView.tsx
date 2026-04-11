@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import NoteStaticPreview from "./NoteStaticPreview";
+import EntryStaticPreview from "./EntryStaticPreview";
 import "./OrbitalChrome.css";
 import {
   COLOR_PALETTE,
@@ -18,6 +18,7 @@ import {
   DEFAULT_NOTE_COLOR,
   DEFAULT_PROJECT_COLOR
 } from "../lib/palette";
+import { getCanvasMetrics } from "../lib/canvas";
 import { buildFolderPathMap, formatTimestamp } from "../lib/notes";
 import type { AppLanguage, Asset, Folder, Note, Project, Tag } from "../types";
 
@@ -34,6 +35,7 @@ interface OrbitalMapViewProps {
   assetCount: number;
   language: AppLanguage;
   editorOpen: boolean;
+  editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
   editorTitle?: string;
   syncModalSlot?: ReactNode;
@@ -53,6 +55,7 @@ interface OrbitalMapViewProps {
   onUpdateFolderColor: (folderId: string, color: string) => void;
   onUpdateNoteColor: (noteId: string, color: string) => void;
   onCreateNote: (folderId: string | null, projectId?: string) => Promise<Note>;
+  onCreateCanvas: (folderId: string | null, projectId?: string) => Promise<Note>;
   onOpenNote: (noteId: string) => void;
   onResolveFileUrl?: (url: string) => Promise<string>;
   labels: {
@@ -72,10 +75,14 @@ interface OrbitalMapViewProps {
     hiddenBodies: string;
     focusedSystem: string;
     openNote: string;
+    openCanvas: string;
+    enterFullscreen: string;
+    exitFullscreen: string;
     closeEditor: string;
     addRootFolder: string;
     addChildFolder: string;
     addNote: string;
+    addCanvas: string;
     addProject: string;
     create: string;
     cancel: string;
@@ -86,6 +93,7 @@ interface OrbitalMapViewProps {
     core: string;
     folder: string;
     note: string;
+    canvas: string;
     uncategorized: string;
     rootFolders: string;
     directNotes: string;
@@ -93,6 +101,7 @@ interface OrbitalMapViewProps {
     descendants: string;
     updated: string;
     empty: string;
+    emptyCanvas: string;
     hints: string;
     sync: string;
     trash: string;
@@ -114,6 +123,7 @@ interface OrbitalMapViewProps {
     chooseColor: string;
     customColor: string;
     notesStat: string;
+    elementsStat: string;
     foldersStat: string;
     tagsStat: string;
     assetsStat: string;
@@ -211,6 +221,45 @@ interface OrbitalScene {
   entityMap: Map<string, OrbitalSceneNode>;
 }
 
+interface OrbitalLayoutOrbit {
+  color: string;
+  rx: number;
+  ry: number;
+  rotation: number;
+  rotationCos: number;
+  rotationSin: number;
+  speed: number;
+  direction: 1 | -1;
+  baseAngle: number;
+  wobble: number;
+}
+
+interface OrbitalLayoutNode {
+  id: string;
+  entityId: string;
+  parentEntityId: string | null;
+  kind: SceneNodeKind;
+  label: string;
+  radius: number;
+  color: string;
+  depth: number;
+  note?: Note;
+  folder?: Folder;
+  project?: Project;
+  mass: number;
+  favorite?: boolean;
+  pinned?: boolean;
+  x?: number;
+  y?: number;
+  orbit?: OrbitalLayoutOrbit;
+  children: OrbitalLayoutNode[];
+}
+
+interface OrbitalLayout {
+  roots: OrbitalLayoutNode[];
+  entityMap: Map<string, OrbitalLayoutNode>;
+}
+
 type HoverPreviewAnchorRect = {
   left: number;
   top: number;
@@ -235,6 +284,11 @@ const CAMERA_MIN_SCALE = 0.45;
 const CAMERA_MAX_SCALE = 2.2;
 const FOCUS_AUTO_THRESHOLD = 34;
 const PROJECT_MIN_DISTANCE = 430;
+const ORBIT_INTERACTION_WINDOW_MS = 1800;
+const ORBIT_ACTIVE_FRAME_MS = 1000 / 18;
+const ORBIT_IDLE_FRAME_MS = 1000 / 10;
+const ORBIT_ACTIVE_FRAME_MS_LARGE = 1000 / 14;
+const ORBIT_IDLE_FRAME_MS_LARGE = 1000 / 7;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -317,7 +371,31 @@ function noteSorter(left: Note, right: Note) {
 }
 
 function getNoteMass(note: Note) {
+  if (note.contentType === "canvas") {
+    const metrics = getCanvasMetrics(note.canvasContent, { includePlainText: false });
+    return (
+      1.18 +
+      metrics.activeElementCount / 18 +
+      metrics.imageCount * 0.28 +
+      (note.favorite ? 0.45 : 0) +
+      (note.pinned ? 0.3 : 0)
+    );
+  }
+
   return 1.08 + note.plainText.length / 240 + (note.favorite ? 0.45 : 0) + (note.pinned ? 0.3 : 0);
+}
+
+function getOrbitalEntryRadius(note: Note) {
+  if (note.contentType === "canvas") {
+    const metrics = getCanvasMetrics(note.canvasContent, { includePlainText: false });
+    return clamp(
+      10 + Math.min(metrics.activeElementCount / 6, 7.2) + (note.pinned ? 1.2 : 0),
+      10,
+      18
+    );
+  }
+
+  return clamp(9 + Math.min(note.plainText.length / 180, 6.4) + (note.pinned ? 1.2 : 0), 9, 17);
 }
 
 function truncateLabel(value: string, maxLength: number) {
@@ -527,27 +605,31 @@ function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalDat
   return related;
 }
 
-function buildOrbitalScene(
+function buildOrbitalLayout(
   data: OrbitalData,
-  timeMs: number,
   visibleEntityIds: Set<string> | null
-): OrbitalScene {
-  const nodes: OrbitalSceneNode[] = [];
-  const orbits: OrbitalSceneOrbit[] = [];
-  const links: OrbitalSceneLink[] = [];
-  const entityMap = new Map<string, OrbitalSceneNode>();
-  const renderChildren = (parent: OrbitalSceneNode, children: OrbitalChild[], depth: number) => {
+): OrbitalLayout {
+  const roots: OrbitalLayoutNode[] = [];
+  const entityMap = new Map<string, OrbitalLayoutNode>();
+
+  const renderChildren = (
+    parent: Pick<OrbitalLayoutNode, "entityId" | "kind" | "radius">,
+    children: OrbitalChild[],
+    depth: number
+  ) => {
     const scopedChildren = visibleEntityIds
       ? children.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
       : children;
 
     if (scopedChildren.length === 0) {
-      return;
+      return [];
     }
 
     const folderChildren = scopedChildren.filter((child) => child.folder);
     const noteChildren = scopedChildren.filter((child) => child.note);
-    const folderRingSpan = folderChildren.length > 0 ? getOrbitSlot(folderChildren.length - 1).ringIndex + 1 : 0;
+    const folderRingSpan =
+      folderChildren.length > 0 ? getOrbitSlot(folderChildren.length - 1).ringIndex + 1 : 0;
+    const nodes: OrbitalLayoutNode[] = [];
 
     const renderGroup = (group: OrbitalChild[], bandOffset: number) => {
       group.forEach((child, index) => {
@@ -574,7 +656,9 @@ function buildOrbitalScene(
           (kind === "note" ? 18 : 0);
         const rx = Math.max(
           parent.radius + 64,
-          baseRadius + (((seed >> 5) % (isRootFolderOrbit ? 7 : 9)) - (isRootFolderOrbit ? 3 : 4)) * (isRootFolderOrbit ? 4 : 6)
+          baseRadius +
+            (((seed >> 5) % (isRootFolderOrbit ? 7 : 9)) - (isRootFolderOrbit ? 3 : 4)) *
+              (isRootFolderOrbit ? 4 : 6)
         );
         const orbitRatio =
           (parent.kind === "core" ? 0.6 : kind === "folder" ? 0.8 : 0.74) +
@@ -587,43 +671,26 @@ function buildOrbitalScene(
             ? { min: 0.000022, max: 0.000049 }
             : { min: 0.000018, max: 0.000041 };
         const bandDrag = Math.max(0.72, 1 - bandIndex * 0.045);
-        const speed = (speedRange.min + (speedRange.max - speedRange.min) * speedSeed) * bandDrag;
-        const direction = seed % 2 === 0 ? 1 : -1;
+        const speed =
+          (speedRange.min + (speedRange.max - speedRange.min) * speedSeed) * bandDrag;
+        const direction = (seed % 2 === 0 ? 1 : -1) as 1 | -1;
         const baseAngle =
           ((Math.PI * 2) / Math.max(slot.capacity, 1)) * slot.slotIndex +
-          ((hashString(`${parent.entityId}:${kind}:${Math.round(bandIndex * 10)}`) % 360) * Math.PI) / 180;
-        const angle =
-          baseAngle + timeMs * speed * direction + ((((seed >> 14) % 240) - 120) / 120) * 0.08;
-        const rotationRad = (rotation * Math.PI) / 180;
-        const localX = Math.cos(angle) * rx;
-        const localY = Math.sin(angle) * ry;
-        const x = parent.x + localX * Math.cos(rotationRad) - localY * Math.sin(rotationRad);
-        const y = parent.y + localX * Math.sin(rotationRad) + localY * Math.cos(rotationRad);
+          ((hashString(`${parent.entityId}:${kind}:${Math.round(bandIndex * 10)}`) % 360) *
+            Math.PI) /
+            180;
         const label = child.folder?.folder.name ?? child.note?.title ?? "";
         const radius = child.folder
           ? clamp(14 + child.folder.mass * 1.5, 15, 40)
-          : clamp(
-              9 + Math.min((child.note?.plainText.length ?? 0) / 180, 6.4) + (child.note?.pinned ? 1.2 : 0),
-              9,
-              17
-            );
+          : getOrbitalEntryRadius(child.note!);
         const color = child.folder?.folder.color ?? child.note?.color ?? DEFAULT_NOTE_COLOR;
-        const orbit = {
-          x: parent.x,
-          y: parent.y,
-          rx,
-          ry,
-          rotation,
-          color
-        };
-        const sceneNode: OrbitalSceneNode = {
+        const rotationRad = (rotation * Math.PI) / 180;
+        const node: OrbitalLayoutNode = {
           id: entityId,
           entityId,
           parentEntityId: parent.entityId,
           kind,
           label,
-          x,
-          y,
           radius,
           color,
           depth,
@@ -632,40 +699,26 @@ function buildOrbitalScene(
           mass,
           favorite: child.note?.favorite,
           pinned: child.note?.pinned,
-          orbit
+          orbit: {
+            color,
+            rx,
+            ry,
+            rotation,
+            rotationCos: Math.cos(rotationRad),
+            rotationSin: Math.sin(rotationRad),
+            speed,
+            direction,
+            baseAngle,
+            wobble: ((((seed >> 14) % 240) - 120) / 120) * 0.08
+          },
+          children: []
         };
 
-        orbits.push({
-          id: `${entityId}:orbit`,
-          entityId,
-          parentEntityId: parent.entityId,
-          color,
-          x: orbit.x,
-          y: orbit.y,
-          rx: orbit.rx,
-          ry: orbit.ry,
-          rotation: orbit.rotation,
-          depth,
-          kind: kind === "note" ? "note" : "folder"
-        });
-        links.push({
-          id: `${parent.entityId}->${entityId}`,
-          entityId,
-          parentEntityId: parent.entityId,
-          color,
-          x1: parent.x,
-          y1: parent.y,
-          x2: x,
-          y2: y,
-          depth,
-          kind: kind === "note" ? "note" : "folder"
-        });
-        nodes.push(sceneNode);
-        entityMap.set(entityId, sceneNode);
+        entityMap.set(entityId, node);
 
         if (child.folder) {
-          renderChildren(
-            sceneNode,
+          node.children = renderChildren(
+            node,
             [
               ...child.folder.children.map((branch) => ({ folder: branch })),
               ...child.folder.notes.map((note) => ({ note }))
@@ -673,11 +726,14 @@ function buildOrbitalScene(
             depth + 1
           );
         }
+
+        nodes.push(node);
       });
     };
 
     renderGroup(folderChildren, 0);
     renderGroup(noteChildren, folderRingSpan > 0 ? folderRingSpan + 1.2 : 1.2);
+    return nodes;
   };
 
   data.projects.forEach((project) => {
@@ -687,7 +743,7 @@ function buildOrbitalScene(
       return;
     }
 
-    const coreNode: OrbitalSceneNode = {
+    const coreNode: OrbitalLayoutNode = {
       id: coreEntityId,
       entityId: coreEntityId,
       parentEntityId: null,
@@ -699,13 +755,12 @@ function buildOrbitalScene(
       color: project.color ?? DEFAULT_PROJECT_COLOR,
       depth: 0,
       project,
-      mass: 10
+      mass: 10,
+      children: []
     };
 
-    nodes.push(coreNode);
     entityMap.set(coreEntityId, coreNode);
-
-    renderChildren(
+    coreNode.children = renderChildren(
       coreNode,
       [
         ...(data.rootFoldersByProject.get(project.id) ?? []).map((folder) => ({ folder })),
@@ -713,6 +768,115 @@ function buildOrbitalScene(
       ],
       0
     );
+    roots.push(coreNode);
+  });
+
+  return {
+    roots,
+    entityMap
+  };
+}
+
+function materializeOrbitalScene(layout: OrbitalLayout, timeMs: number): OrbitalScene {
+  const nodes: OrbitalSceneNode[] = [];
+  const orbits: OrbitalSceneOrbit[] = [];
+  const links: OrbitalSceneLink[] = [];
+  const entityMap = new Map<string, OrbitalSceneNode>();
+
+  const visit = (
+    layoutNode: OrbitalLayoutNode,
+    parent: OrbitalSceneNode | null
+  ) => {
+    let x = layoutNode.x ?? 0;
+    let y = layoutNode.y ?? 0;
+    let orbit:
+      | Omit<OrbitalSceneOrbit, "id" | "entityId" | "kind" | "parentEntityId" | "depth">
+      | undefined;
+
+    if (parent && layoutNode.orbit) {
+      const angle =
+        layoutNode.orbit.baseAngle +
+        timeMs * layoutNode.orbit.speed * layoutNode.orbit.direction +
+        layoutNode.orbit.wobble;
+      const localX = Math.cos(angle) * layoutNode.orbit.rx;
+      const localY = Math.sin(angle) * layoutNode.orbit.ry;
+
+      x =
+        parent.x +
+        localX * layoutNode.orbit.rotationCos -
+        localY * layoutNode.orbit.rotationSin;
+      y =
+        parent.y +
+        localX * layoutNode.orbit.rotationSin +
+        localY * layoutNode.orbit.rotationCos;
+      orbit = {
+        x: parent.x,
+        y: parent.y,
+        rx: layoutNode.orbit.rx,
+        ry: layoutNode.orbit.ry,
+        rotation: layoutNode.orbit.rotation,
+        color: layoutNode.orbit.color
+      };
+    }
+
+    const sceneNode: OrbitalSceneNode = {
+      id: layoutNode.id,
+      entityId: layoutNode.entityId,
+      parentEntityId: layoutNode.parentEntityId,
+      kind: layoutNode.kind,
+      label: layoutNode.label,
+      x,
+      y,
+      radius: layoutNode.radius,
+      color: layoutNode.color,
+      depth: layoutNode.depth,
+      note: layoutNode.note,
+      folder: layoutNode.folder,
+      project: layoutNode.project,
+      mass: layoutNode.mass,
+      favorite: layoutNode.favorite,
+      pinned: layoutNode.pinned,
+      orbit
+    };
+
+    nodes.push(sceneNode);
+    entityMap.set(sceneNode.entityId, sceneNode);
+
+    if (parent && orbit) {
+      orbits.push({
+        id: `${sceneNode.entityId}:orbit`,
+        entityId: sceneNode.entityId,
+        parentEntityId: parent.entityId,
+        color: orbit.color,
+        x: orbit.x,
+        y: orbit.y,
+        rx: orbit.rx,
+        ry: orbit.ry,
+        rotation: orbit.rotation,
+        depth: sceneNode.depth,
+        kind: sceneNode.kind === "note" ? "note" : "folder"
+      });
+      links.push({
+        id: `${parent.entityId}->${sceneNode.entityId}`,
+        entityId: sceneNode.entityId,
+        parentEntityId: parent.entityId,
+        color: orbit.color,
+        x1: parent.x,
+        y1: parent.y,
+        x2: sceneNode.x,
+        y2: sceneNode.y,
+        depth: sceneNode.depth,
+        kind: sceneNode.kind === "note" ? "note" : "folder"
+      });
+    }
+
+    layoutNode.children.forEach((child) => {
+      visit(child, sceneNode);
+    });
+  };
+
+  layout.roots.forEach((root) => {
+    visit(root, null);
   });
 
   return {
@@ -784,6 +948,7 @@ export default function OrbitalMapView({
   assetCount,
   language,
   editorOpen,
+  editorMode = null,
   editorSlot,
   editorTitle,
   syncModalSlot,
@@ -798,6 +963,7 @@ export default function OrbitalMapView({
   onUpdateFolderColor,
   onUpdateNoteColor,
   onCreateNote,
+  onCreateCanvas,
   onOpenNote,
   onResolveFileUrl,
   labels
@@ -820,6 +986,11 @@ export default function OrbitalMapView({
     Record<string, { x: number; y: number }>
   >({});
   const [activeModal, setActiveModal] = useState<"sync" | "trash" | null>(null);
+  const [isCanvasEditorFullscreen, setIsCanvasEditorFullscreen] = useState(false);
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState !== "hidden"
+  );
+  const [isOrbitInteractionActive, setIsOrbitInteractionActive] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
   const [activeColorFilters, setActiveColorFilters] = useState<string[]>([]);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
@@ -841,6 +1012,8 @@ export default function OrbitalMapView({
   const noteHoverPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const hoverPreviewCloseTimeoutRef = useRef<number | null>(null);
   const hoverPreviewSceneAnchorRef = useRef<SVGGElement | null>(null);
+  const orbitInteractionTimeoutRef = useRef<number | null>(null);
+  const orbitInteractionActiveRef = useRef(true);
   const dragRef = useRef<
     | {
         mode: "camera";
@@ -1168,14 +1341,17 @@ export default function OrbitalMapView({
 
     return matches;
   }, [filterPrimaryEntityIds, folderDescendantFilteredEntityIds]);
-  const scene = useMemo(
+  const sceneLayout = useMemo(
     () =>
-      buildOrbitalScene(
+      buildOrbitalLayout(
         orbitalData,
-        timeMs,
         effectiveFocusMode && !hasActiveFilter ? selectedSystemEntityIds : null
       ),
-    [effectiveFocusMode, hasActiveFilter, orbitalData, selectedSystemEntityIds, timeMs]
+    [effectiveFocusMode, hasActiveFilter, orbitalData, selectedSystemEntityIds]
+  );
+  const scene = useMemo(
+    () => materializeOrbitalScene(sceneLayout, timeMs),
+    [sceneLayout, timeMs]
   );
   const selectedNode = selectedEntityId ? scene.entityMap.get(selectedEntityId) ?? null : null;
   const currentProjectNode = currentProjectEntityId
@@ -1218,6 +1394,7 @@ export default function OrbitalMapView({
     }
   ) => {
     clearHoverPreviewCloseTimeout();
+    markOrbitInteraction();
     setHoveredSelectionNoteId(noteId);
     setHoverPreviewAnchorSource(source);
     setHoverPreviewFallbackRect(options?.anchorRect ?? null);
@@ -1233,6 +1410,8 @@ export default function OrbitalMapView({
       sceneAnchorElement?: SVGGElement | null;
     }
   ) => {
+    markOrbitInteraction();
+
     if (typeof options?.anchorRect !== "undefined") {
       setHoverPreviewFallbackRect(options.anchorRect);
     }
@@ -1244,11 +1423,34 @@ export default function OrbitalMapView({
     setHoverPreviewCursor({ x: clientX, y: clientY });
   };
 
+  const markOrbitInteraction = () => {
+    if (!orbitInteractionActiveRef.current) {
+      orbitInteractionActiveRef.current = true;
+      setIsOrbitInteractionActive(true);
+    }
+
+    if (orbitInteractionTimeoutRef.current !== null) {
+      window.clearTimeout(orbitInteractionTimeoutRef.current);
+    }
+
+    orbitInteractionTimeoutRef.current = window.setTimeout(() => {
+      orbitInteractionActiveRef.current = false;
+      setIsOrbitInteractionActive(false);
+      orbitInteractionTimeoutRef.current = null;
+    }, ORBIT_INTERACTION_WINDOW_MS);
+  };
+
   useEffect(() => {
     if (editorOpen || (hoveredSelectionNoteId && !hoverPreviewNote)) {
       closeSelectionHoverPreview();
     }
   }, [editorOpen, hoverPreviewNote, hoveredSelectionNoteId]);
+
+  useEffect(() => {
+    if (!editorOpen || editorMode !== "canvas") {
+      setIsCanvasEditorFullscreen(false);
+    }
+  }, [editorMode, editorOpen]);
 
   useEffect(() => {
     if (hoverPreviewAnchorSource === "inspector" && inspectorMenu !== "notes") {
@@ -1265,6 +1467,27 @@ export default function OrbitalMapView({
   useEffect(() => {
     return () => {
       clearHoverPreviewCloseTimeout();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsDocumentVisible(document.visibilityState !== "hidden");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    markOrbitInteraction();
+
+    return () => {
+      if (orbitInteractionTimeoutRef.current !== null) {
+        window.clearTimeout(orbitInteractionTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -1305,20 +1528,29 @@ export default function OrbitalMapView({
   );
   const stars = useMemo(
     () =>
-      Array.from({ length: 88 }, (_, index) => {
+      Array.from({ length: 56 }, (_, index) => {
         const seed = hashString(`star-${index}`);
         return {
           id: `star-${index}`,
           x: (seed % VIEWBOX.width) + VIEWBOX.minX,
           y: ((seed * 13) % VIEWBOX.height) + VIEWBOX.minY,
           r: 0.8 + ((seed % 10) / 10) * 2.2,
-          opacity: 0.12 + ((seed % 100) / 100) * 0.62,
-          phase: (seed % 360) * (Math.PI / 180)
+          opacity: 0.12 + ((seed % 100) / 100) * 0.62
         };
       }),
     []
   );
   const autoFocusEnabled = isLargeVault && focusModeOverride === null && !hasActiveFilter;
+  const isDenseOrbitalScene = orbitalData.totalEntities > 80;
+  const orbitFrameInterval = isOrbitInteractionActive
+    ? isDenseOrbitalScene
+      ? ORBIT_ACTIVE_FRAME_MS_LARGE
+      : ORBIT_ACTIVE_FRAME_MS
+    : isDenseOrbitalScene
+      ? ORBIT_IDLE_FRAME_MS_LARGE
+      : ORBIT_IDLE_FRAME_MS;
+  const isOrbitAnimationSuspended =
+    isPaused || editorOpen || activeModal !== null || !isDocumentVisible;
   const focusSystemLabel =
     !anchorNode
       ? labels.core
@@ -1389,8 +1621,9 @@ export default function OrbitalMapView({
 
   useEffect(() => {
     let frameId = 0;
+    let timeoutId = 0;
 
-    if (isPaused) {
+    if (isOrbitAnimationSuspended) {
       return undefined;
     }
 
@@ -1398,31 +1631,38 @@ export default function OrbitalMapView({
 
     const tick = (now: number) => {
       setTimeMs(now - startedAt);
-      frameId = window.requestAnimationFrame(tick);
+      timeoutId = window.setTimeout(() => {
+        frameId = window.requestAnimationFrame(tick);
+      }, orbitFrameInterval);
     };
 
     frameId = window.requestAnimationFrame(tick);
     return () => {
       window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
     };
-  }, [isPaused]);
+  }, [isOrbitAnimationSuspended, orbitFrameInterval]);
 
   useEffect(
     () => () => {
       if (cameraAnimationFrameRef.current !== null) {
         window.cancelAnimationFrame(cameraAnimationFrameRef.current);
       }
+
+      if (orbitInteractionTimeoutRef.current !== null) {
+        window.clearTimeout(orbitInteractionTimeoutRef.current);
+      }
     },
     []
   );
 
   useEffect(() => {
-    if (!selectedEntityId || scene.entityMap.has(selectedEntityId)) {
+    if (!selectedEntityId || sceneLayout.entityMap.has(selectedEntityId)) {
       return;
     }
 
     setSelectedEntityId(null);
-  }, [scene.entityMap, selectedEntityId]);
+  }, [sceneLayout.entityMap, selectedEntityId]);
 
   useEffect(() => {
     setFolderDraftError(null);
@@ -1488,15 +1728,30 @@ export default function OrbitalMapView({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      markOrbitInteraction();
+
       if (event.key === " " && !isEditableTarget(event.target)) {
         event.preventDefault();
         setIsPaused((current) => !current);
         return;
       }
 
+      if (
+        event.key.toLowerCase() === "f" &&
+        editorOpen &&
+        editorMode === "canvas" &&
+        !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        setIsCanvasEditorFullscreen((current) => !current);
+        return;
+      }
+
       if (event.key === "Escape") {
         if (activeModal) {
           setActiveModal(null);
+        } else if (editorOpen && editorMode === "canvas" && isCanvasEditorFullscreen) {
+          setIsCanvasEditorFullscreen(false);
         } else if (editorOpen) {
           onCloseEditor();
         } else if (selectedEntityId) {
@@ -1511,7 +1766,15 @@ export default function OrbitalMapView({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeModal, editorOpen, onClose, onCloseEditor, selectedEntityId]);
+  }, [
+    activeModal,
+    editorMode,
+    editorOpen,
+    isCanvasEditorFullscreen,
+    onClose,
+    onCloseEditor,
+    selectedEntityId
+  ]);
 
   const handleCenterSelection = () => {
     if (!anchorNode) {
@@ -1546,6 +1809,8 @@ export default function OrbitalMapView({
   };
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    markOrbitInteraction();
+
     if ((event.target as HTMLElement).closest("[data-orbital-node='true']")) {
       return;
     }
@@ -1565,6 +1830,8 @@ export default function OrbitalMapView({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    markOrbitInteraction();
+
     if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) {
       return;
     }
@@ -1623,6 +1890,8 @@ export default function OrbitalMapView({
   };
 
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    markOrbitInteraction();
+
     if (
       hoverPreviewAnchorSource === "scene" &&
       hoveredSelectionNoteId &&
@@ -1680,6 +1949,13 @@ export default function OrbitalMapView({
     setSelectedEntityId(`note:${createdNote.id}`);
     setActiveProjectId(createdNote.projectId);
     onOpenNote(createdNote.id);
+  };
+
+  const handleCreateCanvas = async (folderId: string | null, projectId?: string) => {
+    const createdCanvas = await onCreateCanvas(folderId, projectId);
+    setSelectedEntityId(`note:${createdCanvas.id}`);
+    setActiveProjectId(createdCanvas.projectId);
+    onOpenNote(createdCanvas.id);
   };
 
   const handleCreateProject = async () => {
@@ -1780,6 +2056,12 @@ export default function OrbitalMapView({
           .map((tagId) => tagMap.get(tagId)?.name ?? "")
           .filter((value) => value.length > 0)
       : [];
+  const selectedEntryIsCanvas =
+    selectedNode?.kind === "note" && selectedNode.note?.contentType === "canvas";
+  const selectedCanvasMetrics =
+    selectedNode?.kind === "note" && selectedNode.note?.contentType === "canvas"
+      ? getCanvasMetrics(selectedNode.note.canvasContent, { includePlainText: false })
+      : null;
   const selectedNoteVisibleTags = selectedNoteTagNames.slice(0, 3);
   const selectedNoteHiddenTagCount = Math.max(0, selectedNoteTagNames.length - selectedNoteVisibleTags.length);
   const selectedNoteAssetCount =
@@ -2255,15 +2537,26 @@ export default function OrbitalMapView({
                     scheduleSelectionHoverPreviewClose();
                   }}
                 >
-                  <span className="orbital-menu-item-title">{note.title}</span>
+                  <span className="orbital-menu-item-head">
+                    <span className="orbital-menu-item-title">{note.title}</span>
+                    {note.contentType === "canvas" ? (
+                      <span className="orbital-menu-item-badge">{labels.canvas}</span>
+                    ) : null}
+                  </span>
                   <div className="orbital-menu-item-richmeta">
-                    <NoteStaticPreview
-                      content={note.content}
+                    <EntryStaticPreview
+                      note={note}
                       emptyLabel={labels.empty}
                       resolveFileUrl={onResolveFileUrl}
                       compact
                       interactive={false}
                       className="orbital-menu-note-preview"
+                      labels={{
+                        canvas: labels.canvas,
+                        elements: labels.elementsStat,
+                        images: labels.assetsStat,
+                        emptyCanvas: labels.emptyCanvas
+                      }}
                     />
                   </div>
                 </button>
@@ -2281,7 +2574,12 @@ export default function OrbitalMapView({
                     onOpenNote(note.id);
                   }}
                 >
-                  <span className="orbital-menu-item-title">{note.title}</span>
+                  <span className="orbital-menu-item-head">
+                    <span className="orbital-menu-item-title">{note.title}</span>
+                    {note.contentType === "canvas" ? (
+                      <span className="orbital-menu-item-badge">{labels.canvas}</span>
+                    ) : null}
+                  </span>
                   <span className="orbital-menu-item-meta">{formatTimestamp(note.updatedAt, language)}</span>
                 </button>
               ))
@@ -2372,7 +2670,13 @@ export default function OrbitalMapView({
     );
 
   return (
-    <section className="orbital-overlay" role="dialog" aria-modal="true">
+    <section
+      className="orbital-overlay"
+      role="dialog"
+      aria-modal="true"
+      onPointerDown={markOrbitInteraction}
+      onWheel={markOrbitInteraction}
+    >
       <div className="orbital-backdrop" aria-hidden="true" />
 
       <header className="orbital-topbar orbital-topbar-minimal">
@@ -2538,7 +2842,9 @@ export default function OrbitalMapView({
               ) : (
                 <>
                   <section
-                    className={`orbital-selection-shell orbital-selection-shell-${selectedNode.kind}`}
+                    className={`orbital-selection-shell orbital-selection-shell-${selectedNode.kind} ${
+                      selectedEntryIsCanvas ? "is-canvas" : ""
+                    }`}
                     style={{ "--selection-accent": selectedInspectorAccent } as CSSProperties}
                     onDoubleClick={
                       selectedNode.kind === "note"
@@ -2552,7 +2858,11 @@ export default function OrbitalMapView({
                     <div className="orbital-selection-head">
                       <div className="orbital-selection-eyebrow-row">
                         <span className="orbital-selection-kindchip">
-                          {selectedNode.kind === "folder" ? labels.folder : labels.note}
+                          {selectedNode.kind === "folder"
+                            ? labels.folder
+                            : selectedEntryIsCanvas
+                              ? labels.canvas
+                              : labels.note}
                         </span>
                         {selectedNode.kind === "folder" ? (
                           <span className="orbital-selection-systemchip">{focusSystemLabel}</span>
@@ -2578,15 +2888,26 @@ export default function OrbitalMapView({
                     {selectedNode.kind === "note" && selectedNode.note ? (
                       <>
                         <div className="orbital-selection-preview orbital-selection-preview-note">
-                          <NoteStaticPreview
-                            content={selectedNode.note.content}
+                          <EntryStaticPreview
+                            note={selectedNode.note}
                             emptyLabel={labels.empty}
                             resolveFileUrl={onResolveFileUrl}
                             compact
                             interactive={false}
+                            labels={{
+                              canvas: labels.canvas,
+                              elements: labels.elementsStat,
+                              images: labels.assetsStat,
+                              emptyCanvas: labels.emptyCanvas
+                            }}
                           />
                         </div>
                         <div className="orbital-selection-meta-line">
+                          {selectedEntryIsCanvas && selectedCanvasMetrics ? (
+                            <span className="orbital-selection-meta-chip">
+                              {selectedCanvasMetrics.activeElementCount} {labels.elementsStat}
+                            </span>
+                          ) : null}
                           {selectedNode.note.favorite ? (
                             <span className="orbital-selection-badge">{t("note.favorite")}</span>
                           ) : null}
@@ -2596,7 +2917,12 @@ export default function OrbitalMapView({
                           {selectedNode.note.archived ? (
                             <span className="orbital-selection-badge">{t("note.archive")}</span>
                           ) : null}
-                          {selectedNoteAssetCount > 0 ? (
+                          {selectedEntryIsCanvas && selectedCanvasMetrics && selectedCanvasMetrics.imageCount > 0 ? (
+                            <span className="orbital-selection-meta-chip">
+                              {selectedCanvasMetrics.imageCount} {labels.assetsStat}
+                            </span>
+                          ) : null}
+                          {selectedNoteAssetCount > 0 && !selectedEntryIsCanvas ? (
                             <span className="orbital-selection-meta-chip">
                               {selectedNoteAssetCount} {labels.assetsStat}
                             </span>
@@ -2706,7 +3032,7 @@ export default function OrbitalMapView({
               <div className={`orbital-action-stack ${selectedNode.kind !== "core" ? "orbital-action-stack-compact" : ""}`}>
                 {selectedNode.kind === "note" && selectedNode.note ? (
                   <button className="primary-action" onClick={() => onOpenNote(selectedNode.note!.id)}>
-                    {labels.openNote}
+                    {selectedEntryIsCanvas ? labels.openCanvas : labels.openNote}
                   </button>
                 ) : null}
 
@@ -2739,6 +3065,19 @@ export default function OrbitalMapView({
                       }
                     >
                       {labels.addNote}
+                    </button>
+                    <button
+                      className="toolbar-action"
+                      onClick={() =>
+                        void handleCreateCanvas(
+                          selectedNode.kind === "folder" ? selectedNode.folder!.id : null,
+                          selectedNode.kind === "core"
+                            ? selectedNode.project?.id
+                            : selectedNode.folder?.projectId
+                        )
+                      }
+                    >
+                      {labels.addCanvas}
                     </button>
                   </>
                 )}
@@ -2840,19 +3179,16 @@ export default function OrbitalMapView({
             onPointerCancel={(event) => releaseDrag(event.pointerId)}
           >
             <g className="orbital-starfield">
-              {stars.map((star) => {
-                const pulse = 0.82 + Math.sin(timeMs * 0.00042 + star.phase) * 0.18;
-                return (
-                  <circle
-                    key={star.id}
-                    cx={star.x}
-                    cy={star.y}
-                    r={star.r * pulse}
-                    opacity={star.opacity * pulse}
-                    fill="#f6f1ff"
-                  />
-                );
-              })}
+              {stars.map((star) => (
+                <circle
+                  key={star.id}
+                  cx={star.x}
+                  cy={star.y}
+                  r={star.r}
+                  opacity={star.opacity}
+                  fill="#f6f1ff"
+                />
+              ))}
             </g>
 
             <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
@@ -2937,7 +3273,9 @@ export default function OrbitalMapView({
                   <g
                     key={node.id}
                     data-orbital-node="true"
-                    className={`orbital-node orbital-node-${node.kind} ${isSelected ? "is-selected" : ""} ${isEmphasis ? "is-emphasis" : "is-muted"} ${isEmphasisRelated ? "is-related-emphasis" : ""} ${isPassiveHighlight ? "is-passive-highlight" : ""} ${isFilterPrimary ? "is-filter-match" : ""} ${isFilterRelated ? "is-filter-related" : ""} ${isFilterMuted ? "is-filter-muted" : ""}`}
+                    className={`orbital-node orbital-node-${node.kind} ${
+                      node.note?.contentType === "canvas" ? "is-canvas-entry" : ""
+                    } ${isSelected ? "is-selected" : ""} ${isEmphasis ? "is-emphasis" : "is-muted"} ${isEmphasisRelated ? "is-related-emphasis" : ""} ${isPassiveHighlight ? "is-passive-highlight" : ""} ${isFilterPrimary ? "is-filter-match" : ""} ${isFilterRelated ? "is-filter-related" : ""} ${isFilterMuted ? "is-filter-muted" : ""}`}
                     style={{ "--node-color": node.color } as CSSProperties}
                     transform={`translate(${node.x} ${node.y})`}
                     onPointerDown={(event) => {
@@ -3061,43 +3399,75 @@ export default function OrbitalMapView({
                     ) : null}
 
                     {node.kind === "note" ? (
-                      <>
-                        <circle r={node.radius * 1.14} className="orbital-node-aura note-aura" />
-                        <rect
-                          x={-node.radius}
-                          y={-node.radius}
-                          width={node.radius * 2}
-                          height={node.radius * 2}
-                          rx={node.radius * 0.18}
-                          className="orbital-note-disc"
-                          transform="rotate(45)"
-                        />
-                        <rect
-                          x={-node.radius * 0.52}
-                          y={-node.radius * 0.52}
-                          width={node.radius * 1.04}
-                          height={node.radius * 1.04}
-                          rx={node.radius * 0.1}
-                          className="orbital-note-core"
-                          transform="rotate(45)"
-                        />
-                        {node.favorite ? (
+                      node.note?.contentType === "canvas" ? (
+                        <>
+                          <circle r={node.radius * 1.16} className="orbital-node-aura note-aura" />
+                          <rect
+                            x={-node.radius * 1.04}
+                            y={-node.radius * 0.86}
+                            width={node.radius * 2.08}
+                            height={node.radius * 1.72}
+                            rx={node.radius * 0.28}
+                            className="orbital-canvas-disc"
+                          />
+                          <rect
+                            x={-node.radius * 0.7}
+                            y={-node.radius * 0.5}
+                            width={node.radius * 1.4}
+                            height={node.radius}
+                            rx={node.radius * 0.18}
+                            className="orbital-canvas-core"
+                          />
+                          <path
+                            d={`M ${-node.radius * 0.44} ${-node.radius * 0.08} H ${node.radius * 0.44} M ${-node.radius * 0.44} ${node.radius * 0.18} H ${node.radius * 0.44}`}
+                            className="orbital-canvas-lines"
+                          />
                           <circle
-                            cx={node.radius * 0.92}
-                            cy={-node.radius * 0.92}
+                            cx={node.radius * 0.78}
+                            cy={-node.radius * 0.72}
                             r="3.2"
-                            className="orbital-favorite-signal"
+                            className="orbital-canvas-beacon"
                           />
-                        ) : null}
-                        {node.pinned ? (
-                          <circle
-                            cx={-node.radius * 0.92}
-                            cy={node.radius * 0.92}
-                            r="2.8"
-                            className="orbital-pinned-signal"
+                        </>
+                      ) : (
+                        <>
+                          <circle r={node.radius * 1.14} className="orbital-node-aura note-aura" />
+                          <rect
+                            x={-node.radius}
+                            y={-node.radius}
+                            width={node.radius * 2}
+                            height={node.radius * 2}
+                            rx={node.radius * 0.18}
+                            className="orbital-note-disc"
+                            transform="rotate(45)"
                           />
-                        ) : null}
-                      </>
+                          <rect
+                            x={-node.radius * 0.52}
+                            y={-node.radius * 0.52}
+                            width={node.radius * 1.04}
+                            height={node.radius * 1.04}
+                            rx={node.radius * 0.1}
+                            className="orbital-note-core"
+                            transform="rotate(45)"
+                          />
+                          {node.favorite ? (
+                            <circle
+                              cx={node.radius * 0.92}
+                              cy={-node.radius * 0.92}
+                              r="3.2"
+                              className="orbital-favorite-signal"
+                            />
+                          ) : null}
+                          {node.pinned ? (
+                            <circle
+                              cx={-node.radius * 0.92}
+                              cy={node.radius * 0.92}
+                              r="2.8"
+                              className="orbital-pinned-signal"
+                            />
+                          ) : null}
+                        </>
+                      )
                     ) : null}
 
                     {isSelected ? <circle r={node.radius * 1.82} className="orbital-selection-ring" /> : null}
@@ -3144,7 +3514,9 @@ export default function OrbitalMapView({
           onPointerLeave={scheduleSelectionHoverPreviewClose}
         >
           <div className="orbital-note-hovercard-head">
-            <p className="panel-kicker">{labels.note}</p>
+            <p className="panel-kicker">
+              {hoverPreviewNote.contentType === "canvas" ? labels.canvas : labels.note}
+            </p>
             <h3>{hoverPreviewNote.title}</h3>
             <div className="orbital-note-hovercard-meta">
               <span>{hoverPreviewFolder}</span>
@@ -3152,35 +3524,69 @@ export default function OrbitalMapView({
             </div>
           </div>
           <div className="orbital-note-hovercard-scroll" ref={noteHoverPreviewScrollRef}>
-            <NoteStaticPreview
-              content={hoverPreviewNote.content}
+            <EntryStaticPreview
+              note={hoverPreviewNote}
               emptyLabel={labels.empty}
               resolveFileUrl={onResolveFileUrl}
               interactive
               className="orbital-note-hovercard-copy"
+              labels={{
+                canvas: labels.canvas,
+                elements: labels.elementsStat,
+                images: labels.assetsStat,
+                emptyCanvas: labels.emptyCanvas
+              }}
             />
           </div>
         </div>
       ) : null}
 
       {editorOpen ? (
-        <div className="orbital-modal-layer orbital-editor-modal-layer" role="dialog" aria-modal="true">
+        <div
+          className={`orbital-modal-layer orbital-editor-modal-layer ${
+            editorMode === "canvas" ? "is-canvas-mode" : ""
+          } ${isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""}`}
+          role="dialog"
+          aria-modal="true"
+        >
           <button
             className="orbital-modal-dim"
             aria-label={labels.closeEditor}
             onClick={onCloseEditor}
           />
-          <div className="orbital-modal-window orbital-editor-modal-window">
-            <div className="orbital-editor-topbar">
-              <div className="orbital-editor-topmeta">
-                <p className="panel-kicker">{labels.openNote}</p>
-                <strong className="orbital-editor-title">{editorTitle || labels.note}</strong>
+          <div
+            className={`orbital-modal-window orbital-editor-modal-window ${
+              editorMode === "canvas" ? "is-canvas-mode" : ""
+            } ${isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""}`}
+          >
+            <div className={`orbital-editor-topbar ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+              <div className={`orbital-editor-topmeta ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+                <p className="panel-kicker">
+                  {editorMode === "canvas" ? labels.openCanvas : labels.openNote}
+                </p>
+                {editorMode === "canvas" ? null : (
+                  <strong className="orbital-editor-title">
+                    {editorTitle || labels.note}
+                  </strong>
+                )}
               </div>
-              <button className="toolbar-action danger" onClick={onCloseEditor}>
-                {labels.closeEditor}
-              </button>
+              <div className={`orbital-editor-topactions ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+                {editorMode === "canvas" ? (
+                  <button
+                    className="toolbar-action orbital-toolbar-action"
+                    onClick={() => setIsCanvasEditorFullscreen((current) => !current)}
+                  >
+                    {isCanvasEditorFullscreen ? labels.exitFullscreen : labels.enterFullscreen}
+                  </button>
+                ) : null}
+                <button className="toolbar-action danger" onClick={onCloseEditor}>
+                  {labels.closeEditor}
+                </button>
+              </div>
             </div>
-            <div className="orbital-editor-scroll">{editorSlot}</div>
+            <div className={`orbital-editor-scroll ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+              {editorSlot}
+            </div>
           </div>
         </div>
       ) : null}
