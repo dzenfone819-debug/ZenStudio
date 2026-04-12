@@ -11,10 +11,12 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Zen Sync Server</p>
-          <h1>Vault Admin</h1>
-          <p class="lede">Create vaults, issue tokens, and keep a clean multi-vault self-hosted setup.</p>
+          <h1>Hosted Control Plane</h1>
+          <p class="lede">
+            Create user spaces, attach vaults to them, and issue client tokens without losing the simple self-hosted workflow.
+          </p>
         </div>
-        <div class="hero-badge">Multi-vault</div>
+        <div class="hero-badge">Hosted-ready</div>
       </header>
 
       <section class="panel">
@@ -35,8 +37,28 @@
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Create Vault</p>
-            <h2>New Space</h2>
+            <p class="eyebrow">Create User Space</p>
+            <h2>New Owner</h2>
+          </div>
+          <button id="create-user" class="button accent">Create user space</button>
+        </div>
+        <div class="grid two">
+          <label class="field">
+            <span>Name</span>
+            <input id="user-name" type="text" placeholder="Aleksandr" />
+          </label>
+          <label class="field">
+            <span>Custom user ID (optional)</span>
+            <input id="user-id" type="text" placeholder="aleksandr" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Create Standalone Vault</p>
+            <h2>Unassigned Space</h2>
           </div>
           <button id="create-vault" class="button accent">Create vault</button>
         </div>
@@ -55,16 +77,47 @@
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Vaults</p>
-            <h2>Registry</h2>
+            <p class="eyebrow">Users</p>
+            <h2>User Spaces</h2>
           </div>
           <button id="refresh-vaults" class="button ghost">Refresh</button>
         </div>
+        <div id="user-list" class="user-list">
+          <div class="empty-state">Connect with the admin token to load user spaces.</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Vaults</p>
+            <h2>Standalone Registry</h2>
+          </div>
+        </div>
         <div id="vault-list" class="vault-list">
-          <div class="empty-state">Connect with the admin token to load vaults.</div>
+          <div class="empty-state">Standalone vaults will appear here.</div>
         </div>
       </section>
     </main>
+
+    <template id="user-template">
+      <article class="user-card">
+        <div class="user-head">
+          <div>
+            <h3 class="user-name"></h3>
+            <p class="user-id"></p>
+          </div>
+          <div class="user-meta"></div>
+        </div>
+        <div class="user-stats"></div>
+        <div class="user-vault-create">
+          <input class="user-vault-name-input" type="text" placeholder="Work vault" />
+          <input class="user-vault-id-input" type="text" placeholder="work" />
+          <button class="button issue-user-vault-button">Create vault</button>
+        </div>
+        <div class="user-vault-list"></div>
+      </article>
+    </template>
 
     <template id="vault-template">
       <article class="vault-card">
@@ -72,6 +125,7 @@
           <div>
             <h3 class="vault-name"></h3>
             <p class="vault-id"></p>
+            <p class="vault-owner muted hidden"></p>
           </div>
           <div class="vault-meta"></div>
         </div>

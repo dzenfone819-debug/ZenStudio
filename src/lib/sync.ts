@@ -17,6 +17,9 @@ import type {
   AppSettings,
   Asset,
   Folder,
+  HostedAccountSession,
+  HostedAccountUser,
+  HostedAccountVault,
   Note,
   Project,
   SyncEnvelope,
@@ -57,6 +60,12 @@ const JSON_HEADERS = {
   "Content-Type": "application/json"
 };
 
+type HostedAccountOverview = {
+  user: HostedAccountUser;
+  session: Omit<HostedAccountSession, "token">;
+  vaults: HostedAccountVault[];
+};
+
 function getEntityKey(entityType: SyncEntityKind, entityId: string) {
   return `${entityType}:${entityId}`;
 }
@@ -71,6 +80,17 @@ function normalizeVaultId(value: string) {
 
 function buildVaultStateUrl(serverUrl: string, vaultId: string) {
   return `${normalizeBaseUrl(serverUrl)}/v1/vaults/${encodeURIComponent(normalizeVaultId(vaultId))}/state`;
+}
+
+function buildAccountUrl(serverUrl: string, path: string) {
+  return `${normalizeBaseUrl(serverUrl)}${path}`;
+}
+
+function createBearerHeaders(token: string, includeJson = false) {
+  return {
+    ...(includeJson ? JSON_HEADERS : {}),
+    Authorization: `Bearer ${token}`
+  };
 }
 
 function sortObjectKeys(value: unknown): unknown {
@@ -571,12 +591,119 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
   return payload as T;
 }
 
+export async function registerHostedAccount(
+  serverUrl: string,
+  payload: {
+    name: string;
+    email: string;
+    password: string;
+  }
+) {
+  return requestJson<{
+    user: HostedAccountUser;
+    session: HostedAccountSession;
+  }>(buildAccountUrl(serverUrl, "/v1/auth/register"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function loginHostedAccount(
+  serverUrl: string,
+  payload: {
+    email: string;
+    password: string;
+  }
+) {
+  return requestJson<{
+    user: HostedAccountUser;
+    session: HostedAccountSession;
+  }>(buildAccountUrl(serverUrl, "/v1/auth/login"), {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function logoutHostedAccount(serverUrl: string, sessionToken: string) {
+  return requestJson<{ ok: true }>(buildAccountUrl(serverUrl, "/v1/auth/logout"), {
+    method: "POST",
+    headers: createBearerHeaders(sessionToken, false)
+  });
+}
+
+export async function loadHostedAccountOverview(serverUrl: string, sessionToken: string) {
+  const [mePayload, vaultsPayload] = await Promise.all([
+    requestJson<{
+      user: HostedAccountUser;
+      session: Omit<HostedAccountSession, "token">;
+      vaultCount: number;
+    }>(buildAccountUrl(serverUrl, "/v1/auth/me"), {
+      method: "GET",
+      headers: createBearerHeaders(sessionToken, false)
+    }),
+    requestJson<{
+      user: HostedAccountUser;
+      vaults: HostedAccountVault[];
+    }>(buildAccountUrl(serverUrl, "/v1/account/vaults"), {
+      method: "GET",
+      headers: createBearerHeaders(sessionToken, false)
+    })
+  ]);
+
+  return {
+    user: mePayload.user,
+    session: mePayload.session,
+    vaults: vaultsPayload.vaults
+  } satisfies HostedAccountOverview;
+}
+
+export async function createHostedVault(
+  serverUrl: string,
+  sessionToken: string,
+  payload: {
+    name: string;
+    id?: string;
+  }
+) {
+  return requestJson<{
+    vault: HostedAccountVault;
+  }>(buildAccountUrl(serverUrl, "/v1/account/vaults"), {
+    method: "POST",
+    headers: createBearerHeaders(sessionToken, true),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function issueHostedVaultToken(
+  serverUrl: string,
+  sessionToken: string,
+  vaultId: string,
+  label: string
+) {
+  return requestJson<{
+    token: string;
+    tokenMeta: {
+      id: string;
+      vaultId: string;
+      label: string;
+      createdAt: number;
+      lastUsedAt: number | null;
+    };
+  }>(buildAccountUrl(serverUrl, `/v1/account/vaults/${encodeURIComponent(vaultId)}/tokens`), {
+    method: "POST",
+    headers: createBearerHeaders(sessionToken, true),
+    body: JSON.stringify({
+      label
+    })
+  });
+}
+
 async function pullSelfHostedEnvelope(serverUrl: string, vaultId: string, token: string) {
   return requestJson<SyncEnvelope>(buildVaultStateUrl(serverUrl, vaultId), {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
+    headers: createBearerHeaders(token, false)
   });
 }
 
@@ -589,10 +716,7 @@ async function pushSelfHostedEnvelope(
 ) {
   const response = await fetch(buildVaultStateUrl(serverUrl, vaultId), {
     method: "PUT",
-    headers: {
-      ...JSON_HEADERS,
-      Authorization: `Bearer ${token}`
-    },
+    headers: createBearerHeaders(token, true),
     body: JSON.stringify({
       baseRevision,
       snapshot
@@ -1044,20 +1168,72 @@ export async function runSelfHostedSync(
     throw new Error("SELF_HOSTED_PROVIDER_REQUIRED");
   }
 
-  const serverUrl = normalizeBaseUrl(settings.selfHostedUrl);
-  const vaultId = normalizeVaultId(settings.selfHostedVaultId);
-  const token = settings.selfHostedToken.trim();
+  return runRemoteVaultSync(
+    settings,
+    {
+      serverUrl: settings.selfHostedUrl,
+      vaultId: settings.selfHostedVaultId,
+      token: settings.selfHostedToken,
+      missingUrlError: "SELF_HOSTED_URL_REQUIRED",
+      missingTokenError: "SELF_HOSTED_TOKEN_REQUIRED",
+      missingVaultError: "SELF_HOSTED_VAULT_REQUIRED"
+    },
+    options
+  );
+}
+
+export async function runHostedSync(
+  settings: AppSettings,
+  options?: {
+    onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+  }
+): Promise<SyncExecutionResult> {
+  if (settings.syncProvider !== "hosted") {
+    throw new Error("HOSTED_PROVIDER_REQUIRED");
+  }
+
+  return runRemoteVaultSync(
+    settings,
+    {
+      serverUrl: settings.hostedUrl,
+      vaultId: settings.hostedVaultId,
+      token: settings.hostedSyncToken,
+      missingUrlError: "HOSTED_URL_REQUIRED",
+      missingTokenError: "HOSTED_SYNC_TOKEN_REQUIRED",
+      missingVaultError: "HOSTED_VAULT_REQUIRED"
+    },
+    options
+  );
+}
+
+async function runRemoteVaultSync(
+  settings: AppSettings,
+  remote: {
+    serverUrl: string;
+    vaultId: string;
+    token: string;
+    missingUrlError: string;
+    missingTokenError: string;
+    missingVaultError: string;
+  },
+  options?: {
+    onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+  }
+): Promise<SyncExecutionResult> {
+  const serverUrl = normalizeBaseUrl(remote.serverUrl);
+  const vaultId = normalizeVaultId(remote.vaultId);
+  const token = remote.token.trim();
 
   if (!serverUrl) {
-    throw new Error("SELF_HOSTED_URL_REQUIRED");
+    throw new Error(remote.missingUrlError);
   }
 
   if (!token) {
-    throw new Error("SELF_HOSTED_TOKEN_REQUIRED");
+    throw new Error(remote.missingTokenError);
   }
 
   if (!vaultId) {
-    throw new Error("SELF_HOSTED_VAULT_REQUIRED");
+    throw new Error(remote.missingVaultError);
   }
 
   await options?.onStatusChange?.("syncing");

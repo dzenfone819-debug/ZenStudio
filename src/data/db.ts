@@ -332,6 +332,34 @@ class ZenNotesDatabase extends Dexie {
             settings.selfHostedVaultId ??= "default";
           });
       });
+
+    this.version(10)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings:
+          "id,syncProvider,syncStatus,syncCursor,selfHostedVaultId,hostedVaultId,hostedUserId",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.hostedUrl ??= "";
+            settings.hostedSessionToken ??= "";
+            settings.hostedUserId ??= null;
+            settings.hostedUserName ??= "";
+            settings.hostedUserEmail ??= "";
+            settings.hostedVaultId ??= "";
+            settings.hostedSyncToken ??= "";
+          });
+      });
   }
 }
 
@@ -456,6 +484,13 @@ export async function ensureSeedData() {
       selfHostedUrl: "",
       selfHostedVaultId: "default",
       selfHostedToken: "",
+      hostedUrl: "",
+      hostedSessionToken: "",
+      hostedUserId: null,
+      hostedUserName: "",
+      hostedUserEmail: "",
+      hostedVaultId: "",
+      hostedSyncToken: "",
       conflictStrategy: "duplicate",
       encryptionEnabled: false,
       lastSyncAt: null,
@@ -1089,7 +1124,7 @@ export async function resolveAssetUrl(url: string) {
 }
 
 export function isSyncProvider(value: string): value is SyncProvider {
-  return value === "none" || value === "googleDrive" || value === "selfHosted";
+  return value === "none" || value === "googleDrive" || value === "selfHosted" || value === "hosted";
 }
 
 export async function clearSyncTombstone(entityType: SyncEntityKind, entityId: string) {

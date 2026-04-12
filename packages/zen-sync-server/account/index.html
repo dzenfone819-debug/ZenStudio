@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zen Account Portal</title>
+    <link rel="stylesheet" href="/account/styles.css" />
+  </head>
+  <body>
+    <main class="portal-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Zen Hosted Vault</p>
+          <h1>Account Portal</h1>
+          <p class="lede">
+            Register, sign in, create your own vaults, and issue sync tokens for the Zen Notes app.
+          </p>
+        </div>
+        <div class="hero-badge">Auth beta</div>
+      </header>
+
+      <section class="panel auth-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Authentication</p>
+            <h2>Access</h2>
+          </div>
+          <button id="logout-button" class="button ghost hidden">Log out</button>
+        </div>
+        <p id="portal-status" class="muted">Register a new account or sign in with an existing one.</p>
+
+        <div id="auth-grid" class="grid two">
+          <section class="card">
+            <div class="card-head">
+              <p class="eyebrow">Register</p>
+              <h3>Create account</h3>
+            </div>
+            <label class="field">
+              <span>Name</span>
+              <input id="register-name" type="text" placeholder="Aleksandr" />
+            </label>
+            <label class="field">
+              <span>Email</span>
+              <input id="register-email" type="email" placeholder="you@example.com" />
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <input id="register-password" type="password" placeholder="At least 8 characters" />
+            </label>
+            <button id="register-button" class="button accent">Create account</button>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <p class="eyebrow">Login</p>
+              <h3>Continue</h3>
+            </div>
+            <label class="field">
+              <span>Email</span>
+              <input id="login-email" type="email" placeholder="you@example.com" />
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <input id="login-password" type="password" placeholder="Your password" />
+            </label>
+            <button id="login-button" class="button">Sign in</button>
+          </section>
+        </div>
+      </section>
+
+      <section id="account-overview-panel" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Account</p>
+            <h2>Overview</h2>
+          </div>
+        </div>
+        <div id="account-overview" class="account-overview"></div>
+      </section>
+
+      <section id="create-vault-panel" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Create Vault</p>
+            <h2>New Personal Space</h2>
+          </div>
+          <button id="create-vault-button" class="button accent">Create vault</button>
+        </div>
+        <div class="grid two">
+          <label class="field">
+            <span>Name</span>
+            <input id="vault-name" type="text" placeholder="Main vault" />
+          </label>
+          <label class="field">
+            <span>Custom vault ID (optional)</span>
+            <input id="vault-id" type="text" placeholder="main" />
+          </label>
+        </div>
+      </section>
+
+      <section id="vaults-panel" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Your Vaults</p>
+            <h2>Sync Tokens</h2>
+          </div>
+          <button id="refresh-vaults-button" class="button ghost">Refresh</button>
+        </div>
+        <div id="vault-list" class="vault-list">
+          <div class="empty-state">Sign in to load your vaults.</div>
+        </div>
+      </section>
+    </main>
+
+    <template id="vault-template">
+      <article class="vault-card">
+        <div class="vault-head">
+          <div>
+            <h3 class="vault-name"></h3>
+            <p class="vault-id"></p>
+          </div>
+          <div class="vault-meta"></div>
+        </div>
+        <div class="vault-stats"></div>
+        <div class="token-create">
+          <input class="token-label-input" type="text" placeholder="Desktop app" />
+          <button class="button issue-token-button">Issue token</button>
+        </div>
+        <div class="token-result hidden"></div>
+        <div class="token-list"></div>
+      </article>
+    </template>
+
+    <script type="module" src="/account/app.js"></script>
+  </body>
+</html>

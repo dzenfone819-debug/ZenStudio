@@ -1,0 +1,90 @@
+.hosted-sync-shell {
+  display: grid;
+}
+
+.hosted-sync-section {
+  gap: 10px;
+}
+
+.hosted-sync-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.hosted-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hosted-auth-grid,
+.hosted-account-card,
+.hosted-vault-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hosted-auth-card,
+.hosted-vault-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hosted-create-vault-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.hosted-vault-card.is-selected {
+  border-color: rgba(115, 247, 255, 0.28);
+  box-shadow: 0 0 0 1px rgba(115, 247, 255, 0.16) inset;
+}
+
+.hosted-vault-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hosted-vault-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.hosted-vault-copy strong {
+  color: var(--text);
+}
+
+.hosted-vault-copy span,
+.hosted-vault-meta {
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.hosted-vault-meta {
+  display: grid;
+  gap: 4px;
+}
+
+@media (min-width: 720px) {
+  .hosted-auth-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hosted-account-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hosted-create-vault-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}

@@ -1,5 +1,5 @@
 export type AppLanguage = "en" | "ru";
-export type SyncProvider = "none" | "googleDrive" | "selfHosted";
+export type SyncProvider = "none" | "googleDrive" | "selfHosted" | "hosted";
 export type MobileSection = "vault" | "notes" | "editor";
 export type SaveState = "idle" | "saving" | "saved";
 export type AssetKind = "image" | "file" | "audio" | "video";
@@ -119,12 +119,49 @@ export interface AppSettings {
   selfHostedUrl: string;
   selfHostedVaultId: string;
   selfHostedToken: string;
+  hostedUrl: string;
+  hostedSessionToken: string;
+  hostedUserId: string | null;
+  hostedUserName: string;
+  hostedUserEmail: string;
+  hostedVaultId: string;
+  hostedSyncToken: string;
   conflictStrategy: ConflictStrategy;
   encryptionEnabled: boolean;
   lastSyncAt: number | null;
   syncCursor: string | null;
   localDeviceId: string;
   lastOpenedNoteId: string | null;
+}
+
+export interface HostedAccountUser {
+  id: string;
+  name: string;
+  email: string | null;
+  role: "member" | "admin";
+  createdAt: number;
+  updatedAt: number;
+  lastLoginAt: number | null;
+  hasPassword: boolean;
+}
+
+export interface HostedAccountSession {
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+  token: string;
+}
+
+export interface HostedAccountVault {
+  id: string;
+  name: string;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  createdAt: number;
+  updatedAt: number;
+  lastRevision: string | null;
+  lastSyncAt: number | null;
+  tokenCount: number;
 }
 
 export interface SyncShadow {

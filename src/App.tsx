@@ -52,10 +52,21 @@ import {
   renameLocalVaultProfile,
   setStoredActiveLocalVaultId
 } from "./lib/localVaults";
-import { runSelfHostedSync } from "./lib/sync";
+import {
+  createHostedVault,
+  issueHostedVaultToken,
+  loadHostedAccountOverview,
+  loginHostedAccount,
+  logoutHostedAccount,
+  registerHostedAccount,
+  runHostedSync,
+  runSelfHostedSync
+} from "./lib/sync";
 import i18n from "./i18n";
 import type {
   AppLanguage,
+  HostedAccountUser,
+  HostedAccountVault,
   MobileSection,
   Note,
   NoteListView,
@@ -114,6 +125,10 @@ export default function App() {
     tone: "success" | "error";
     text: string;
   } | null>(null);
+  const [hostedAccountUser, setHostedAccountUser] = useState<HostedAccountUser | null>(null);
+  const [hostedAccountVaults, setHostedAccountVaults] = useState<HostedAccountVault[]>([]);
+  const [hostedAccountLoading, setHostedAccountLoading] = useState(false);
+  const [hostedActionBusy, setHostedActionBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -573,20 +588,73 @@ export default function App() {
     setOrbitalEditorNoteId(noteId);
   };
 
+  const clearHostedAccountState = () => {
+    setHostedAccountUser(null);
+    setHostedAccountVaults([]);
+  };
+
+  const clearHostedSessionSettings = async () => {
+    await patchSettings({
+      hostedSessionToken: "",
+      hostedUserId: null,
+      hostedUserName: "",
+      hostedUserEmail: "",
+      hostedVaultId: "",
+      hostedSyncToken: ""
+    });
+  };
+
+  const translateHostedAccountError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "HOSTED_FAILED";
+
+    switch (message) {
+      case "EMAIL_REQUIRED":
+        return t("sync.hostedEmailRequired");
+      case "INVALID_EMAIL":
+        return t("sync.hostedInvalidEmail");
+      case "EMAIL_ALREADY_EXISTS":
+        return t("sync.hostedEmailExists");
+      case "PASSWORD_TOO_SHORT":
+        return t("sync.hostedPasswordTooShort");
+      case "EMAIL_AND_PASSWORD_REQUIRED":
+        return t("sync.hostedCredentialsRequired");
+      case "INVALID_CREDENTIALS":
+        return t("sync.hostedInvalidCredentials");
+      case "UNAUTHORIZED":
+        return t("sync.hostedSessionExpired");
+      case "VAULT_NOT_FOUND":
+        return t("sync.vaultNotFound");
+      case "HTTP_404":
+        return t("sync.serverNotFound");
+      default:
+        return t("sync.hostedFailedGeneric");
+    }
+  };
+
   const translateSyncError = (error: unknown) => {
     const message = error instanceof Error ? error.message : "SYNC_FAILED";
 
     switch (message) {
       case "SELF_HOSTED_PROVIDER_REQUIRED":
         return t("sync.selfHostedOnly");
+      case "HOSTED_PROVIDER_REQUIRED":
+        return t("sync.hostedFailedGeneric");
       case "SELF_HOSTED_URL_REQUIRED":
         return t("sync.urlRequired");
+      case "HOSTED_URL_REQUIRED":
+        return t("sync.hostedUrlRequired");
       case "SELF_HOSTED_TOKEN_REQUIRED":
         return t("sync.tokenRequired");
+      case "HOSTED_SYNC_TOKEN_REQUIRED":
+        return t("sync.hostedTokenRequired");
       case "SELF_HOSTED_VAULT_REQUIRED":
         return t("sync.vaultRequired");
+      case "HOSTED_VAULT_REQUIRED":
+        return t("sync.hostedVaultRequired");
       case "UNAUTHORIZED":
-        return t("sync.unauthorized");
+        return settings?.syncProvider === "hosted"
+          ? t("sync.hostedUnauthorized")
+          : t("sync.unauthorized");
       case "VAULT_NOT_FOUND":
         return t("sync.vaultNotFound");
       case "SYNC_REVISION_CONFLICT":
@@ -598,6 +666,126 @@ export default function App() {
     }
   };
 
+  const hydrateHostedAccount = async (
+    serverUrl: string,
+    sessionToken: string,
+    options: {
+      feedbackOnError?: boolean;
+    } = {}
+  ) => {
+    setHostedAccountLoading(true);
+
+    try {
+      const overview = await loadHostedAccountOverview(serverUrl, sessionToken);
+      setHostedAccountUser(overview.user);
+      setHostedAccountVaults(overview.vaults);
+      await patchSettings({
+        hostedUserId: overview.user.id,
+        hostedUserName: overview.user.name,
+        hostedUserEmail: overview.user.email ?? ""
+      });
+      return overview;
+    } catch (error) {
+      if (error instanceof Error && error.message === "UNAUTHORIZED") {
+        clearHostedAccountState();
+        await resetSyncBinding();
+        await clearHostedSessionSettings();
+
+        if (options.feedbackOnError !== false) {
+          setSyncFeedback({
+            tone: "error",
+            text: t("sync.hostedSessionExpired")
+          });
+        }
+      } else if (options.feedbackOnError) {
+        setSyncFeedback({
+          tone: "error",
+          text: translateHostedAccountError(error)
+        });
+      }
+
+      throw error;
+    } finally {
+      setHostedAccountLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!settings || settings.syncProvider !== "hosted") {
+      setHostedAccountLoading(false);
+      clearHostedAccountState();
+      return;
+    }
+
+    const serverUrl = settings.hostedUrl.trim();
+    const sessionToken = settings.hostedSessionToken.trim();
+
+    if (serverUrl.length === 0 || sessionToken.length === 0) {
+      setHostedAccountLoading(false);
+      clearHostedAccountState();
+      return;
+    }
+
+    let cancelled = false;
+    setHostedAccountLoading(true);
+
+    void loadHostedAccountOverview(serverUrl, sessionToken)
+      .then(async (overview) => {
+        if (cancelled) {
+          return;
+        }
+
+        setHostedAccountUser(overview.user);
+        setHostedAccountVaults(overview.vaults);
+        await patchSettings({
+          hostedUserId: overview.user.id,
+          hostedUserName: overview.user.name,
+          hostedUserEmail: overview.user.email ?? ""
+        });
+
+        if (
+          settings.hostedVaultId &&
+          !overview.vaults.some((vault) => vault.id === settings.hostedVaultId)
+        ) {
+          await resetSyncBinding();
+          await patchSettings({
+            hostedVaultId: "",
+            hostedSyncToken: ""
+          });
+        }
+      })
+      .catch(async (error) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (error instanceof Error && error.message === "UNAUTHORIZED") {
+          clearHostedAccountState();
+          await resetSyncBinding();
+          await clearHostedSessionSettings();
+          setSyncFeedback({
+            tone: "error",
+            text: t("sync.hostedSessionExpired")
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHostedAccountLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    settings?.hostedSessionToken,
+    settings?.hostedUrl,
+    settings?.hostedVaultId,
+    settings?.syncProvider,
+    t
+  ]);
+
   const handleRunSelfHostedSync = async () => {
     if (!settings) {
       return;
@@ -607,6 +795,226 @@ export default function App() {
 
     try {
       const result = await runSelfHostedSync(settings, {
+        onStatusChange: async (status) => {
+          await patchSettings({
+            syncStatus: status
+          });
+        }
+      });
+
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.completed", {
+          count: result.stats.conflicts
+        })
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateSyncError(error)
+      });
+    }
+  };
+
+  const handleChangeHostedUrl = async (value: string) => {
+    setSyncFeedback(null);
+    clearHostedAccountState();
+    await resetSyncBinding();
+    await clearHostedSessionSettings();
+    await patchSettings({
+      hostedUrl: value
+    });
+  };
+
+  const handleHostedRegister = async (payload: {
+    name: string;
+    email: string;
+    password: string;
+  }) => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+    setHostedActionBusy(true);
+
+    try {
+      const result = await registerHostedAccount(settings.hostedUrl, payload);
+      clearHostedAccountState();
+      await resetSyncBinding();
+      await patchSettings({
+        hostedSessionToken: result.session.token,
+        hostedUserId: result.user.id,
+        hostedUserName: result.user.name,
+        hostedUserEmail: result.user.email ?? "",
+        hostedVaultId: "",
+        hostedSyncToken: ""
+      });
+      setHostedAccountUser(result.user);
+      setHostedAccountVaults([]);
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.hostedAccountCreated")
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateHostedAccountError(error)
+      });
+    } finally {
+      setHostedActionBusy(false);
+    }
+  };
+
+  const handleHostedLogin = async (payload: { email: string; password: string }) => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+    setHostedActionBusy(true);
+
+    try {
+      const result = await loginHostedAccount(settings.hostedUrl, payload);
+      await resetSyncBinding();
+      await patchSettings({
+        hostedSessionToken: result.session.token,
+        hostedUserId: result.user.id,
+        hostedUserName: result.user.name,
+        hostedUserEmail: result.user.email ?? "",
+        hostedVaultId: "",
+        hostedSyncToken: ""
+      });
+      await hydrateHostedAccount(settings.hostedUrl, result.session.token, {
+        feedbackOnError: true
+      });
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.hostedLoggedIn")
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateHostedAccountError(error)
+      });
+    } finally {
+      setHostedActionBusy(false);
+    }
+  };
+
+  const handleHostedLogout = async () => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+    setHostedActionBusy(true);
+
+    try {
+      if (settings.hostedUrl.trim() && settings.hostedSessionToken.trim()) {
+        await logoutHostedAccount(settings.hostedUrl, settings.hostedSessionToken);
+      }
+    } catch {
+      // Local logout should still proceed even if the remote session has already expired.
+    } finally {
+      clearHostedAccountState();
+      await resetSyncBinding();
+      await clearHostedSessionSettings();
+      setHostedActionBusy(false);
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.hostedLoggedOut")
+      });
+    }
+  };
+
+  const handleRefreshHostedAccount = async () => {
+    if (!settings || !settings.hostedUrl.trim() || !settings.hostedSessionToken.trim()) {
+      return;
+    }
+
+    setSyncFeedback(null);
+
+    try {
+      await hydrateHostedAccount(settings.hostedUrl, settings.hostedSessionToken, {
+        feedbackOnError: true
+      });
+    } catch {
+      // Feedback already handled in hydrateHostedAccount.
+    }
+  };
+
+  const handleCreateHostedVault = async (payload: { name: string; id?: string }) => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+    setHostedActionBusy(true);
+
+    try {
+      await createHostedVault(settings.hostedUrl, settings.hostedSessionToken, payload);
+      await hydrateHostedAccount(settings.hostedUrl, settings.hostedSessionToken, {
+        feedbackOnError: true
+      });
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.hostedVaultCreated")
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateHostedAccountError(error)
+      });
+    } finally {
+      setHostedActionBusy(false);
+    }
+  };
+
+  const handleBindHostedVault = async (vault: HostedAccountVault) => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+    setHostedActionBusy(true);
+
+    try {
+      const result = await issueHostedVaultToken(
+        settings.hostedUrl,
+        settings.hostedSessionToken,
+        vault.id,
+        `${activeLocalVaultName ?? "Local vault"} · ${settings.localDeviceId}`
+      );
+
+      await resetSyncBinding();
+      await patchSettings({
+        hostedVaultId: vault.id,
+        hostedSyncToken: result.token
+      });
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.hostedVaultBound")
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateHostedAccountError(error)
+      });
+    } finally {
+      setHostedActionBusy(false);
+    }
+  };
+
+  const handleRunHostedSync = async () => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+
+    try {
+      const result = await runHostedSync(settings, {
         onStatusChange: async (status) => {
           await patchSettings({
             syncStatus: status
@@ -782,8 +1190,13 @@ export default function App() {
             online={online}
             localVaults={localVaults}
             activeLocalVaultId={activeLocalVaultId}
+            localVaultName={activeLocalVaultName}
             syncFeedback={syncFeedback}
             syncBusy={settings.syncStatus === "syncing"}
+            hostedAccountUser={hostedAccountUser}
+            hostedAccountVaults={hostedAccountVaults}
+            hostedAccountLoading={hostedAccountLoading}
+            hostedActionBusy={hostedActionBusy}
             labels={{
               title: t("sections.sync"),
               panelCaption: t("sync.panelCaption"),
@@ -805,6 +1218,7 @@ export default function App() {
               none: t("sync.none"),
               googleDrive: t("sync.googleDrive"),
               selfHosted: t("sync.selfHosted"),
+              hosted: t("sync.hosted"),
               ready: t("sync.ready"),
               planned: t("sync.planned"),
               endpoint: t("sync.endpoint"),
@@ -823,7 +1237,36 @@ export default function App() {
               syncNow: t("sync.syncNow"),
               syncing: t("sync.syncing"),
               selfHostedOnly: t("sync.selfHostedOnly"),
-              lastRevision: t("sync.lastRevision")
+              lastRevision: t("sync.lastRevision"),
+              never: t("sync.never"),
+              hostedCaption: t("sync.hostedCaption"),
+              hostedAccount: t("sync.hostedAccount"),
+              hostedAccountLoading: t("sync.hostedAccountLoading"),
+              hostedAccountSignedOut: t("sync.hostedAccountSignedOut"),
+              hostedRegisterTitle: t("sync.hostedRegisterTitle"),
+              hostedLoginTitle: t("sync.hostedLoginTitle"),
+              hostedName: t("sync.hostedName"),
+              hostedNamePlaceholder: t("sync.hostedNamePlaceholder"),
+              hostedEmail: t("sync.hostedEmail"),
+              hostedEmailPlaceholder: t("sync.hostedEmailPlaceholder"),
+              hostedPassword: t("sync.hostedPassword"),
+              hostedPasswordPlaceholder: t("sync.hostedPasswordPlaceholder"),
+              hostedRegister: t("sync.hostedRegister"),
+              hostedLogin: t("sync.hostedLogin"),
+              hostedLogout: t("sync.hostedLogout"),
+              hostedRefresh: t("sync.hostedRefresh"),
+              hostedCreateVaultTitle: t("sync.hostedCreateVaultTitle"),
+              hostedCreateVault: t("sync.hostedCreateVault"),
+              hostedCreateVaultNamePlaceholder: t("sync.hostedCreateVaultNamePlaceholder"),
+              hostedCreateVaultIdPlaceholder: t("sync.hostedCreateVaultIdPlaceholder"),
+              hostedVaults: t("sync.hostedVaults"),
+              hostedNoVaults: t("sync.hostedNoVaults"),
+              hostedBind: t("sync.hostedBind"),
+              hostedBound: t("sync.hostedBound"),
+              hostedSelectedVault: t("sync.hostedSelectedVault"),
+              hostedAccountConnected: t("sync.hostedAccountConnected"),
+              hostedSyncReady: t("sync.hostedSyncReady"),
+              hostedSyncNeedsBinding: t("sync.hostedSyncNeedsBinding")
             }}
             onLanguageChange={(language) => void handleChangeLanguage(language)}
             onSelectLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
@@ -836,6 +1279,14 @@ export default function App() {
             onUrlChange={(value) => void handleChangeSelfHostedUrl(value)}
             onVaultChange={(value) => void handleChangeSelfHostedVaultId(value)}
             onTokenChange={(value) => void handleChangeSelfHostedToken(value)}
+            onHostedUrlChange={(value) => void handleChangeHostedUrl(value)}
+            onHostedRegister={(payload) => void handleHostedRegister(payload)}
+            onHostedLogin={(payload) => void handleHostedLogin(payload)}
+            onHostedLogout={() => void handleHostedLogout()}
+            onHostedRefresh={() => void handleRefreshHostedAccount()}
+            onHostedCreateVault={(payload) => void handleCreateHostedVault(payload)}
+            onHostedBindVault={(vault) => void handleBindHostedVault(vault)}
+            onRunHostedSync={() => void handleRunHostedSync()}
             onRunSync={() => void handleRunSelfHostedSync()}
           />
         }

@@ -30,7 +30,7 @@ input {
   font: inherit;
 }
 
-.admin-shell {
+.portal-shell {
   width: min(1120px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 28px 0 40px;
@@ -40,8 +40,8 @@ input {
 
 .hero,
 .panel,
-.vault-card,
-.user-card {
+.card,
+.vault-card {
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--panel);
@@ -63,16 +63,15 @@ input {
 
 .hero h1,
 .panel h2,
+.card h3,
 .vault-name {
   margin: 0;
-  font-size: 1.25rem;
 }
 
 .lede,
 .muted,
 .vault-id,
 .vault-meta,
-.token-meta,
 .stat-chip {
   color: var(--text-dim);
 }
@@ -94,7 +93,7 @@ input {
 
 .panel-head,
 .vault-head,
-.user-head {
+.card-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -149,36 +148,34 @@ input {
   color: var(--text-dim);
 }
 
-.vault-list {
-  display: grid;
-  gap: 12px;
+.auth-panel .grid.two {
+  align-items: start;
 }
 
-.vault-card,
-.user-card {
+.card,
+.vault-card {
   padding: 18px;
   display: grid;
   gap: 14px;
 }
 
-.user-list,
-.user-vault-list {
+.account-overview,
+.vault-stats,
+.token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vault-list {
   display: grid;
   gap: 12px;
 }
 
-.user-vault-create {
+.token-create {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-}
-
-.vault-stats,
-.token-list,
-.user-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .stat-chip,
@@ -188,12 +185,6 @@ input {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
   font-size: 0.78rem;
-}
-
-.token-create {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
 }
 
 .token-result {
@@ -212,23 +203,12 @@ input {
   color: var(--text-dim);
 }
 
-.empty-state.compact {
-  padding: 14px;
-  border-radius: 16px;
-}
-
-.vault-card.is-nested {
-  border-radius: 20px;
-  background: rgba(11, 14, 29, 0.56);
-  box-shadow: none;
-}
-
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 @media (max-width: 720px) {
-  .admin-shell {
+  .portal-shell {
     width: min(100vw - 20px, 1120px);
     padding-top: 18px;
   }
@@ -236,10 +216,8 @@ input {
   .hero,
   .panel-head,
   .vault-head,
-  .user-head,
   .token-create,
-  .grid.two,
-  .user-vault-create {
+  .grid.two {
     grid-template-columns: 1fr;
     display: grid;
   }

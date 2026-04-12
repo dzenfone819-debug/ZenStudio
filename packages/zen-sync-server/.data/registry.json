@@ -1,9 +1,42 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
+  "users": [
+    {
+      "id": "test1",
+      "name": "Test User 1",
+      "email": null,
+      "passwordHash": null,
+      "role": "member",
+      "createdAt": 1776004545528,
+      "updatedAt": 1776004545528,
+      "lastLoginAt": null
+    },
+    {
+      "id": "alex",
+      "name": "Alex",
+      "email": "test@gmail.com",
+      "passwordHash": "scrypt$d707734eae3c5d74af2832e53f723355$4ad6856712583f6c0fe9ce7c6e7bcb775423fd0723ac775ea62dcee879081aa254bd9fb5edc23972c68b4a7f2b28244b849195e3e185cc303cddf7fff0b0a2e5",
+      "role": "member",
+      "createdAt": 1776004657637,
+      "updatedAt": 1776004657638,
+      "lastLoginAt": 1776004657638
+    },
+    {
+      "id": "test-2",
+      "name": "Test 2",
+      "email": "test2@gmail.com",
+      "passwordHash": "scrypt$6004c9f22a601b23bc79cebecf93ac55$bca13ea0e372f9eeaa857b948f9f24cab83421b00a7a772c2c49c13792bcb82967aa875afb4e2e41539b3ed6f4dfc43c645f3c63432fcbf6893f5bc1931125e4",
+      "role": "member",
+      "createdAt": 1776005880718,
+      "updatedAt": 1776006115095,
+      "lastLoginAt": 1776006115095
+    }
+  ],
   "vaults": [
     {
       "id": "default",
       "name": "Default vault",
+      "ownerUserId": null,
       "createdAt": 1775999940827,
       "updatedAt": 1776000991575,
       "lastRevision": "rev-1776000991561-994c94e4-1d5b-4f8e-a3a2-8c78162f51a7",
@@ -12,10 +45,38 @@
     {
       "id": "work",
       "name": "Work Vault",
+      "ownerUserId": null,
       "createdAt": 1775999954820,
       "updatedAt": 1776001261304,
       "lastRevision": "rev-1776001261304-6302d067-5335-4ba3-a569-b414271f0f33",
       "lastSyncAt": 1776001261304
+    },
+    {
+      "id": "new-vault",
+      "name": "New vault",
+      "ownerUserId": "test1",
+      "createdAt": 1776004562027,
+      "updatedAt": 1776004562027,
+      "lastRevision": null,
+      "lastSyncAt": null
+    },
+    {
+      "id": "ax",
+      "name": "Alex",
+      "ownerUserId": "alex",
+      "createdAt": 1776004711558,
+      "updatedAt": 1776004711558,
+      "lastRevision": null,
+      "lastSyncAt": null
+    },
+    {
+      "id": "test2",
+      "name": "test2",
+      "ownerUserId": "test-2",
+      "createdAt": 1776005925668,
+      "updatedAt": 1776006170761,
+      "lastRevision": "rev-1776006170749-9078507c-2aef-4798-b2cc-47ae790db601",
+      "lastSyncAt": 1776006170761
     }
   ],
   "tokens": [
@@ -90,6 +151,48 @@
       "tokenHash": "1cfab5928a5b6c3ff3bc8ed7461d63ea0320b922e21eceba98d004804a457dad",
       "createdAt": 1776001208583,
       "lastUsedAt": 1776001261303
+    },
+    {
+      "id": "413cb055-ea3e-41b0-afdf-027b880e5eaa",
+      "vaultId": "test2",
+      "label": "Main vault · device-01fa02e4-6362-44c7-8345-f78d35a5b795",
+      "tokenHash": "8991bb542e7aa0a3b46dd3ade98483a850ecb6ca735b784e7223def93ea58840",
+      "createdAt": 1776005949634,
+      "lastUsedAt": 1776005997602
+    },
+    {
+      "id": "bb62d239-2315-42ea-8784-784ff555c7e2",
+      "vaultId": "test2",
+      "label": "wrerse · device-b728b428-0714-41ff-93d0-b4bf1cfaec62",
+      "tokenHash": "a880fa314590726a9adda4476dad63451f42ce8895765566b6bcc740d8ca5130",
+      "createdAt": 1776006123065,
+      "lastUsedAt": 1776006130996
+    }
+  ],
+  "sessions": [
+    {
+      "id": "9da9f997-8b63-43e6-99fe-362fc7b08145",
+      "userId": "alex",
+      "tokenHash": "12457b9b0c2a7602106e71c68d3cda3c6e04bd6406d1690d350dedf3984c2ecb",
+      "createdAt": 1776004657638,
+      "lastUsedAt": 1776004657638,
+      "expiresAt": 1778596657638
+    },
+    {
+      "id": "6422c5d5-e2d2-4c36-84e7-efbeb1571bc5",
+      "userId": "test-2",
+      "tokenHash": "6c39ed59826ee356b074f438a32c7ef749493214ade5032eb39209d43dd0219b",
+      "createdAt": 1776005880719,
+      "lastUsedAt": 1776005949632,
+      "expiresAt": 1778597880719
+    },
+    {
+      "id": "c50d4320-3db3-410b-9fe8-2ad80e79b10e",
+      "userId": "test-2",
+      "tokenHash": "47c40c7a3422b94176537698f25aa2f558e13169e6b8c342b1514d6c0de5072d",
+      "createdAt": 1776006115095,
+      "lastUsedAt": 1776006185449,
+      "expiresAt": 1778598115095
     }
   ]
 }

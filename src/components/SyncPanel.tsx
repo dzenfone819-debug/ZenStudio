@@ -1,5 +1,12 @@
-import type { AppLanguage, AppSettings, SyncProvider } from "../types";
+import type {
+  AppLanguage,
+  AppSettings,
+  HostedAccountUser,
+  HostedAccountVault,
+  SyncProvider
+} from "../types";
 import LocalVaultPanel from "./LocalVaultPanel";
+import HostedSyncPanel from "./HostedSyncPanel";
 import type { LocalVaultProfile } from "../lib/localVaults";
 
 interface SyncPanelProps {
@@ -7,11 +14,16 @@ interface SyncPanelProps {
   online: boolean;
   localVaults: LocalVaultProfile[];
   activeLocalVaultId: string;
+  localVaultName?: string | null;
   syncFeedback?: {
     tone: "success" | "error";
     text: string;
   } | null;
   syncBusy?: boolean;
+  hostedAccountUser: HostedAccountUser | null;
+  hostedAccountVaults: HostedAccountVault[];
+  hostedAccountLoading?: boolean;
+  hostedActionBusy?: boolean;
   labels: {
     title: string;
     panelCaption: string;
@@ -33,6 +45,7 @@ interface SyncPanelProps {
     none: string;
     googleDrive: string;
     selfHosted: string;
+    hosted: string;
     ready: string;
     planned: string;
     endpoint: string;
@@ -52,6 +65,35 @@ interface SyncPanelProps {
     syncing: string;
     selfHostedOnly: string;
     lastRevision: string;
+    never: string;
+    hostedCaption: string;
+    hostedAccount: string;
+    hostedAccountLoading: string;
+    hostedAccountSignedOut: string;
+    hostedRegisterTitle: string;
+    hostedLoginTitle: string;
+    hostedName: string;
+    hostedNamePlaceholder: string;
+    hostedEmail: string;
+    hostedEmailPlaceholder: string;
+    hostedPassword: string;
+    hostedPasswordPlaceholder: string;
+    hostedRegister: string;
+    hostedLogin: string;
+    hostedLogout: string;
+    hostedRefresh: string;
+    hostedCreateVaultTitle: string;
+    hostedCreateVault: string;
+    hostedCreateVaultNamePlaceholder: string;
+    hostedCreateVaultIdPlaceholder: string;
+    hostedVaults: string;
+    hostedNoVaults: string;
+    hostedBind: string;
+    hostedBound: string;
+    hostedSelectedVault: string;
+    hostedAccountConnected: string;
+    hostedSyncReady: string;
+    hostedSyncNeedsBinding: string;
   };
   onLanguageChange: (language: AppLanguage) => void;
   onSelectLocalVault: (localVaultId: string) => void;
@@ -62,6 +104,14 @@ interface SyncPanelProps {
   onUrlChange: (value: string) => void;
   onVaultChange: (value: string) => void;
   onTokenChange: (value: string) => void;
+  onHostedUrlChange: (value: string) => void;
+  onHostedRegister: (payload: { name: string; email: string; password: string }) => void;
+  onHostedLogin: (payload: { email: string; password: string }) => void;
+  onHostedLogout: () => void;
+  onHostedRefresh: () => void;
+  onHostedCreateVault: (payload: { name: string; id?: string }) => void;
+  onHostedBindVault: (vault: HostedAccountVault) => void;
+  onRunHostedSync: () => void;
   onRunSync: () => void;
 }
 
@@ -70,8 +120,13 @@ export default function SyncPanel({
   online,
   localVaults,
   activeLocalVaultId,
+  localVaultName,
   syncFeedback,
   syncBusy = false,
+  hostedAccountUser,
+  hostedAccountVaults,
+  hostedAccountLoading = false,
+  hostedActionBusy = false,
   labels,
   onLanguageChange,
   onSelectLocalVault,
@@ -82,6 +137,14 @@ export default function SyncPanel({
   onUrlChange,
   onVaultChange,
   onTokenChange,
+  onHostedUrlChange,
+  onHostedRegister,
+  onHostedLogin,
+  onHostedLogout,
+  onHostedRefresh,
+  onHostedCreateVault,
+  onHostedBindVault,
+  onRunHostedSync,
   onRunSync
 }: SyncPanelProps) {
   return (
@@ -175,10 +238,73 @@ export default function SyncPanel({
             <strong>{labels.selfHosted}</strong>
             <span>{labels.ready}</span>
           </button>
+          <button
+            className={`provider-card ${settings.syncProvider === "hosted" ? "is-active" : ""}`}
+            onClick={() => onProviderChange("hosted")}
+          >
+            <strong>{labels.hosted}</strong>
+            <span>{labels.ready}</span>
+          </button>
         </div>
       </div>
 
-      {settings.syncProvider === "selfHosted" ? (
+      {settings.syncProvider === "hosted" ? (
+        <HostedSyncPanel
+          settings={settings}
+          localVaultName={localVaultName}
+          accountUser={hostedAccountUser}
+          accountVaults={hostedAccountVaults}
+          accountLoading={hostedAccountLoading}
+          actionBusy={hostedActionBusy}
+          syncBusy={syncBusy}
+          labels={{
+            caption: labels.hostedCaption,
+            endpoint: labels.endpoint,
+            endpointPlaceholder: labels.endpointPlaceholder,
+            never: labels.never,
+            account: labels.hostedAccount,
+            accountLoading: labels.hostedAccountLoading,
+            accountSignedOut: labels.hostedAccountSignedOut,
+            registerTitle: labels.hostedRegisterTitle,
+            loginTitle: labels.hostedLoginTitle,
+            name: labels.hostedName,
+            namePlaceholder: labels.hostedNamePlaceholder,
+            email: labels.hostedEmail,
+            emailPlaceholder: labels.hostedEmailPlaceholder,
+            password: labels.hostedPassword,
+            passwordPlaceholder: labels.hostedPasswordPlaceholder,
+            register: labels.hostedRegister,
+            login: labels.hostedLogin,
+            logout: labels.hostedLogout,
+            refresh: labels.hostedRefresh,
+            createVaultTitle: labels.hostedCreateVaultTitle,
+            createVault: labels.hostedCreateVault,
+            createVaultNamePlaceholder: labels.hostedCreateVaultNamePlaceholder,
+            createVaultIdPlaceholder: labels.hostedCreateVaultIdPlaceholder,
+            vaults: labels.hostedVaults,
+            noVaults: labels.hostedNoVaults,
+            bind: labels.hostedBind,
+            bound: labels.hostedBound,
+            selectedVault: labels.hostedSelectedVault,
+            bindingScope: labels.bindingScope,
+            accountConnected: labels.hostedAccountConnected,
+            syncNow: labels.syncNow,
+            syncing: labels.syncing,
+            syncReady: labels.hostedSyncReady,
+            syncNeedsBinding: labels.hostedSyncNeedsBinding,
+            lastRevision: labels.lastRevision,
+            lastSync: labels.lastSync
+          }}
+          onUrlChange={onHostedUrlChange}
+          onRegister={onHostedRegister}
+          onLogin={onHostedLogin}
+          onLogout={onHostedLogout}
+          onRefresh={onHostedRefresh}
+          onCreateVault={onHostedCreateVault}
+          onBindVault={onHostedBindVault}
+          onRunSync={onRunHostedSync}
+        />
+      ) : settings.syncProvider === "selfHosted" ? (
         <>
           <div className="setting-group">
             <p className="panel-caption">{labels.bindingScope}</p>
