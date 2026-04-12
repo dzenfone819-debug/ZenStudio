@@ -23,6 +23,7 @@ import {
   getUntitledCanvasTitle,
   normalizeCanvasContent
 } from "../lib/canvas";
+import { normalizeTagLookup, normalizeTagName } from "../lib/tags";
 import type {
   AppLanguage,
   AppSettings,
@@ -512,10 +513,22 @@ export async function inspectFolderRemoval(folderId: string) {
 }
 
 export async function createTag(name: string) {
+  const normalizedName = normalizeTagName(name);
+
+  if (!normalizedName) {
+    throw new Error("TAG_NAME_REQUIRED");
+  }
+
+  const existingTag = await db.tags.where("name").equalsIgnoreCase(normalizedName).first();
+
+  if (existingTag) {
+    return existingTag;
+  }
+
   const timestamp = now();
   const tag: Tag = {
     id: crypto.randomUUID(),
-    name,
+    name: normalizedName,
     color: "",
     createdAt: timestamp,
     updatedAt: timestamp
@@ -526,9 +539,63 @@ export async function createTag(name: string) {
 }
 
 export async function renameTag(tagId: string, name: string) {
-  await db.tags.update(tagId, {
-    name,
-    updatedAt: now()
+  const normalizedName = normalizeTagName(name);
+
+  if (!normalizedName) {
+    throw new Error("TAG_NAME_REQUIRED");
+  }
+
+  await db.transaction("rw", db.tags, db.notes, async () => {
+    const existingTag = await db.tags.get(tagId);
+
+    if (!existingTag) {
+      return;
+    }
+
+    const duplicateTag = await db.tags.where("name").equalsIgnoreCase(normalizedName).first();
+
+    if (duplicateTag && duplicateTag.id !== tagId) {
+      const impactedNotes = await db.notes.where("tagIds").equals(tagId).toArray();
+
+      await Promise.all(
+        impactedNotes.map((note) => {
+          const nextTagIds = Array.from(
+            new Set(
+              note.tagIds.map((currentTagId) =>
+                currentTagId === tagId ? duplicateTag.id : currentTagId
+              )
+            )
+          );
+
+          return db.notes.update(note.id, {
+            tagIds: nextTagIds,
+            updatedAt: now(),
+            syncState: nextSyncState(note.syncState)
+          });
+        })
+      );
+
+      await db.tags.update(duplicateTag.id, {
+        updatedAt: now()
+      });
+      await db.tags.delete(tagId);
+      return;
+    }
+
+    if (normalizeTagLookup(existingTag.name) === normalizeTagLookup(normalizedName)) {
+      if (existingTag.name !== normalizedName) {
+        await db.tags.update(tagId, {
+          name: normalizedName,
+          updatedAt: now()
+        });
+      }
+      return;
+    }
+
+    await db.tags.update(tagId, {
+      name: normalizedName,
+      updatedAt: now()
+    });
   });
 }
 

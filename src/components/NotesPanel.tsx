@@ -50,9 +50,7 @@ export default function NotesPanel({
   const title =
     selectedFolderName ?? selectedTagName ?? (viewMode === "favorites"
       ? labels.favorites
-      : viewMode === "archived"
-        ? labels.archived
-        : viewMode === "trash"
+      : viewMode === "trash"
           ? labels.trash
           : labels.allNotes);
   const description = selectedFolderName
@@ -118,7 +116,6 @@ export default function NotesPanel({
                 <div className="note-card-flags">
                   {note.favorite ? <span className="note-card-pin favorite">{t("note.favorite")}</span> : null}
                   {note.pinned ? <span className="note-card-pin">{t("note.pin")}</span> : null}
-                  {note.archived ? <span className="note-card-pin muted">{t("note.archive")}</span> : null}
                   {note.trashedAt ? <span className="note-card-pin danger">{t("filters.viewTrash")}</span> : null}
                 </div>
               </div>

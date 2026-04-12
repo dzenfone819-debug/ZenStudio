@@ -4,10 +4,10 @@ import { en, ru } from "@blocknote/core/locales";
 import { useCreateBlockNote } from "@blocknote/react";
 import { useTranslation } from "react-i18next";
 
+import "./EditorPane.css";
+import TagInputField from "./TagInputField";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import {
-  buildFolderPathMap,
-  countBlocks,
   flattenFolderOptions,
   formatTimestamp,
   normalizeNoteContent
@@ -23,15 +23,16 @@ interface EditorPaneProps {
   onTitleChange: (title: string) => void;
   onFolderChange: (folderId: string | null) => void;
   onNoteColorChange: (color: string) => void;
-  onToggleTag: (tagId: string) => void;
+  onTagIdsChange: (tagIds: string[]) => Promise<void> | void;
+  onCreateTag: (name: string) => Promise<Tag>;
   onDelete: () => void;
   onRestore: () => void;
   onTogglePin: () => void;
   onToggleFavorite: () => void;
-  onToggleArchive: () => void;
   onContentChange: (content: NoteContent, state: SaveState) => void;
   onUploadFile: (file: File) => Promise<string>;
   onResolveFileUrl: (url: string) => Promise<string>;
+  immersive?: boolean;
 }
 
 export default function EditorPane({
@@ -43,19 +44,19 @@ export default function EditorPane({
   onTitleChange,
   onFolderChange,
   onNoteColorChange,
-  onToggleTag,
+  onTagIdsChange,
+  onCreateTag,
   onDelete,
   onRestore,
   onTogglePin,
   onToggleFavorite,
-  onToggleArchive,
   onContentChange,
   onUploadFile,
-  onResolveFileUrl
+  onResolveFileUrl,
+  immersive = false
 }: EditorPaneProps) {
   const { t } = useTranslation();
   const [titleDraft, setTitleDraft] = useState(note.title);
-  const [activeSurface, setActiveSurface] = useState<"write" | "info">("write");
   const titleTimeoutRef = useRef<number | null>(null);
   const contentTimeoutRef = useRef<number | null>(null);
   const latestTitleDraftRef = useRef(titleDraft);
@@ -67,30 +68,11 @@ export default function EditorPane({
     () => flattenFolderOptions(folders.filter((folder) => folder.projectId === note.projectId)),
     [folders, note.projectId]
   );
-  const folderPathMap = useMemo(
-    () => buildFolderPathMap(folders.filter((folder) => folder.projectId === note.projectId)),
-    [folders, note.projectId]
-  );
-  const selectedTags = tags.filter((tag) => note.tagIds.includes(tag.id));
   const normalizedContent = useMemo(() => normalizeNoteContent(note.content), [note.content]);
-  const attachmentCount = normalizedContent.filter((block) =>
-    ["image", "file", "audio", "video"].includes(block.type ?? "")
-  ).length;
-  const selectedFolderLabel =
-    folderOptions.find((folder) => folder.id === note.folderId)?.name ?? t("orbit.uncategorized");
-  const selectedFolderPath = note.folderId
-    ? folderPathMap.get(note.folderId) ?? selectedFolderLabel
-    : t("orbit.uncategorized");
-  const visibleHeaderTags = selectedTags.slice(0, 4);
-  const hiddenHeaderTagsCount = Math.max(0, selectedTags.length - visibleHeaderTags.length);
 
   useEffect(() => {
     setTitleDraft(note.title);
   }, [note.id, note.title]);
-
-  useEffect(() => {
-    setActiveSurface("write");
-  }, [note.id]);
 
   const editorDictionary = language === "ru" ? ru : en;
 
@@ -193,68 +175,29 @@ export default function EditorPane({
   }, [t]);
 
   return (
-    <section className="panel editor-panel editor-composer">
-      <div
-        className="editor-surface-switcher editor-surface-switcher-quiet"
-        role="tablist"
-        aria-label={t("note.surfaceLabel")}
-      >
-        <button
-          type="button"
-          className={`editor-surface-tab ${activeSurface === "write" ? "is-active" : ""}`}
-          onClick={() => setActiveSurface("write")}
-        >
-          {t("note.writeTab")}
-        </button>
-        <button
-          type="button"
-          className={`editor-surface-tab ${activeSurface === "info" ? "is-active" : ""}`}
-          onClick={() => setActiveSurface("info")}
-        >
-          {t("note.infoTab")}
-        </button>
+    <section className={`editor-pane ${immersive ? "is-immersive" : ""}`}>
+      <div className="editor-pane-toolbar">
+        <div className="editor-pane-toolbar-main">
+          <input
+            value={titleDraft}
+            onChange={(event) => handleTitleChange(event.target.value)}
+            className="note-title-input editor-pane-title-field"
+            placeholder={t("note.titlePlaceholder")}
+          />
+
+          <div className="editor-pane-toolbar-meta">
+            <span className={`editor-pane-save-pill is-${saveState}`}>{t(`saveState.${saveState}`)}</span>
+            <span className="editor-pane-contextmeta">
+              {t("note.updated")}: {formatTimestamp(note.updatedAt, language)}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="editor-composer-shell">
-        <div className={`editor-primary-stage ${activeSurface === "info" ? "is-hidden-mobile" : ""}`}>
-          <header className="editor-focus-head">
-            <div className="editor-session-line">
-              <span className={`editor-save-pill is-${saveState}`}>{t(`saveState.${saveState}`)}</span>
-              {note.favorite ? <span className="editor-inline-state">{t("note.favoriteActive")}</span> : null}
-              {note.pinned ? <span className="editor-inline-state">{t("note.pin")}</span> : null}
-              {note.archived ? <span className="editor-inline-state">{t("note.archive")}</span> : null}
-            </div>
-
-            <input
-              value={titleDraft}
-              onChange={(event) => handleTitleChange(event.target.value)}
-              className="note-title-input editor-title-field"
-              placeholder={t("note.titlePlaceholder")}
-            />
-
-            <div className="editor-context-row">
-              <span className="editor-context-chip">{selectedFolderPath}</span>
-              <span className="editor-context-caption">
-                {t("note.updated")}: {formatTimestamp(note.updatedAt, language)}
-              </span>
-            </div>
-
-            {selectedTags.length > 0 ? (
-              <div className="editor-tag-preview-strip">
-                {visibleHeaderTags.map((tag) => (
-                  <span className="tiny-tag editor-tag-preview" key={tag.id}>
-                    {tag.name}
-                  </span>
-                ))}
-                {hiddenHeaderTagsCount > 0 ? (
-                  <span className="tiny-tag editor-tag-preview">+{hiddenHeaderTagsCount}</span>
-                ) : null}
-              </div>
-            ) : null}
-          </header>
-
-          <div className="editor-writing-stage">
-            <div className="editor-shell editor-writing-shell">
+      <div className="editor-pane-shell">
+        <div className="editor-stage-column">
+          <div className="editor-stage-frame">
+            <div className="editor-stage-shell">
               <BlockNoteView
                 editor={editor}
                 theme="dark"
@@ -272,16 +215,14 @@ export default function EditorPane({
           </div>
         </div>
 
-        <aside className={`editor-secondary-rail ${activeSurface === "write" ? "is-hidden-mobile" : ""}`}>
-          <section className="editor-detail-card editor-detail-card-organize">
-            <p className="editor-section-title">{t("note.organize")}</p>
-
-            <label className="editor-detail-field">
-              <span className="editor-detail-label">{t("note.folder")}</span>
+        <aside className="editor-sidepanel">
+          <section className="editor-pane-detail-card">
+            <label className="editor-pane-detail-field">
+              <span className="editor-pane-detail-label">{t("note.folder")}</span>
               <select
                 value={note.folderId ?? ""}
                 onChange={(event) => onFolderChange(event.target.value || null)}
-                className="meta-select editor-detail-select"
+                className="meta-select editor-pane-detail-select"
               >
                 <option value="">{t("orbit.uncategorized")}</option>
                 {folderOptions.map((folder) => (
@@ -293,9 +234,20 @@ export default function EditorPane({
               </select>
             </label>
 
-            <div className="editor-detail-field">
-              <span className="editor-detail-label">{t("note.color")}</span>
-              <div className="color-swatch-grid compact editor-color-grid">
+            <div className="editor-pane-detail-field">
+              <span className="editor-pane-detail-label">{t("note.tags")}</span>
+              <TagInputField
+                tags={tags}
+                selectedTagIds={note.tagIds}
+                language={language}
+                onChangeTagIds={onTagIdsChange}
+                onCreateTag={onCreateTag}
+              />
+            </div>
+
+            <div className="editor-pane-detail-field">
+              <span className="editor-pane-detail-label">{t("note.color")}</span>
+              <div className="color-swatch-grid compact editor-pane-color-grid">
                 {COLOR_PALETTE.map((colorOption) => (
                   <button
                     type="button"
@@ -310,7 +262,7 @@ export default function EditorPane({
                   </button>
                 ))}
               </div>
-              <label className="orbital-custom-color-picker editor-custom-color-picker">
+              <label className="orbital-custom-color-picker editor-pane-custom-color-picker">
                 <span className="orbital-color-label">{t("orbit.customColor")}</span>
                 <span className="orbital-custom-color-control">
                   <input
@@ -326,92 +278,32 @@ export default function EditorPane({
                 </span>
               </label>
             </div>
-
-            <div className="editor-detail-field">
-              <span className="editor-detail-label">{t("note.tags")}</span>
-              <div className="editor-tag-selector">
-                {tags.map((tag) => (
-                  <button
-                    type="button"
-                    key={tag.id}
-                    className={`tag-chip ${note.tagIds.includes(tag.id) ? "is-active" : ""}`}
-                    onClick={() => onToggleTag(tag.id)}
-                  >
-                    {tag.name}
-                  </button>
-                ))}
-              </div>
-            </div>
           </section>
 
-          <section className="editor-detail-card editor-detail-card-actions">
-            <p className="editor-section-title">{t("note.actions")}</p>
-
-            <div className="editor-quiet-actions">
+          <section className="editor-pane-detail-card editor-pane-detail-card-actions">
+            <div className="editor-pane-action-grid">
               <button
                 type="button"
-                className={`micro-action editor-quiet-action ${note.favorite ? "is-active" : ""}`}
+                className={`micro-action ${note.favorite ? "is-active" : ""}`}
                 onClick={onToggleFavorite}
               >
                 {note.favorite ? t("note.unfavorite") : t("note.favorite")}
               </button>
               <button
                 type="button"
-                className={`micro-action editor-quiet-action ${note.pinned ? "is-active" : ""}`}
+                className={`micro-action ${note.pinned ? "is-active" : ""}`}
                 onClick={onTogglePin}
               >
                 {note.pinned ? t("note.unpin") : t("note.pin")}
               </button>
-              <button
-                type="button"
-                className={`micro-action editor-quiet-action ${note.archived ? "is-active" : ""}`}
-                onClick={onToggleArchive}
-              >
-                {note.archived ? t("note.unarchive") : t("note.archive")}
-              </button>
               {note.trashedAt ? (
-                <button type="button" className="micro-action editor-quiet-action" onClick={onRestore}>
+                <button type="button" className="micro-action" onClick={onRestore}>
                   {t("note.restore")}
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="micro-action danger editor-quiet-action"
-                onClick={onDelete}
-              >
+              <button type="button" className="micro-action danger" onClick={onDelete}>
                 {note.trashedAt ? t("note.deletePermanently") : t("note.moveToTrash")}
               </button>
-            </div>
-          </section>
-
-          <section className="editor-detail-card editor-detail-card-secondary">
-            <p className="editor-section-title">{t("note.details")}</p>
-
-            <div className="editor-detail-list">
-              <div className="editor-detail-row">
-                <span>{t("note.saveStatus")}</span>
-                <strong>{t(`saveState.${saveState}`)}</strong>
-              </div>
-              <div className="editor-detail-row">
-                <span>{t("note.updated")}</span>
-                <strong>{formatTimestamp(note.updatedAt, language)}</strong>
-              </div>
-              <div className="editor-detail-row">
-                <span>{t("note.blocks")}</span>
-                <strong>{countBlocks(normalizedContent)}</strong>
-              </div>
-              <div className="editor-detail-row">
-                <span>{t("note.attachments")}</span>
-                <strong>{attachmentCount}</strong>
-              </div>
-              <div className="editor-detail-row">
-                <span>{t("note.tags")}</span>
-                <strong>{selectedTags.length}</strong>
-              </div>
-              <div className="editor-detail-row">
-                <span>{t("note.storage")}</span>
-                <strong>{t("note.localOnlyShort")}</strong>
-              </div>
             </div>
           </section>
         </aside>

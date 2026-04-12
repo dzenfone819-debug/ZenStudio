@@ -50,7 +50,16 @@ const ru = {
     delete: "Удалить",
     save: "Сохранить",
     cancel: "Отмена",
-    createPlaceholder: "Имя тега"
+    createPlaceholder: "Имя тега",
+    fieldPlaceholder: "Добавить теги...",
+    inputHint: "Печатай, чтобы найти или создать теги. Enter или запятая подтверждают ввод.",
+    createHint: "Нажми Enter, чтобы создать “{{name}}”.",
+    pickSuggestion: "Нажми Enter, чтобы добавить найденный тег.",
+    existing: "Есть",
+    searchPlaceholder: "Поиск тегов",
+    emptyStateTitle: "Тегов пока нет",
+    emptyStateDescription: "Создай первый тег, и он появится здесь для повторного использования.",
+    noMatches: "По текущему запросу теги не найдены."
   },
   noteList: {
     emptyTitle: "Пока нет заметок",

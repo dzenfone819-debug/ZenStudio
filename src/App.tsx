@@ -6,7 +6,6 @@ import FolderPanel from "./components/FolderPanel";
 import KnowledgeMap from "./components/KnowledgeMap";
 import NotesPanel from "./components/NotesPanel";
 import SyncPanel from "./components/SyncPanel";
-import TagPanel from "./components/TagPanel";
 import TrashPanel from "./components/TrashPanel";
 import {
   createCanvas,
@@ -55,8 +54,6 @@ import type {
 const EditorPane = lazy(() => import("./components/EditorPane"));
 const CanvasPane = lazy(() => import("./components/CanvasPane"));
 const OrbitalMapView = lazy(() => import("./components/OrbitalMapView"));
-type LibrarySection = "folders" | "tags" | "sync";
-
 function useOnlineStatus() {
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -93,7 +90,6 @@ export default function App() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [mobileSection, setMobileSection] = useState<MobileSection>("notes");
   const [viewMode, setViewMode] = useState<NoteListView>("all");
-  const [librarySection, setLibrarySection] = useState<LibrarySection>("folders");
   const [search, setSearch] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [orbitalOpen, setOrbitalOpen] = useState(false);
@@ -141,14 +137,10 @@ export default function App() {
         }
 
         if (viewMode === "favorites") {
-          return note.favorite && !note.archived;
+          return note.favorite;
         }
 
-        if (viewMode === "archived") {
-          return note.archived;
-        }
-
-        return !note.archived;
+        return true;
       })
       .filter((note) => {
         if (!folderScope) {
@@ -195,31 +187,18 @@ export default function App() {
     filteredNotes[0] ??
     null;
   const orbitalEditorEntry =
-    notes.find(
-      (note) => note.id === orbitalEditorNoteId && note.trashedAt === null && !note.archived
-    ) ?? null;
+    notes.find((note) => note.id === orbitalEditorNoteId && note.trashedAt === null) ?? null;
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
-  const totalVisibleNotes = notes.filter(
-    (note) => note.trashedAt === null && !note.archived
-  ).length;
-  const favoriteCount = notes.filter(
-    (note) => note.trashedAt === null && !note.archived && note.favorite
-  ).length;
-  const archivedCount = notes.filter(
-    (note) => note.trashedAt === null && note.archived
-  ).length;
+  const totalVisibleNotes = notes.filter((note) => note.trashedAt === null).length;
+  const favoriteCount = notes.filter((note) => note.trashedAt === null && note.favorite).length;
   const trashCount = notes.filter((note) => note.trashedAt !== null).length;
-  const pinnedCount = notes.filter(
-    (note) => note.trashedAt === null && !note.archived && note.pinned
-  ).length;
+  const pinnedCount = notes.filter((note) => note.trashedAt === null && note.pinned).length;
   const viewModeLabel =
     viewMode === "favorites"
       ? t("filters.viewFavorites")
-      : viewMode === "archived"
-        ? t("filters.viewArchived")
-        : viewMode === "trash"
+      : viewMode === "trash"
           ? t("filters.viewTrash")
           : t("filters.viewAll");
   const currentCollectionTitle =
@@ -227,9 +206,7 @@ export default function App() {
     selectedTagName ??
     (viewMode === "favorites"
       ? t("filters.viewFavorites")
-      : viewMode === "archived"
-        ? t("filters.viewArchived")
-        : viewMode === "trash"
+      : viewMode === "trash"
           ? t("filters.viewTrash")
           : t("filters.allNotes"));
   const currentCollectionDescription = selectedFolderName
@@ -238,9 +215,7 @@ export default function App() {
       ? `${t("noteList.filteredByTag")}: ${selectedTagName}`
       : viewMode === "favorites"
         ? `${favoriteCount} ${t("noteList.noteCount")}`
-        : viewMode === "archived"
-          ? `${archivedCount} ${t("noteList.noteCount")}`
-          : viewMode === "trash"
+        : viewMode === "trash"
             ? `${trashCount} ${t("noteList.noteCount")}`
             : `${totalVisibleNotes} ${t("noteList.noteCount")}`;
   const contextChips = [
@@ -328,6 +303,12 @@ export default function App() {
 
     await updateNoteMeta(noteId, {
       tagIds: nextTagIds
+    });
+  };
+
+  const handleSetTagIdsForNote = async (noteId: string, tagIds: string[]) => {
+    await updateNoteMeta(noteId, {
+      tagIds: Array.from(new Set(tagIds))
     });
   };
 
@@ -517,7 +498,10 @@ export default function App() {
                     color
                   })
                 }
-                onToggleTag={(tagId) => void handleToggleTagForNote(orbitalEditorEntry.id, tagId)}
+                onTagIdsChange={(tagIds) =>
+                  void handleSetTagIdsForNote(orbitalEditorEntry.id, tagIds)
+                }
+                onCreateTag={createTag}
                 onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
                 onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
                 onTogglePin={() =>
@@ -528,12 +512,6 @@ export default function App() {
                 onToggleFavorite={() =>
                   void updateNoteMeta(orbitalEditorEntry.id, {
                     favorite: !orbitalEditorEntry.favorite
-                  })
-                }
-                onToggleArchive={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
-                    archived: !orbitalEditorEntry.archived,
-                    trashedAt: null
                   })
                 }
                 onContentChange={(content, files, fileNames, state) => {
@@ -553,6 +531,7 @@ export default function App() {
                 tags={tags}
                 language={settings.language}
                 saveState={saveState}
+                immersive
                 onTitleChange={(title) =>
                   void updateNoteMeta(orbitalEditorEntry.id, {
                     title
@@ -568,7 +547,10 @@ export default function App() {
                     color
                   })
                 }
-                onToggleTag={(tagId) => void handleToggleTagForNote(orbitalEditorEntry.id, tagId)}
+                onTagIdsChange={(tagIds) =>
+                  void handleSetTagIdsForNote(orbitalEditorEntry.id, tagIds)
+                }
+                onCreateTag={createTag}
                 onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
                 onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
                 onTogglePin={() =>
@@ -579,12 +561,6 @@ export default function App() {
                 onToggleFavorite={() =>
                   void updateNoteMeta(orbitalEditorEntry.id, {
                     favorite: !orbitalEditorEntry.favorite
-                  })
-                }
-                onToggleArchive={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
-                    archived: !orbitalEditorEntry.archived,
-                    trashedAt: null
                   })
                 }
                 onContentChange={(content, state) =>

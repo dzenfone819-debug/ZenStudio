@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
+import "./TagPanel.css";
 import { buildTagCounts } from "../lib/notes";
-import type { Note, Tag } from "../types";
+import { normalizeTagName, sortTagsByName } from "../lib/tags";
+import type { AppLanguage, Note, Tag } from "../types";
 
 interface TagPanelProps {
   tags: Tag[];
@@ -22,6 +25,10 @@ interface TagPanelProps {
   onDelete: (tagId: string) => Promise<void>;
 }
 
+function detectLanguage(tags: Tag[]): AppLanguage {
+  return tags.some((tag) => /[А-Яа-яЁё]/.test(tag.name)) ? "ru" : "en";
+}
+
 export default function TagPanel({
   tags,
   notes,
@@ -32,13 +39,25 @@ export default function TagPanel({
   onRename,
   onDelete
 }: TagPanelProps) {
+  const { t } = useTranslation();
   const counts = buildTagCounts(notes, tags);
   const [draftName, setDraftName] = useState("");
+  const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const sortedTags = useMemo(() => sortTagsByName(tags, detectLanguage(tags)), [tags]);
+  const filteredTags = useMemo(() => {
+    const normalizedQuery = normalizeTagName(query).toLocaleLowerCase();
+
+    if (!normalizedQuery) {
+      return sortedTags;
+    }
+
+    return sortedTags.filter((tag) => tag.name.toLocaleLowerCase().includes(normalizedQuery));
+  }, [query, sortedTags]);
 
   const submitDraft = async () => {
-    const normalized = draftName.trim();
+    const normalized = normalizeTagName(draftName);
 
     if (!normalized) {
       return;
@@ -49,93 +68,129 @@ export default function TagPanel({
   };
 
   const submitRename = async () => {
-    if (!editingId || !editingName.trim()) {
+    const normalized = normalizeTagName(editingName);
+
+    if (!editingId || !normalized) {
       return;
     }
 
-    await onRename(editingId, editingName.trim());
+    await onRename(editingId, normalized);
     setEditingId(null);
     setEditingName("");
   };
 
   return (
-    <section className="panel sidebar-panel tags-panel">
-      <div className="panel-head tags-head">
-        <div className="tags-title">
+    <section className="panel sidebar-panel tag-manager-panel">
+      <div className="tag-manager-head">
+        <div className="tag-manager-titleblock">
           <p className="panel-kicker">{labels.title}</p>
           <h2 className="panel-title">{labels.title}</h2>
           <p className="panel-caption">
             {tags.length} · {notes.length}
           </p>
         </div>
-        <button className="toolbar-action tags-add" onClick={() => setEditingId(null)}>
-          {labels.add}
-        </button>
       </div>
 
-      <div className="tag-create-row tags-composer">
-        <input
-          value={draftName}
-          onChange={(event) => setDraftName(event.target.value)}
-          className="micro-input"
-          placeholder={labels.createPlaceholder}
-        />
-        <button className="micro-action primary" onClick={() => void submitDraft()}>
-          {labels.save}
-        </button>
-      </div>
-
-      <div className="tag-list">
-        {tags.map((tag) => (
-          <div className="tag-manage-row" key={tag.id}>
-            {editingId === tag.id ? (
-              <>
-                <input
-                  value={editingName}
-                  onChange={(event) => setEditingName(event.target.value)}
-                  className="micro-input"
-                  placeholder={labels.createPlaceholder}
-                />
-                <button className="micro-action primary" onClick={() => void submitRename()}>
-                  {labels.save}
-                </button>
-                <button
-                  className="micro-action"
-                  onClick={() => {
-                    setEditingId(null);
-                    setEditingName("");
-                  }}
-                >
-                  {labels.cancel}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className={`tag-chip ${selectedTagId === tag.id ? "is-active" : ""}`}
-                  onClick={() => onSelect(selectedTagId === tag.id ? null : tag.id)}
-                >
-                  <span>{tag.name}</span>
-                  <span>{counts.get(tag.id) ?? 0}</span>
-                </button>
-                <div className="tag-actions">
-                  <button
-                    className="micro-action"
-                    onClick={() => {
-                      setEditingId(tag.id);
-                      setEditingName(tag.name);
-                    }}
-                  >
-                    {labels.rename}
-                  </button>
-                  <button className="micro-action danger" onClick={() => void onDelete(tag.id)}>
-                    {labels.delete}
-                  </button>
-                </div>
-              </>
-            )}
+      <div className="tag-manager-toolbar">
+        <label className="tag-manager-compose">
+          <span className="tag-manager-toolbar-label">{labels.add}</span>
+          <div className="tag-manager-toolbar-row">
+            <input
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              className="micro-input tag-manager-input"
+              placeholder={labels.createPlaceholder}
+            />
+            <button className="micro-action primary" onClick={() => void submitDraft()}>
+              {labels.add}
+            </button>
           </div>
-        ))}
+        </label>
+
+        <label className="tag-manager-searchshell">
+          <span className="tag-manager-toolbar-label">{t("tags.searchPlaceholder")}</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="micro-input tag-manager-search"
+            placeholder={t("tags.searchPlaceholder")}
+          />
+        </label>
+      </div>
+
+      <div className="tag-manager-list">
+        {filteredTags.length === 0 ? (
+          <div className="tag-manager-empty">
+            <strong>{t("tags.emptyStateTitle")}</strong>
+            <p>
+              {query.trim() ? t("tags.noMatches") : t("tags.emptyStateDescription")}
+            </p>
+          </div>
+        ) : (
+          filteredTags.map((tag) => {
+            const isSelected = selectedTagId === tag.id;
+            const noteCount = counts.get(tag.id) ?? 0;
+
+            return (
+              <div
+                className={`tag-manager-row ${isSelected ? "is-selected" : ""}`}
+                key={tag.id}
+              >
+                {editingId === tag.id ? (
+                  <div className="tag-manager-editrow">
+                    <input
+                      value={editingName}
+                      onChange={(event) => setEditingName(event.target.value)}
+                      className="micro-input tag-manager-input"
+                      placeholder={labels.createPlaceholder}
+                    />
+                    <div className="tag-manager-row-actions">
+                      <button className="micro-action primary" onClick={() => void submitRename()}>
+                        {labels.save}
+                      </button>
+                      <button
+                        className="micro-action"
+                        onClick={() => {
+                          setEditingId(null);
+                          setEditingName("");
+                        }}
+                      >
+                        {labels.cancel}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      className={`tag-manager-pill ${isSelected ? "is-active" : ""}`}
+                      onClick={() => onSelect(isSelected ? null : tag.id)}
+                    >
+                      <span className="tag-manager-pill-name">{tag.name}</span>
+                      <span className="tag-manager-pill-meta">
+                        {noteCount} {t("noteList.noteCount")}
+                      </span>
+                    </button>
+
+                    <div className="tag-manager-row-actions">
+                      <button
+                        className="micro-action"
+                        onClick={() => {
+                          setEditingId(tag.id);
+                          setEditingName(tag.name);
+                        }}
+                      >
+                        {labels.rename}
+                      </button>
+                      <button className="micro-action danger" onClick={() => void onDelete(tag.id)}>
+                        {labels.delete}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </section>
   );

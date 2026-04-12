@@ -424,7 +424,7 @@ function getProjectEntityId(projectId: string) {
 
 function buildOrbitalData(projects: Project[], folders: Folder[], notes: Note[]): OrbitalData {
   const visibleNotes = notes
-    .filter((note) => note.trashedAt === null && !note.archived)
+    .filter((note) => note.trashedAt === null)
     .sort(noteSorter);
   const orderedProjects = [...projects].sort((left, right) => left.createdAt - right.createdAt);
   const rootFoldersByProject = new Map<string, FolderBranch[]>();
@@ -2345,11 +2345,6 @@ export default function OrbitalMapView({
     centerOnProject(project.id, 760);
   };
   const coreFlareRotation = (timeMs * 0.0045) % 360;
-  const coreSparkOrbit = [
-    { angle: timeMs * 0.0012, radius: 110, size: 5.2 },
-    { angle: Math.PI * 0.8 - timeMs * 0.001, radius: 134, size: 3.9 },
-    { angle: Math.PI * 1.55 + timeMs * 0.00086, radius: 150, size: 3.2 }
-  ];
   const overviewBody = (
     <>
       <div className="orbital-inspector-header orbital-inspector-header-overview">
@@ -2914,9 +2909,6 @@ export default function OrbitalMapView({
                           {selectedNode.note.pinned ? (
                             <span className="orbital-selection-badge">{t("note.pin")}</span>
                           ) : null}
-                          {selectedNode.note.archived ? (
-                            <span className="orbital-selection-badge">{t("note.archive")}</span>
-                          ) : null}
                           {selectedEntryIsCanvas && selectedCanvasMetrics && selectedCanvasMetrics.imageCount > 0 ? (
                             <span className="orbital-selection-meta-chip">
                               {selectedCanvasMetrics.imageCount} {labels.assetsStat}
@@ -3378,15 +3370,6 @@ export default function OrbitalMapView({
                         <circle r={node.radius * 1.28} className="orbital-node-aura" />
                         <circle r={node.radius} className="orbital-core-disc" />
                         <circle r={node.radius * 0.58} className="orbital-core-pulse" />
-                        {coreSparkOrbit.map((spark, index) => (
-                          <circle
-                            key={`spark-${index}`}
-                            cx={Math.cos(spark.angle) * spark.radius}
-                            cy={Math.sin(spark.angle) * spark.radius * 0.82}
-                            r={spark.size}
-                            className="orbital-core-spark"
-                          />
-                        ))}
                       </>
                     ) : null}
 
@@ -3545,7 +3528,9 @@ export default function OrbitalMapView({
         <div
           className={`orbital-modal-layer orbital-editor-modal-layer ${
             editorMode === "canvas" ? "is-canvas-mode" : ""
-          } ${isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""}`}
+          } ${editorMode === "note" ? "is-note-mode" : ""} ${
+            isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""
+          }`}
           role="dialog"
           aria-modal="true"
         >
@@ -3557,20 +3542,29 @@ export default function OrbitalMapView({
           <div
             className={`orbital-modal-window orbital-editor-modal-window ${
               editorMode === "canvas" ? "is-canvas-mode" : ""
-            } ${isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""}`}
+            } ${editorMode === "note" ? "is-note-mode" : ""} ${
+              isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""
+            }`}
           >
-            <div className={`orbital-editor-topbar ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
-              <div className={`orbital-editor-topmeta ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+            <div
+              className={`orbital-editor-topbar ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
+                editorMode === "note" ? "is-note-mode" : ""
+              }`}
+            >
+              <div
+                className={`orbital-editor-topmeta ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
+                  editorMode === "note" ? "is-note-mode" : ""
+                }`}
+              >
                 <p className="panel-kicker">
                   {editorMode === "canvas" ? labels.openCanvas : labels.openNote}
                 </p>
-                {editorMode === "canvas" ? null : (
-                  <strong className="orbital-editor-title">
-                    {editorTitle || labels.note}
-                  </strong>
-                )}
               </div>
-              <div className={`orbital-editor-topactions ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+              <div
+                className={`orbital-editor-topactions ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
+                  editorMode === "note" ? "is-note-mode" : ""
+                }`}
+              >
                 {editorMode === "canvas" ? (
                   <button
                     className="toolbar-action orbital-toolbar-action"
@@ -3584,7 +3578,11 @@ export default function OrbitalMapView({
                 </button>
               </div>
             </div>
-            <div className={`orbital-editor-scroll ${editorMode === "canvas" ? "is-canvas-mode" : ""}`}>
+            <div
+              className={`orbital-editor-scroll ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
+                editorMode === "note" ? "is-note-mode" : ""
+              }`}
+            >
               {editorSlot}
             </div>
           </div>

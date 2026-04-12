@@ -3357,6 +3357,11 @@ button {
   min-width: 0;
 }
 
+.orbital-editor-topmeta.is-note-mode {
+  gap: 0;
+  min-width: 0;
+}
+
 .orbital-editor-title {
   color: var(--text);
   font-family: "Azeret Mono", "IBM Plex Mono", monospace;
@@ -3374,6 +3379,10 @@ button {
   gap: 4px;
 }
 
+.orbital-editor-topactions.is-note-mode {
+  gap: 4px;
+}
+
 .orbital-editor-scroll {
   flex: 1;
   min-height: 0;
@@ -3383,6 +3392,12 @@ button {
 }
 
 .orbital-editor-scroll.is-canvas-mode {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.orbital-editor-scroll.is-note-mode {
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3480,6 +3495,14 @@ button {
     rgba(5, 7, 16, 0.995);
 }
 
+.orbital-modal-window.orbital-editor-modal-window.is-note-mode {
+  width: min(1320px, calc(100vw - 20px));
+  background:
+    radial-gradient(circle at top, rgba(255, 224, 138, 0.05), transparent 22%),
+    linear-gradient(180deg, rgba(10, 11, 28, 0.98), rgba(6, 8, 18, 0.995)),
+    rgba(6, 8, 18, 0.995);
+}
+
 .orbital-modal-layer.orbital-editor-modal-layer.is-canvas-fullscreen {
   padding: 0;
 }
@@ -3516,9 +3539,34 @@ button {
   backdrop-filter: blur(8px);
 }
 
+.orbital-editor-topbar.is-note-mode {
+  padding:
+    max(8px, env(safe-area-inset-top))
+    12px
+    10px;
+  justify-content: space-between;
+  gap: 8px;
+  background:
+    linear-gradient(180deg, rgba(6, 7, 18, 0.92), rgba(6, 7, 18, 0.74)),
+    rgba(6, 7, 18, 0.82);
+  border-bottom-color: rgba(147, 173, 255, 0.06);
+  backdrop-filter: blur(10px);
+}
+
 .orbital-editor-topbar.is-canvas-mode .panel-kicker {
   margin: 0;
   font-size: 0.54rem;
+  line-height: 1.1;
+  letter-spacing: 0.18em;
+  opacity: 0.84;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orbital-editor-topbar.is-note-mode .panel-kicker {
+  margin: 0;
+  font-size: 0.56rem;
   line-height: 1.1;
   letter-spacing: 0.18em;
   opacity: 0.84;
@@ -3532,6 +3580,13 @@ button {
   padding: 4px 8px;
   border-radius: 10px;
   font-size: 0.68rem;
+}
+
+.orbital-editor-topbar.is-note-mode .toolbar-action {
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 11px;
+  font-size: 0.72rem;
 }
 
 .orbital-modal-close {
@@ -3647,11 +3702,22 @@ button {
     width: min(1280px, calc(100vw - 24px));
   }
 
+  .orbital-modal-window.orbital-editor-modal-window.is-note-mode {
+    width: min(1180px, calc(100vw - 24px));
+  }
+
   .orbital-editor-topbar.is-canvas-mode {
     padding:
       max(6px, env(safe-area-inset-top))
       8px
       6px;
+  }
+
+  .orbital-editor-topbar.is-note-mode {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      12px
+      10px;
   }
 
   .orbital-modal-window {
@@ -3734,11 +3800,22 @@ button {
     width: 100vw;
   }
 
+  .orbital-modal-window.orbital-editor-modal-window.is-note-mode {
+    width: 100vw;
+  }
+
   .orbital-editor-topbar.is-canvas-mode {
     padding:
       max(6px, env(safe-area-inset-top))
       8px
       6px;
+  }
+
+  .orbital-editor-topbar.is-note-mode {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      10px
+      10px;
   }
 
   .orbital-editor-modal-window .editor-shell .bn-container,
@@ -3889,7 +3966,19 @@ button {
     gap: 6px;
   }
 
+  .orbital-editor-topbar.is-note-mode {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
   .orbital-editor-topactions.is-canvas-mode {
+    width: auto;
+    margin-left: auto;
+  }
+
+  .orbital-editor-topactions.is-note-mode {
     width: auto;
     margin-left: auto;
   }
@@ -3898,10 +3987,20 @@ button {
     flex: 0 0 auto;
   }
 
+  .orbital-editor-topactions.is-note-mode .toolbar-action {
+    flex: 0 0 auto;
+  }
+
   .orbital-editor-topbar.is-canvas-mode .toolbar-action {
     min-height: 25px;
     padding: 4px 7px;
     font-size: 0.66rem;
+  }
+
+  .orbital-editor-topbar.is-note-mode .toolbar-action {
+    min-height: 26px;
+    padding: 4px 8px;
+    font-size: 0.68rem;
   }
 
   .editor-quiet-actions {

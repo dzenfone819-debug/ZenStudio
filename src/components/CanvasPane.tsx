@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 
 import "@excalidraw/excalidraw/index.css";
 import "./CanvasPane.css";
+import TagInputField from "./TagInputField";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import { flattenFolderOptions, formatTimestamp } from "../lib/notes";
 import type {
@@ -31,12 +32,12 @@ interface CanvasPaneProps {
   onTitleChange: (title: string) => void;
   onFolderChange: (folderId: string | null) => void;
   onNoteColorChange: (color: string) => void;
-  onToggleTag: (tagId: string) => void;
+  onTagIdsChange: (tagIds: string[]) => Promise<void> | void;
+  onCreateTag: (name: string) => Promise<Tag>;
   onDelete: () => void;
   onRestore: () => void;
   onTogglePin: () => void;
   onToggleFavorite: () => void;
-  onToggleArchive: () => void;
   onContentChange: (
     content: CanvasContent,
     files: BinaryFiles,
@@ -68,12 +69,12 @@ export default function CanvasPane({
   onTitleChange,
   onFolderChange,
   onNoteColorChange,
-  onToggleTag,
+  onTagIdsChange,
+  onCreateTag,
   onDelete,
   onRestore,
   onTogglePin,
   onToggleFavorite,
-  onToggleArchive,
   onContentChange,
   onLoadFiles,
   immersive = false
@@ -102,11 +103,14 @@ export default function CanvasPane({
 
   useEffect(() => {
     setActiveSurface("canvas");
-    latestSceneRef.current = note.canvasContent ?? { elements: [], appState: null };
     latestFilesRef.current = {};
     latestFileNamesRef.current = {};
     generatedFileNamesRef.current = {};
-  }, [note.canvasContent, note.id]);
+  }, [note.id]);
+
+  useEffect(() => {
+    latestSceneRef.current = note.canvasContent ?? { elements: [], appState: null };
+  }, [note.canvasContent]);
 
   useEffect(() => {
     latestTitleDraftRef.current = titleDraft;
@@ -292,18 +296,13 @@ export default function CanvasPane({
 
             <div className="canvas-detail-field">
               <span className="canvas-detail-label">{t("note.tags")}</span>
-              <div className="canvas-tag-selector">
-                {tags.map((tag) => (
-                  <button
-                    type="button"
-                    key={tag.id}
-                    className={`tag-chip ${note.tagIds.includes(tag.id) ? "is-active" : ""}`}
-                    onClick={() => onToggleTag(tag.id)}
-                  >
-                    {tag.name}
-                  </button>
-                ))}
-              </div>
+              <TagInputField
+                tags={tags}
+                selectedTagIds={note.tagIds}
+                language={language}
+                onChangeTagIds={onTagIdsChange}
+                onCreateTag={onCreateTag}
+              />
             </div>
 
             <div className="canvas-detail-field">
@@ -356,13 +355,6 @@ export default function CanvasPane({
                 onClick={onTogglePin}
               >
                 {note.pinned ? t("note.unpin") : t("note.pin")}
-              </button>
-              <button
-                type="button"
-                className={`micro-action ${note.archived ? "is-active" : ""}`}
-                onClick={onToggleArchive}
-              >
-                {note.archived ? t("note.unarchive") : t("note.archive")}
               </button>
               {note.trashedAt ? (
                 <button type="button" className="micro-action" onClick={onRestore}>

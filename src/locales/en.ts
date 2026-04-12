@@ -50,7 +50,16 @@ const en = {
     delete: "Delete",
     save: "Save",
     cancel: "Cancel",
-    createPlaceholder: "Tag name"
+    createPlaceholder: "Tag name",
+    fieldPlaceholder: "Add tags...",
+    inputHint: "Type to find or create tags. Press Enter or comma to confirm.",
+    createHint: "Press Enter to create “{{name}}”.",
+    pickSuggestion: "Press Enter to add the matching tag.",
+    existing: "Existing",
+    searchPlaceholder: "Search tags",
+    emptyStateTitle: "No tags yet",
+    emptyStateDescription: "Create the first tag and it will appear here for quick reuse.",
+    noMatches: "No tags match the current query."
   },
   noteList: {
     emptyTitle: "No notes yet",
