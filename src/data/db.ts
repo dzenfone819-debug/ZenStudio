@@ -24,6 +24,7 @@ import {
   normalizeCanvasContent
 } from "../lib/canvas";
 import { normalizeTagLookup, normalizeTagName } from "../lib/tags";
+import { buildLocalVaultDatabaseName, getStoredActiveLocalVaultId } from "../lib/localVaults";
 import type {
   AppLanguage,
   AppSettings,
@@ -34,12 +35,32 @@ import type {
   Note,
   NoteContent,
   Project,
+  SyncEntityKind,
+  SyncShadow,
+  SyncTombstone,
   SyncProvider,
   Tag
 } from "../types";
 import type { BinaryFileData, BinaryFiles } from "@excalidraw/excalidraw/types";
 
 const assetUrlCache = new Map<string, string>();
+
+function getSyncEntityKey(entityType: SyncEntityKind, entityId: string) {
+  return `${entityType}:${entityId}`;
+}
+
+async function putSyncTombstone(entityType: SyncEntityKind, entityId: string, deletedAt = now()) {
+  await db.syncTombstones.put({
+    key: getSyncEntityKey(entityType, entityId),
+    entityType,
+    entityId,
+    deletedAt
+  });
+}
+
+async function deleteSyncTombstone(entityType: SyncEntityKind, entityId: string) {
+  await db.syncTombstones.delete(getSyncEntityKey(entityType, entityId));
+}
 
 function now() {
   return Date.now();
@@ -84,9 +105,11 @@ class ZenNotesDatabase extends Dexie {
   notes!: EntityTable<Note, "id">;
   assets!: EntityTable<Asset, "id">;
   settings!: EntityTable<AppSettings, "id">;
+  syncShadows!: EntityTable<SyncShadow, "key">;
+  syncTombstones!: EntityTable<SyncTombstone, "key">;
 
-  constructor() {
-    super("zen-notes-db");
+  constructor(name: string) {
+    super(name);
 
     this.version(1).stores({
       projects: "id,updatedAt",
@@ -267,10 +290,61 @@ class ZenNotesDatabase extends Dexie {
             asset.version ??= 0;
           });
       });
+
+    this.version(8)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus,syncCursor",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.syncCursor ??= null;
+          });
+      });
+
+    this.version(9)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings: "id,syncProvider,syncStatus,syncCursor,selfHostedVaultId",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.selfHostedVaultId ??= "default";
+          });
+      });
   }
 }
 
-export const db = new ZenNotesDatabase();
+function createDatabaseForLocalVault(localVaultId: string) {
+  return new ZenNotesDatabase(buildLocalVaultDatabaseName(localVaultId));
+}
+
+export let db = createDatabaseForLocalVault(getStoredActiveLocalVaultId());
+
+export function switchActiveLocalVaultDatabase(localVaultId: string) {
+  db.close();
+  db = createDatabaseForLocalVault(localVaultId);
+}
 
 export async function ensureSeedData() {
   const existingSettings = await db.settings.get("app");
@@ -380,10 +454,12 @@ export async function ensureSeedData() {
       syncStatus: "disabled",
       syncProvider: "none",
       selfHostedUrl: "",
+      selfHostedVaultId: "default",
       selfHostedToken: "",
       conflictStrategy: "duplicate",
       encryptionEnabled: false,
       lastSyncAt: null,
+      syncCursor: null,
       localDeviceId: createDeviceId(),
       lastOpenedNoteId: note.id
     });
@@ -392,6 +468,23 @@ export async function ensureSeedData() {
 
 export async function patchSettings(patch: Partial<Omit<AppSettings, "id">>) {
   await db.settings.update("app", patch);
+}
+
+export async function resetSyncBinding() {
+  await db.transaction("rw", [db.syncShadows, db.settings, db.notes], async () => {
+    await db.syncShadows.clear();
+    await db.settings.update("app", {
+      syncCursor: null,
+      lastSyncAt: null,
+      syncStatus: "idle"
+    });
+
+    await db.notes.toCollection().modify((note) => {
+      if (note.syncState !== "conflict") {
+        note.syncState = "local";
+      }
+    });
+  });
 }
 
 export async function createProject(name: string, x: number, y: number, color?: string) {
@@ -484,8 +577,9 @@ export async function removeFolder(folderId: string) {
   const cascade = getFolderCascade(folderId, folders, notes);
   const timestamp = now();
 
-  await db.transaction("rw", db.folders, db.notes, async () => {
+  await db.transaction("rw", db.folders, db.notes, db.syncTombstones, async () => {
     await db.folders.bulkDelete(cascade.folderIds);
+    await Promise.all(cascade.folderIds.map((currentFolderId) => putSyncTombstone("folder", currentFolderId, timestamp)));
 
     await Promise.all(
       cascade.noteIds.map((noteId) =>
@@ -600,8 +694,9 @@ export async function renameTag(tagId: string, name: string) {
 }
 
 export async function removeTag(tagId: string) {
-  await db.transaction("rw", db.tags, db.notes, async () => {
+  await db.transaction("rw", db.tags, db.notes, db.syncTombstones, async () => {
     await db.tags.delete(tagId);
+    await putSyncTombstone("tag", tagId);
 
     const impactedNotes = await db.notes.where("tagIds").equals(tagId).toArray();
 
@@ -609,7 +704,8 @@ export async function removeTag(tagId: string) {
       impactedNotes.map((note) =>
         db.notes.update(note.id, {
           tagIds: note.tagIds.filter((currentTagId) => currentTagId !== tagId),
-          updatedAt: now()
+          updatedAt: now(),
+          syncState: nextSyncState(note.syncState)
         })
       )
     );
@@ -748,7 +844,7 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
   const excerpt = buildExcerpt(normalizedContent);
   const activeAssetIds = new Set(extractReferencedAssetIds(normalizedContent));
 
-  await db.transaction("rw", db.notes, db.assets, async () => {
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const staleAssets = noteAssets.filter((asset) => !activeAssetIds.has(asset.id));
 
@@ -763,6 +859,7 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
       });
 
       await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
+      await Promise.all(staleAssets.map((asset) => putSyncTombstone("asset", asset.id)));
     }
 
     await db.notes.update(noteId, {
@@ -827,7 +924,7 @@ export async function saveCanvasContent(
   const excerpt = buildCanvasExcerpt(normalizedContent);
   const activeFileIds = new Set(extractCanvasReferencedFileIds(normalizedContent));
 
-  await db.transaction("rw", db.notes, db.assets, async () => {
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const assetsById = new Map(noteAssets.map((asset) => [asset.id, asset]));
     const staleAssets = noteAssets.filter((asset) => !activeFileIds.has(asset.id));
@@ -843,6 +940,7 @@ export async function saveCanvasContent(
       });
 
       await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
+      await Promise.all(staleAssets.map((asset) => putSyncTombstone("asset", asset.id)));
     }
 
     for (const fileId of activeFileIds) {
@@ -904,8 +1002,9 @@ export async function restoreNoteFromTrash(noteId: string) {
 }
 
 export async function removeNote(noteId: string) {
-  await db.transaction("rw", db.notes, db.assets, async () => {
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
     await db.notes.delete(noteId);
+    await putSyncTombstone("note", noteId);
     const assetIds = await db.assets.where("noteId").equals(noteId).primaryKeys();
     const normalizedIds = assetIds.map((id) => String(id));
 
@@ -919,6 +1018,7 @@ export async function removeNote(noteId: string) {
     });
 
     await db.assets.bulkDelete(normalizedIds);
+    await Promise.all(normalizedIds.map((assetId) => putSyncTombstone("asset", assetId)));
   });
 }
 
@@ -957,6 +1057,14 @@ export async function storeAsset(noteId: string, file: File) {
   return `asset://${asset.id}`;
 }
 
+export function resetResolvedAssetCache() {
+  assetUrlCache.forEach((objectUrl) => {
+    URL.revokeObjectURL(objectUrl);
+  });
+
+  assetUrlCache.clear();
+}
+
 export async function resolveAssetUrl(url: string) {
   if (!url.startsWith("asset://")) {
     return url;
@@ -982,4 +1090,8 @@ export async function resolveAssetUrl(url: string) {
 
 export function isSyncProvider(value: string): value is SyncProvider {
   return value === "none" || value === "googleDrive" || value === "selfHosted";
+}
+
+export async function clearSyncTombstone(entityType: SyncEntityKind, entityId: string) {
+  await deleteSyncTombstone(entityType, entityId);
 }

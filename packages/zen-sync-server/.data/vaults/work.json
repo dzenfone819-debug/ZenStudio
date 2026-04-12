@@ -1,0 +1,126 @@
+{
+  "revision": "rev-1776001261304-6302d067-5335-4ba3-a569-b414271f0f33",
+  "snapshot": {
+    "deviceId": "device-daf72357-7a07-4aeb-bf99-60ff607e9ff6",
+    "exportedAt": 1776001261304,
+    "projects": [
+      {
+        "id": "254b8cff-5c46-4a13-a60d-99369b6d4773",
+        "name": "Проект 1",
+        "color": "#ffe08a",
+        "x": 0,
+        "y": 0,
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      }
+    ],
+    "folders": [
+      {
+        "id": "41a70241-64ab-4394-b851-72b24d363484",
+        "projectId": "254b8cff-5c46-4a13-a60d-99369b6d4773",
+        "name": "Прототипы",
+        "parentId": null,
+        "color": "#73f7ff",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      },
+      {
+        "id": "d715783d-bc68-4dbe-819a-cd6a7fdd9046",
+        "projectId": "254b8cff-5c46-4a13-a60d-99369b6d4773",
+        "name": "Исследования",
+        "parentId": null,
+        "color": "#ffa45c",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      },
+      {
+        "id": "e60dec43-4716-47a6-aad6-2e37f42eb197",
+        "projectId": "254b8cff-5c46-4a13-a60d-99369b6d4773",
+        "name": "Входящие",
+        "parentId": null,
+        "color": "#ff678c",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      }
+    ],
+    "tags": [
+      {
+        "id": "0079ec03-c8a6-4c07-9e58-e183b9e611be",
+        "name": "идея",
+        "color": "",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      },
+      {
+        "id": "2b4d8f4d-45f3-48f1-a12f-c400c8f95eb6",
+        "name": "локально",
+        "color": "",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      },
+      {
+        "id": "358e98b8-bc86-47e0-bd45-851125fa72e5",
+        "name": "дизайн",
+        "color": "",
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555
+      }
+    ],
+    "notes": [
+      {
+        "id": "0a030034-0911-4398-adeb-c9423f41da77",
+        "title": "Стартовая заметка",
+        "contentType": "note",
+        "projectId": "254b8cff-5c46-4a13-a60d-99369b6d4773",
+        "folderId": "e60dec43-4716-47a6-aad6-2e37f42eb197",
+        "color": "#73f7ff",
+        "tagIds": [
+          "0079ec03-c8a6-4c07-9e58-e183b9e611be",
+          "2b4d8f4d-45f3-48f1-a12f-c400c8f95eb6"
+        ],
+        "content": [
+          {
+            "id": "cdfb225c-13f8-49a8-bf2c-75bbb2fc67ff",
+            "type": "heading",
+            "props": {
+              "level": 2
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Полевая заметка",
+                "styles": {}
+              }
+            ],
+            "children": []
+          },
+          {
+            "id": "fad836c1-557f-4fc7-bcc2-cbce9c2e5ee3",
+            "type": "paragraph",
+            "props": {
+              "textColor": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Используйте / для вставки таблиц, изображений, файлов, списков и других блоков.",
+                "styles": {}
+              }
+            ],
+            "children": []
+          }
+        ],
+        "canvasContent": null,
+        "createdAt": 1776000906555,
+        "updatedAt": 1776000906555,
+        "pinned": true,
+        "favorite": false,
+        "archived": false,
+        "trashedAt": null,
+        "conflictOriginId": null
+      }
+    ],
+    "assets": [],
+    "tombstones": []
+  }
+}

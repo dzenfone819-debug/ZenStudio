@@ -213,6 +213,43 @@ export function extractReferencedAssetIds(blocks: NoteContent) {
   return [...assetIds];
 }
 
+export function remapReferencedAssetIds(
+  blocks: NoteContent,
+  assetIdMap: ReadonlyMap<string, string>
+): NoteContent {
+  const rewriteBlock = (block: StoredBlock): StoredBlock => {
+    const nextChildren = Array.isArray(block.children)
+      ? block.children.map((child) => rewriteBlock(child))
+      : [];
+    const nextProps = block.props ? { ...block.props } : undefined;
+    const currentUrl =
+      typeof nextProps?.url === "string"
+        ? nextProps.url
+        : typeof (block as StoredBlock & { url?: unknown }).url === "string"
+          ? ((block as StoredBlock & { url: string }).url ?? "")
+          : "";
+
+    if (currentUrl.startsWith("asset://")) {
+      const currentAssetId = currentUrl.replace("asset://", "");
+      const nextAssetId = assetIdMap.get(currentAssetId);
+
+      if (nextAssetId) {
+        if (nextProps) {
+          nextProps.url = `asset://${nextAssetId}`;
+        }
+      }
+    }
+
+    return {
+      ...block,
+      props: nextProps,
+      children: nextChildren
+    };
+  };
+
+  return blocks.map((block) => rewriteBlock(block));
+}
+
 export function buildFolderDepthMap(folders: Folder[]) {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
   const depthMap = new Map<string, number>();

@@ -104,6 +104,29 @@ export function extractCanvasReferencedFileIds(content: CanvasContent | null | u
   return [...fileIds];
 }
 
+export function remapCanvasFileIds(
+  content: CanvasContent | null | undefined,
+  fileIdMap: ReadonlyMap<string, string>
+) {
+  const normalized = normalizeCanvasContent(content);
+
+  return {
+    ...normalized,
+    elements: normalized.elements.map((element) => {
+      if (typeof element.fileId !== "string" || element.fileId.length === 0) {
+        return {
+          ...element
+        };
+      }
+
+      return {
+        ...element,
+        fileId: fileIdMap.get(element.fileId) ?? element.fileId
+      };
+    })
+  };
+}
+
 export function getCanvasMetrics(
   content: CanvasContent | null | undefined,
   options?: { includePlainText?: boolean }

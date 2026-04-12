@@ -18,6 +18,7 @@ import {
   inspectFolderRemoval,
   moveNoteToTrash,
   patchSettings,
+  resetSyncBinding,
   removeFolder,
   removeNote,
   removeTag,
@@ -26,6 +27,7 @@ import {
   renameTag,
   loadCanvasFiles,
   resolveAssetUrl,
+  switchActiveLocalVaultDatabase,
   saveCanvasContent,
   saveNoteContent,
   storeAsset,
@@ -40,6 +42,17 @@ import {
   getFolderCascade,
   matchSearch
 } from "./lib/notes";
+import {
+  createLocalVaultProfile,
+  deleteLocalVaultDatabase,
+  getNextLocalVaultAfterDelete,
+  getStoredActiveLocalVaultId,
+  listLocalVaultProfiles,
+  removeLocalVaultProfile,
+  renameLocalVaultProfile,
+  setStoredActiveLocalVaultId
+} from "./lib/localVaults";
+import { runSelfHostedSync } from "./lib/sync";
 import i18n from "./i18n";
 import type {
   AppLanguage,
@@ -78,12 +91,15 @@ function useOnlineStatus() {
 export default function App() {
   const { t } = useTranslation();
   const online = useOnlineStatus();
-  const projects = useLiveQuery(() => db.projects.toArray(), [], []);
-  const folders = useLiveQuery(() => db.folders.toArray(), [], []);
-  const tags = useLiveQuery(() => db.tags.toArray(), [], []);
-  const notes = useLiveQuery(() => db.notes.toArray(), [], []);
-  const assets = useLiveQuery(() => db.assets.toArray(), [], []);
-  const settings = useLiveQuery(() => db.settings.get("app"), [], undefined);
+  const [activeLocalVaultId, setActiveLocalVaultId] = useState(() => getStoredActiveLocalVaultId());
+  const [localVaults, setLocalVaults] = useState(() => listLocalVaultProfiles());
+  const [vaultBooting, setVaultBooting] = useState(true);
+  const projects = useLiveQuery(() => db.projects.toArray(), [activeLocalVaultId], []);
+  const folders = useLiveQuery(() => db.folders.toArray(), [activeLocalVaultId], []);
+  const tags = useLiveQuery(() => db.tags.toArray(), [activeLocalVaultId], []);
+  const notes = useLiveQuery(() => db.notes.toArray(), [activeLocalVaultId], []);
+  const assets = useLiveQuery(() => db.assets.toArray(), [activeLocalVaultId], []);
+  const settings = useLiveQuery(() => db.settings.get("app"), [activeLocalVaultId], undefined);
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
@@ -94,10 +110,25 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [orbitalOpen, setOrbitalOpen] = useState(false);
   const [orbitalEditorNoteId, setOrbitalEditorNoteId] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
-    void ensureSeedData();
-  }, []);
+    let cancelled = false;
+    setVaultBooting(true);
+
+    void ensureSeedData().finally(() => {
+      if (!cancelled) {
+        setVaultBooting(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLocalVaultId]);
 
   useEffect(() => {
     if (!settings) {
@@ -188,6 +219,8 @@ export default function App() {
     null;
   const orbitalEditorEntry =
     notes.find((note) => note.id === orbitalEditorNoteId && note.trashedAt === null) ?? null;
+  const activeLocalVaultName =
+    localVaults.find((vault) => vault.id === activeLocalVaultId)?.name ?? null;
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
@@ -407,11 +440,106 @@ export default function App() {
     });
   };
 
+  const resetUiForVaultSwitch = () => {
+    setSelectedFolderId(null);
+    setSelectedTagId(null);
+    setSelectedNoteId(null);
+    setMobileSection("notes");
+    setViewMode("all");
+    setSearch("");
+    setSaveState("idle");
+    setOrbitalOpen(false);
+    setOrbitalEditorNoteId(null);
+    setSyncFeedback(null);
+  };
+
+  const activateLocalVault = (localVaultId: string) => {
+    switchActiveLocalVaultDatabase(localVaultId);
+    setStoredActiveLocalVaultId(localVaultId);
+    setActiveLocalVaultId(localVaultId);
+    setLocalVaults(listLocalVaultProfiles());
+    resetUiForVaultSwitch();
+  };
+
+  const handleCreateLocalVault = (name: string) => {
+    const createdVault = createLocalVaultProfile(name);
+    activateLocalVault(createdVault.id);
+  };
+
+  const handleRenameLocalVault = (localVaultId: string, name: string) => {
+    renameLocalVaultProfile(localVaultId, name);
+    setLocalVaults(listLocalVaultProfiles());
+  };
+
+  const handleDeleteLocalVault = async (localVaultId: string) => {
+    const targetVault = localVaults.find((vault) => vault.id === localVaultId);
+
+    if (!targetVault) {
+      return;
+    }
+
+    if (localVaults.length <= 1) {
+      setSyncFeedback({
+        tone: "error",
+        text: t("sync.localVaultCannotDeleteLast")
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      t("sync.localVaultDeleteConfirm", {
+        name: targetVault.name
+      })
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    if (localVaultId === activeLocalVaultId) {
+      const nextActiveVaultId = getNextLocalVaultAfterDelete(localVaultId);
+      switchActiveLocalVaultDatabase(nextActiveVaultId);
+      setStoredActiveLocalVaultId(nextActiveVaultId);
+      setActiveLocalVaultId(nextActiveVaultId);
+      resetUiForVaultSwitch();
+    }
+
+    removeLocalVaultProfile(localVaultId);
+    await deleteLocalVaultDatabase(localVaultId);
+    setLocalVaults(listLocalVaultProfiles());
+  };
+
   const handleChangeProvider = async (provider: SyncProvider) => {
+    setSyncFeedback(null);
+    await resetSyncBinding();
     await patchSettings({
       syncProvider: provider,
       syncEnabled: provider !== "none",
       syncStatus: provider === "none" ? "disabled" : "idle"
+    });
+  };
+
+  const handleChangeSelfHostedUrl = async (value: string) => {
+    setSyncFeedback(null);
+    await resetSyncBinding();
+    await patchSettings({
+      selfHostedUrl: value
+    });
+  };
+
+  const handleChangeSelfHostedVaultId = async (value: string) => {
+    setSyncFeedback(null);
+    await resetSyncBinding();
+    await patchSettings({
+      selfHostedVaultId: value
+    });
+  };
+
+  const handleChangeSelfHostedToken = async (value: string) => {
+    setSyncFeedback(null);
+    await resetSyncBinding();
+    await patchSettings({
+      selfHostedToken: value
     });
   };
 
@@ -445,7 +573,62 @@ export default function App() {
     setOrbitalEditorNoteId(noteId);
   };
 
-  if (!settings) {
+  const translateSyncError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "SYNC_FAILED";
+
+    switch (message) {
+      case "SELF_HOSTED_PROVIDER_REQUIRED":
+        return t("sync.selfHostedOnly");
+      case "SELF_HOSTED_URL_REQUIRED":
+        return t("sync.urlRequired");
+      case "SELF_HOSTED_TOKEN_REQUIRED":
+        return t("sync.tokenRequired");
+      case "SELF_HOSTED_VAULT_REQUIRED":
+        return t("sync.vaultRequired");
+      case "UNAUTHORIZED":
+        return t("sync.unauthorized");
+      case "VAULT_NOT_FOUND":
+        return t("sync.vaultNotFound");
+      case "SYNC_REVISION_CONFLICT":
+        return t("sync.revisionConflict");
+      case "HTTP_404":
+        return t("sync.serverNotFound");
+      default:
+        return t("sync.failedGeneric");
+    }
+  };
+
+  const handleRunSelfHostedSync = async () => {
+    if (!settings) {
+      return;
+    }
+
+    setSyncFeedback(null);
+
+    try {
+      const result = await runSelfHostedSync(settings, {
+        onStatusChange: async (status) => {
+          await patchSettings({
+            syncStatus: status
+          });
+        }
+      });
+
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.completed", {
+          count: result.stats.conflicts
+        })
+      });
+    } catch (error) {
+      setSyncFeedback({
+        tone: "error",
+        text: translateSyncError(error)
+      });
+    }
+  };
+
+  if (vaultBooting || !settings) {
     return (
       <div className="boot-screen">
         <div className="boot-card">
@@ -466,6 +649,7 @@ export default function App() {
         assets={assets}
         assetCount={assets.length}
         language={settings.language}
+        localVaultName={activeLocalVaultName ?? undefined}
         editorOpen={Boolean(orbitalEditorEntry)}
         editorTitle={
           orbitalEditorEntry?.title?.trim() ||
@@ -596,38 +780,63 @@ export default function App() {
           <SyncPanel
             settings={settings}
             online={online}
+            localVaults={localVaults}
+            activeLocalVaultId={activeLocalVaultId}
+            syncFeedback={syncFeedback}
+            syncBusy={settings.syncStatus === "syncing"}
             labels={{
               title: t("sections.sync"),
+              panelCaption: t("sync.panelCaption"),
               language: t("sync.language"),
+              localVaults: t("sync.localVaults"),
+              localVaultsCaption: t("sync.localVaultsCaption"),
+              localVaultActive: t("sync.localVaultActive"),
+              localVaultOpen: t("sync.localVaultOpen"),
+              localVaultCreate: t("sync.localVaultCreate"),
+              localVaultCreatePlaceholder: t("sync.localVaultCreatePlaceholder"),
+              localVaultRename: t("sync.localVaultRename"),
+              localVaultDelete: t("sync.localVaultDelete"),
+              localVaultSave: t("sync.localVaultSave"),
+              localVaultCancel: t("sync.localVaultCancel"),
+              localVaultEmpty: t("sync.localVaultEmpty"),
+              localVaultCannotDeleteLast: t("sync.localVaultCannotDeleteLast"),
               provider: t("sync.provider"),
               state: t("sync.state"),
               none: t("sync.none"),
               googleDrive: t("sync.googleDrive"),
               selfHosted: t("sync.selfHosted"),
+              ready: t("sync.ready"),
               planned: t("sync.planned"),
               endpoint: t("sync.endpoint"),
               endpointPlaceholder: t("sync.endpointPlaceholder"),
+              vault: t("sync.vault"),
+              vaultPlaceholder: t("sync.vaultPlaceholder"),
               token: t("sync.token"),
               tokenPlaceholder: t("sync.tokenPlaceholder"),
+              bindingScope: t("sync.bindingScope"),
               deviceId: t("sync.deviceId"),
               conflictStrategy: t("sync.conflictStrategy"),
               duplicateConflict: t("sync.duplicateConflict"),
               encryption: t("sync.encryption"),
               disabled: t("sync.disabled"),
-              lastSync: t("sync.lastSync")
+              lastSync: t("sync.lastSync"),
+              syncNow: t("sync.syncNow"),
+              syncing: t("sync.syncing"),
+              selfHostedOnly: t("sync.selfHostedOnly"),
+              lastRevision: t("sync.lastRevision")
             }}
             onLanguageChange={(language) => void handleChangeLanguage(language)}
+            onSelectLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
+            onCreateLocalVault={(name) => handleCreateLocalVault(name)}
+            onRenameLocalVault={(localVaultId, name) =>
+              handleRenameLocalVault(localVaultId, name)
+            }
+            onDeleteLocalVault={(localVaultId) => void handleDeleteLocalVault(localVaultId)}
             onProviderChange={(provider) => void handleChangeProvider(provider)}
-            onUrlChange={(value) =>
-              void patchSettings({
-                selfHostedUrl: value
-              })
-            }
-            onTokenChange={(value) =>
-              void patchSettings({
-                selfHostedToken: value
-              })
-            }
+            onUrlChange={(value) => void handleChangeSelfHostedUrl(value)}
+            onVaultChange={(value) => void handleChangeSelfHostedVaultId(value)}
+            onTokenChange={(value) => void handleChangeSelfHostedToken(value)}
+            onRunSync={() => void handleRunSelfHostedSync()}
           />
         }
         showClose={false}
@@ -726,7 +935,8 @@ export default function App() {
           tagsStat: t("stats.tags"),
           assetsStat: t("stats.assets"),
           pinnedStat: t("stats.pinned"),
-          colorsStat: t("orbit.colorsMenu")
+          colorsStat: t("orbit.colorsMenu"),
+          localVault: t("sync.localVault")
         }}
       />
     </Suspense>

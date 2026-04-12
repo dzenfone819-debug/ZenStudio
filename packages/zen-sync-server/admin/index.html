@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zen Sync Admin</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <main class="admin-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Zen Sync Server</p>
+          <h1>Vault Admin</h1>
+          <p class="lede">Create vaults, issue tokens, and keep a clean multi-vault self-hosted setup.</p>
+        </div>
+        <div class="hero-badge">Multi-vault</div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Admin Access</p>
+            <h2>Server Token</h2>
+          </div>
+          <button id="connect-admin" class="button">Connect</button>
+        </div>
+        <label class="field">
+          <span>Admin token</span>
+          <input id="admin-token" type="password" placeholder="local-admin-token" />
+        </label>
+        <p id="admin-status" class="muted">Enter the admin token and connect.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Create Vault</p>
+            <h2>New Space</h2>
+          </div>
+          <button id="create-vault" class="button accent">Create vault</button>
+        </div>
+        <div class="grid two">
+          <label class="field">
+            <span>Name</span>
+            <input id="vault-name" type="text" placeholder="Work vault" />
+          </label>
+          <label class="field">
+            <span>Custom vault ID (optional)</span>
+            <input id="vault-id" type="text" placeholder="work" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Vaults</p>
+            <h2>Registry</h2>
+          </div>
+          <button id="refresh-vaults" class="button ghost">Refresh</button>
+        </div>
+        <div id="vault-list" class="vault-list">
+          <div class="empty-state">Connect with the admin token to load vaults.</div>
+        </div>
+      </section>
+    </main>
+
+    <template id="vault-template">
+      <article class="vault-card">
+        <div class="vault-head">
+          <div>
+            <h3 class="vault-name"></h3>
+            <p class="vault-id"></p>
+          </div>
+          <div class="vault-meta"></div>
+        </div>
+        <div class="vault-stats"></div>
+        <div class="token-create">
+          <input class="token-label-input" type="text" placeholder="Token label" />
+          <button class="button issue-token-button">Issue token</button>
+        </div>
+        <div class="token-result hidden"></div>
+        <div class="token-list"></div>
+      </article>
+    </template>
+
+    <script type="module" src="/admin/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "vaults": [
+    {
+      "id": "default",
+      "name": "Default vault",
+      "createdAt": 1775999940827,
+      "updatedAt": 1776000991575,
+      "lastRevision": "rev-1776000991561-994c94e4-1d5b-4f8e-a3a2-8c78162f51a7",
+      "lastSyncAt": 1776000991574
+    },
+    {
+      "id": "work",
+      "name": "Work Vault",
+      "createdAt": 1775999954820,
+      "updatedAt": 1776001261304,
+      "lastRevision": "rev-1776001261304-6302d067-5335-4ba3-a569-b414271f0f33",
+      "lastSyncAt": 1776001261304
+    }
+  ],
+  "tokens": [
+    {
+      "id": "legacy-default",
+      "vaultId": "default",
+      "label": "Legacy default token",
+      "tokenHash": "0cd48eed49739dfdd99efaef37d251aae5a80866e5954763c6597943fff5ce9b",
+      "createdAt": 1775999940836,
+      "lastUsedAt": null
+    },
+    {
+      "id": "95ae9950-93c1-4a70-a53f-9d3bd896f2a4",
+      "vaultId": "work",
+      "label": "Laptop",
+      "tokenHash": "31c89275069ede09ad59c32fc428d365dc3c7e0cce795cb4c307d549796ef6ee",
+      "createdAt": 1775999954821,
+      "lastUsedAt": 1775999959881
+    },
+    {
+      "id": "f7f36a76-060e-4ae1-9984-146f12f6aa72",
+      "vaultId": "default",
+      "label": "DEF",
+      "tokenHash": "8a14e53bf44c1e0f7a370b9a334771a2d661c39643e181105f9613e0ffe9dbb1",
+      "createdAt": 1776000190560,
+      "lastUsedAt": null
+    },
+    {
+      "id": "4c5f539c-5106-4590-9a33-635f2e71e039",
+      "vaultId": "default",
+      "label": "Client token",
+      "tokenHash": "ca50d3a6edc3bf55a7a988525dfd4b2b6adc9362d183d5a4bb64e487fe38df9a",
+      "createdAt": 1776000205742,
+      "lastUsedAt": null
+    },
+    {
+      "id": "eb6ba639-629e-46c5-ba37-e8dc65900428",
+      "vaultId": "default",
+      "label": "Client token",
+      "tokenHash": "65189c647f485d68849784652a35f59f07351066579c4dd41638ed5bfca93cdf",
+      "createdAt": 1776000206591,
+      "lastUsedAt": null
+    },
+    {
+      "id": "8c47f355-09c2-42d4-b53b-09ddd7bc58e0",
+      "vaultId": "default",
+      "label": "Client token",
+      "tokenHash": "6c06a687a402b05a77d42f7d87c1c8ab8895cfca2252cedfb277ae1b1cd8c703",
+      "createdAt": 1776000207807,
+      "lastUsedAt": null
+    },
+    {
+      "id": "2b2198b6-3b0b-4e6b-ab9f-186d62bf6a31",
+      "vaultId": "default",
+      "label": "Client token",
+      "tokenHash": "5e72e95bd67c0a2876b4e713634f35d98bc2f65bf2fb670ec16f59111a91b500",
+      "createdAt": 1776000208474,
+      "lastUsedAt": null
+    },
+    {
+      "id": "0dc4fd0d-96b7-4532-ac30-4202a45b4658",
+      "vaultId": "default",
+      "label": "Client token",
+      "tokenHash": "7d7df1c1e5c64f75938f9b6bcbc1a777cf269658bac4b3ac73d9692383ad742e",
+      "createdAt": 1776000981917,
+      "lastUsedAt": 1776000991533
+    },
+    {
+      "id": "54e640aa-c122-4a85-82a7-8022603d27ec",
+      "vaultId": "work",
+      "label": "Client token",
+      "tokenHash": "1cfab5928a5b6c3ff3bc8ed7461d63ea0320b922e21eceba98d004804a457dad",
+      "createdAt": 1776001208583,
+      "lastUsedAt": 1776001261303
+    }
+  ]
+}

@@ -34,6 +34,7 @@ interface OrbitalMapViewProps {
   assets: Asset[];
   assetCount: number;
   language: AppLanguage;
+  localVaultName?: string;
   editorOpen: boolean;
   editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
@@ -130,6 +131,7 @@ interface OrbitalMapViewProps {
     pinnedStat: string;
     colorsStat: string;
     projectsStat: string;
+    localVault: string;
   };
 }
 
@@ -947,6 +949,7 @@ export default function OrbitalMapView({
   assets,
   assetCount,
   language,
+  localVaultName,
   editorOpen,
   editorMode = null,
   editorSlot,
@@ -2681,6 +2684,11 @@ export default function OrbitalMapView({
             <h2 className="panel-title orbital-title">{labels.subtitle}</h2>
           </div>
           <div className="orbital-title-meta orbital-topbar-meta">
+            {localVaultName ? (
+              <span className="orbital-context-pill">
+                {labels.localVault}: {localVaultName}
+              </span>
+            ) : null}
             {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
             {autoFocusEnabled ? <span className="status-chip accent">{labels.autoFocus}</span> : null}
             {effectiveFocusMode ? <span className="status-chip online">{labels.focusMode}</span> : null}
