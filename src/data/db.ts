@@ -554,6 +554,63 @@ export async function updateProjectColor(projectId: string, color: string) {
   });
 }
 
+export async function renameProject(projectId: string, name: string) {
+  await db.projects.update(projectId, {
+    name,
+    updatedAt: now()
+  });
+}
+
+export async function removeProject(projectId: string) {
+  const [folders, notes, assets] = await Promise.all([
+    db.folders.where("projectId").equals(projectId).toArray(),
+    db.notes.where("projectId").equals(projectId).toArray(),
+    db.assets.toArray()
+  ]);
+  const timestamp = now();
+  const noteIds = new Set(notes.map((note) => note.id));
+  const projectAssetIds = assets
+    .filter((asset) => noteIds.has(asset.noteId))
+    .map((asset) => asset.id);
+
+  await db.transaction("rw", [db.projects, db.folders, db.notes, db.assets, db.syncTombstones], async () => {
+    await db.projects.delete(projectId);
+    await putSyncTombstone("project", projectId, timestamp);
+
+    const folderIds = folders.map((folder) => folder.id);
+
+    if (folderIds.length > 0) {
+      await db.folders.bulkDelete(folderIds);
+      await Promise.all(
+        folderIds.map((folderId) => putSyncTombstone("folder", folderId, timestamp))
+      );
+    }
+
+    if (notes.length > 0) {
+      await db.notes.bulkDelete(notes.map((note) => note.id));
+      await Promise.all(
+        notes.map((note) => putSyncTombstone("note", note.id, timestamp))
+      );
+    }
+
+    if (projectAssetIds.length > 0) {
+      projectAssetIds.forEach((assetId) => {
+        const cachedUrl = assetUrlCache.get(assetId);
+
+        if (cachedUrl) {
+          URL.revokeObjectURL(cachedUrl);
+          assetUrlCache.delete(assetId);
+        }
+      });
+
+      await db.assets.bulkDelete(projectAssetIds);
+      await Promise.all(
+        projectAssetIds.map((assetId) => putSyncTombstone("asset", assetId, timestamp))
+      );
+    }
+  });
+}
+
 export async function createFolder(
   name: string,
   parentId: string | null,

@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type WheelEvent as ReactWheelEvent
@@ -25,6 +26,8 @@ import type { AppLanguage, Asset, Folder, Note, Project, Tag } from "../types";
 type SceneNodeKind = "core" | "folder" | "note";
 type OrbitalChild = { folder?: FolderBranch; note?: Note };
 type InspectorMenu = "overview" | "notes" | "folders" | "tags" | "files" | "pinned" | "colors";
+type InspectorHierarchyItemKind = "folder" | "note" | "canvas";
+type InspectorCompactIconKind = InspectorHierarchyItemKind | "tag" | "file" | "color";
 
 interface OrbitalMapViewProps {
   projects: Project[];
@@ -45,8 +48,10 @@ interface OrbitalMapViewProps {
   onClose: () => void;
   onCloseEditor: () => void;
   onCreateProject: (x: number, y: number) => Promise<Project>;
+  onRenameProject: (projectId: string, name: string) => Promise<void> | void;
   onUpdateProjectPosition: (projectId: string, x: number, y: number) => void;
   onUpdateProjectColor: (projectId: string, color: string) => void;
+  onDeleteProject: (projectId: string) => Promise<void> | void;
   onCreateFolder: (
     name: string,
     parentId: string | null,
@@ -54,7 +59,9 @@ interface OrbitalMapViewProps {
     projectId?: string
   ) => Promise<Folder>;
   onUpdateFolderColor: (folderId: string, color: string) => void;
+  onDeleteFolder: (folderId: string) => Promise<void> | void;
   onUpdateNoteColor: (noteId: string, color: string) => void;
+  onDeleteNote: (noteId: string) => Promise<void> | void;
   onCreateNote: (folderId: string | null, projectId?: string) => Promise<Note>;
   onCreateCanvas: (folderId: string | null, projectId?: string) => Promise<Note>;
   onOpenNote: (noteId: string) => void;
@@ -123,6 +130,9 @@ interface OrbitalMapViewProps {
     noteColor: string;
     chooseColor: string;
     customColor: string;
+    deleteSystem: string;
+    deleteFolder: string;
+    moveToTrash: string;
     notesStat: string;
     elementsStat: string;
     foldersStat: string;
@@ -221,6 +231,18 @@ interface OrbitalScene {
   orbits: OrbitalSceneOrbit[];
   links: OrbitalSceneLink[];
   entityMap: Map<string, OrbitalSceneNode>;
+}
+
+interface InspectorHierarchyItem {
+  id: string;
+  entityId: string;
+  kind: InspectorHierarchyItemKind;
+  label: string;
+  color: string;
+  folder?: Folder;
+  note?: Note;
+  searchText: string;
+  children: InspectorHierarchyItem[];
 }
 
 interface OrbitalLayoutOrbit {
@@ -560,6 +582,20 @@ function collectFolderSubtreeEntityIds(folderId: string, data: OrbitalData) {
   return related;
 }
 
+function collectFolderAncestryEntityIds(folderId: string, data: OrbitalData) {
+  const chain: string[] = [];
+  let currentFolder = data.folderById.get(folderId) ?? null;
+
+  while (currentFolder) {
+    chain.unshift(`folder:${currentFolder.id}`);
+    currentFolder = currentFolder.parentId
+      ? data.folderById.get(currentFolder.parentId) ?? null
+      : null;
+  }
+
+  return chain;
+}
+
 function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalData) {
   const related = new Set<string>();
   const addProjectSystem = (projectId: string) => {
@@ -607,6 +643,74 @@ function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalDat
   return related;
 }
 
+function buildFocusedEntitySet(focusedEntityId: string, data: OrbitalData) {
+  const related = new Set<string>();
+  const projectId = getEntityProjectId(focusedEntityId, data);
+
+  if (!projectId || !data.projectById.has(projectId)) {
+    return related;
+  }
+
+  const addProjectCore = () => {
+    related.add(getProjectEntityId(projectId));
+  };
+
+  const addProjectSystem = () => {
+    addProjectCore();
+
+    (data.rootFoldersByProject.get(projectId) ?? []).forEach((branch) => {
+      related.add(`folder:${branch.folder.id}`);
+    });
+
+    (data.looseNotesByProject.get(projectId) ?? []).forEach((note) => {
+      related.add(`note:${note.id}`);
+    });
+  };
+
+  if (focusedEntityId.startsWith("project:")) {
+    addProjectSystem();
+    return related;
+  }
+
+  if (focusedEntityId.startsWith("folder:")) {
+    const folderId = focusedEntityId.slice("folder:".length);
+
+    if (!data.folderById.has(folderId)) {
+      return related;
+    }
+
+    addProjectCore();
+    collectFolderAncestryEntityIds(folderId, data).forEach((entityId) => {
+      related.add(entityId);
+    });
+    collectFolderSubtreeEntityIds(folderId, data).forEach((entityId) => {
+      related.add(entityId);
+    });
+    return related;
+  }
+
+  if (focusedEntityId.startsWith("note:")) {
+    const noteId = focusedEntityId.slice("note:".length);
+    const note = data.noteById.get(noteId);
+
+    if (!note) {
+      return related;
+    }
+
+    addProjectCore();
+
+    if (note.folderId) {
+      collectFolderAncestryEntityIds(note.folderId, data).forEach((entityId) => {
+        related.add(entityId);
+      });
+    }
+
+    related.add(`note:${note.id}`);
+  }
+
+  return related;
+}
+
 function buildOrbitalLayout(
   data: OrbitalData,
   visibleEntityIds: Set<string> | null
@@ -619,23 +723,37 @@ function buildOrbitalLayout(
     children: OrbitalChild[],
     depth: number
   ) => {
-    const scopedChildren = visibleEntityIds
-      ? children.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
-      : children;
+    const folderChildren = children.filter((child) => child.folder);
+    const noteChildren = children.filter((child) => child.note);
+    const scopedFolderChildren = visibleEntityIds
+      ? folderChildren.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
+      : folderChildren;
+    const scopedNoteChildren = visibleEntityIds
+      ? noteChildren.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
+      : noteChildren;
 
-    if (scopedChildren.length === 0) {
+    if (scopedFolderChildren.length === 0 && scopedNoteChildren.length === 0) {
       return [];
     }
 
-    const folderChildren = scopedChildren.filter((child) => child.folder);
-    const noteChildren = scopedChildren.filter((child) => child.note);
     const folderRingSpan =
       folderChildren.length > 0 ? getOrbitSlot(folderChildren.length - 1).ringIndex + 1 : 0;
     const nodes: OrbitalLayoutNode[] = [];
 
-    const renderGroup = (group: OrbitalChild[], bandOffset: number) => {
-      group.forEach((child, index) => {
+    const renderGroup = (
+      fullGroup: OrbitalChild[],
+      visibleGroup: OrbitalChild[],
+      bandOffset: number
+    ) => {
+      const indexByEntityId = new Map<string, number>();
+
+      fullGroup.forEach((child, index) => {
+        indexByEntityId.set(getChildEntityId(child), index);
+      });
+
+      visibleGroup.forEach((child) => {
         const entityId = getChildEntityId(child);
+        const index = indexByEntityId.get(entityId) ?? 0;
         const seed = hashString(entityId);
         const slot = getOrbitSlot(index);
         const mass = child.folder?.mass ?? getNoteMass(child.note!);
@@ -733,8 +851,8 @@ function buildOrbitalLayout(
       });
     };
 
-    renderGroup(folderChildren, 0);
-    renderGroup(noteChildren, folderRingSpan > 0 ? folderRingSpan + 1.2 : 1.2);
+    renderGroup(folderChildren, scopedFolderChildren, 0);
+    renderGroup(noteChildren, scopedNoteChildren, folderRingSpan > 0 ? folderRingSpan + 1.2 : 1.2);
     return nodes;
   };
 
@@ -889,6 +1007,35 @@ function materializeOrbitalScene(layout: OrbitalLayout, timeMs: number): Orbital
   };
 }
 
+function filterInspectorHierarchy(
+  items: InspectorHierarchyItem[],
+  query: string
+): InspectorHierarchyItem[] {
+  if (!query) {
+    return items;
+  }
+
+  return items.flatMap((item) => {
+    const filteredChildren = filterInspectorHierarchy(item.children, query);
+    const matchesSelf = item.searchText.includes(query);
+
+    if (!matchesSelf && filteredChildren.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        ...item,
+        children: filteredChildren
+      }
+    ];
+  });
+}
+
+function countInspectorHierarchyItems(items: InspectorHierarchyItem[]): number {
+  return items.reduce((total, item) => total + 1 + countInspectorHierarchyItems(item.children), 0);
+}
+
 function getEntityProjectId(entityId: string | null, data: OrbitalData) {
   if (!entityId) {
     return null;
@@ -960,11 +1107,15 @@ export default function OrbitalMapView({
   onClose,
   onCloseEditor,
   onCreateProject,
+  onRenameProject,
   onUpdateProjectPosition,
   onUpdateProjectColor,
+  onDeleteProject,
   onCreateFolder,
   onUpdateFolderColor,
   onUpdateNoteColor,
+  onDeleteFolder,
+  onDeleteNote,
   onCreateNote,
   onCreateCanvas,
   onOpenNote,
@@ -1000,8 +1151,11 @@ export default function OrbitalMapView({
   const [activeFolderFilters, setActiveFolderFilters] = useState<string[]>([]);
   const [activeNoteFilters, setActiveNoteFilters] = useState<string[]>([]);
   const [activeAssetFilters, setActiveAssetFilters] = useState<string[]>([]);
+  const [collapsedInspectorFolders, setCollapsedInspectorFolders] = useState<string[]>([]);
   const [inspectorMenu, setInspectorMenu] = useState<InspectorMenu>("overview");
   const [inspectorQuery, setInspectorQuery] = useState("");
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
   const [hoveredSelectionNoteId, setHoveredSelectionNoteId] = useState<string | null>(null);
   const [hoverPreviewAnchorSource, setHoverPreviewAnchorSource] =
     useState<HoverPreviewAnchorSource | null>(null);
@@ -1015,6 +1169,7 @@ export default function OrbitalMapView({
   const noteHoverPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const hoverPreviewCloseTimeoutRef = useRef<number | null>(null);
   const hoverPreviewSceneAnchorRef = useRef<SVGGElement | null>(null);
+  const inspectorPanelRef = useRef<HTMLElement | null>(null);
   const orbitInteractionTimeoutRef = useRef<number | null>(null);
   const orbitInteractionActiveRef = useRef(true);
   const dragRef = useRef<
@@ -1057,6 +1212,10 @@ export default function OrbitalMapView({
   const activeFolderFilterSet = useMemo(() => new Set(activeFolderFilters), [activeFolderFilters]);
   const activeNoteFilterSet = useMemo(() => new Set(activeNoteFilters), [activeNoteFilters]);
   const activeAssetFilterSet = useMemo(() => new Set(activeAssetFilters), [activeAssetFilters]);
+  const collapsedInspectorFolderSet = useMemo(
+    () => new Set(collapsedInspectorFolders),
+    [collapsedInspectorFolders]
+  );
   const searchableFolders = useMemo(
     () =>
       [...folders].sort((left, right) =>
@@ -1144,16 +1303,16 @@ export default function OrbitalMapView({
     related.delete(selectedEntityId);
     return related;
   }, [selectedEntityId, orbitalData]);
-  const selectedSystemEntityIds = useMemo(() => {
-    const related = new Set(selectedPrimaryEntityIds);
-
-    selectedSecondaryEntityIds.forEach((entityId) => {
-      related.add(entityId);
-    });
-
-    return related;
-  }, [selectedPrimaryEntityIds, selectedSecondaryEntityIds]);
   const effectiveFocusMode = focusModeOverride ?? isLargeVault;
+  const focusedVisibilityEntityIds = useMemo(() => {
+    const focusTargetId = selectedEntityId ?? currentProjectEntityId;
+
+    if (!focusTargetId) {
+      return null;
+    }
+
+    return buildFocusedEntitySet(focusTargetId, orbitalData);
+  }, [currentProjectEntityId, orbitalData, selectedEntityId]);
   const searchMatchedEntityIds = useMemo(() => {
     const matches = new Set<string>();
 
@@ -1348,9 +1507,9 @@ export default function OrbitalMapView({
     () =>
       buildOrbitalLayout(
         orbitalData,
-        effectiveFocusMode && !hasActiveFilter ? selectedSystemEntityIds : null
+        effectiveFocusMode && !hasActiveFilter ? focusedVisibilityEntityIds : null
       ),
-    [effectiveFocusMode, hasActiveFilter, orbitalData, selectedSystemEntityIds]
+    [effectiveFocusMode, focusedVisibilityEntityIds, hasActiveFilter, orbitalData]
   );
   const scene = useMemo(
     () => materializeOrbitalScene(sceneLayout, timeMs),
@@ -1456,7 +1615,12 @@ export default function OrbitalMapView({
   }, [editorMode, editorOpen]);
 
   useEffect(() => {
-    if (hoverPreviewAnchorSource === "inspector" && inspectorMenu !== "notes") {
+    if (
+      hoverPreviewAnchorSource === "inspector" &&
+      inspectorMenu !== "notes" &&
+      inspectorMenu !== "folders" &&
+      inspectorMenu !== "pinned"
+    ) {
       closeSelectionHoverPreview();
     }
   }, [hoverPreviewAnchorSource, inspectorMenu]);
@@ -1472,6 +1636,19 @@ export default function OrbitalMapView({
       clearHoverPreviewCloseTimeout();
     };
   }, []);
+
+  useEffect(() => {
+    setCollapsedInspectorFolders((current) =>
+      current.filter((folderId) => orbitalData.folderById.has(folderId))
+    );
+  }, [orbitalData.folderById]);
+
+  useEffect(() => {
+    if (editingProjectId && !orbitalData.projectById.has(editingProjectId)) {
+      setEditingProjectId(null);
+      setProjectNameDraft("");
+    }
+  }, [editingProjectId, orbitalData.projectById]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -1544,6 +1721,7 @@ export default function OrbitalMapView({
     []
   );
   const autoFocusEnabled = isLargeVault && focusModeOverride === null && !hasActiveFilter;
+  const isSceneFocusActive = effectiveFocusMode && !hasActiveFilter;
   const isDenseOrbitalScene = orbitalData.totalEntities > 80;
   const orbitFrameInterval = isOrbitInteractionActive
     ? isDenseOrbitalScene
@@ -2003,6 +2181,78 @@ export default function OrbitalMapView({
     );
   };
 
+  const beginProjectRename = (project: Project) => {
+    setEditingProjectId(project.id);
+    setProjectNameDraft(project.name);
+  };
+
+  const cancelProjectRename = () => {
+    setEditingProjectId(null);
+    setProjectNameDraft("");
+  };
+
+  const submitProjectRename = async () => {
+    if (!editingProjectId) {
+      return;
+    }
+
+    const project = orbitalData.projectById.get(editingProjectId);
+
+    if (!project) {
+      cancelProjectRename();
+      return;
+    }
+
+    const normalizedName = projectNameDraft.trim();
+
+    if (!normalizedName) {
+      setProjectNameDraft(project.name);
+      cancelProjectRename();
+      return;
+    }
+
+    if (normalizedName === project.name) {
+      cancelProjectRename();
+      return;
+    }
+
+    await onRenameProject(editingProjectId, normalizedName);
+    cancelProjectRename();
+  };
+
+  const toggleInspectorFolderCollapse = (folderId: string) => {
+    setCollapsedInspectorFolders((current) =>
+      current.includes(folderId)
+        ? current.filter((id) => id !== folderId)
+        : [...current, folderId]
+    );
+  };
+
+  const handleInspectorHierarchySelection = (
+    item: InspectorHierarchyItem,
+    event: ReactMouseEvent<HTMLElement>
+  ) => {
+    const isAdditiveSelection = event.metaKey || event.ctrlKey;
+
+    if (item.kind === "folder") {
+      if (isAdditiveSelection) {
+        toggleFolderFilter(item.id);
+      } else {
+        setActiveFolderFilters([item.id]);
+        setActiveNoteFilters([]);
+      }
+
+      return;
+    }
+
+    if (isAdditiveSelection) {
+      toggleNoteFilter(item.id);
+    } else {
+      setActiveNoteFilters([item.id]);
+      setActiveFolderFilters([]);
+    }
+  };
+
   const openInspectorMenu = (menu: InspectorMenu) => {
     setInspectorMenu(menu);
     setInspectorQuery("");
@@ -2107,6 +2357,46 @@ export default function OrbitalMapView({
         centerX: hoverPreviewCursor.x,
         centerY: hoverPreviewCursor.y
       };
+    const inspectorRect =
+      hoverPreviewAnchorSource === "inspector" && inspectorPanelRef.current
+        ? toHoverPreviewAnchorRect(inspectorPanelRef.current.getBoundingClientRect())
+        : null;
+
+    if (hoverPreviewAnchorSource === "inspector" && inspectorRect) {
+      const rightRoom = viewportWidth - viewportPadding - (inspectorRect.right + gap);
+      const leftRoom = inspectorRect.left - viewportPadding - gap;
+      const anchoredTop = clamp(
+        anchor.centerY - cardHeight * 0.22,
+        viewportPadding,
+        viewportHeight - cardHeight - viewportPadding
+      );
+
+      if (rightRoom >= Math.min(cardWidth, 240) || rightRoom >= leftRoom) {
+        const width = Math.min(cardWidth, Math.max(220, rightRoom));
+
+        return {
+          left: clamp(inspectorRect.right + gap, viewportPadding, viewportWidth - width - viewportPadding),
+          top: anchoredTop,
+          width,
+          height: cardHeight,
+          placement: "right" as const
+        };
+      }
+
+      if (leftRoom >= Math.min(cardWidth, 220)) {
+        return {
+          left: clamp(
+            inspectorRect.left - gap - cardWidth,
+            viewportPadding,
+            viewportWidth - cardWidth - viewportPadding
+          ),
+          top: anchoredTop,
+          width: cardWidth,
+          height: cardHeight,
+          placement: "left" as const
+        };
+      }
+    }
 
     const available = {
       right: viewportWidth - viewportPadding - (anchor.right + gap),
@@ -2186,16 +2476,65 @@ export default function OrbitalMapView({
     liveHoverPreviewAnchorRect,
     timeMs
   ]);
-  const folderMenuTree = useMemo(
-    () =>
-      currentProjectId
-        ? (orbitalData.rootFoldersByProject.get(currentProjectId) ?? []).map((branch) => ({
-            root: branch.folder,
-            children: orbitalData.foldersByParent.get(branch.folder.id) ?? []
-          }))
-        : [],
-    [currentProjectId, orbitalData.foldersByParent, orbitalData.rootFoldersByProject]
-  );
+  const inspectorHierarchyTree = useMemo(() => {
+    if (!currentProjectId) {
+      return [];
+    }
+
+    const makeNoteItem = (note: Note): InspectorHierarchyItem => ({
+      id: note.id,
+      entityId: `note:${note.id}`,
+      kind: note.contentType === "canvas" ? "canvas" : "note",
+      label:
+        note.title.trim() ||
+        (note.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled")),
+      color: note.color || DEFAULT_NOTE_COLOR,
+      note,
+      searchText: [
+        note.title,
+        note.excerpt,
+        note.plainText,
+        note.folderId ? folderPathMap.get(note.folderId) ?? "" : labels.uncategorized
+      ]
+        .join(" ")
+        .toLowerCase(),
+      children: []
+    });
+
+    const makeFolderItem = (branch: FolderBranch): InspectorHierarchyItem => {
+      const folderPath = folderPathMap.get(branch.folder.id) ?? branch.folder.name;
+
+      return {
+        id: branch.folder.id,
+        entityId: `folder:${branch.folder.id}`,
+        kind: "folder",
+        label: branch.folder.name,
+        color: branch.folder.color || DEFAULT_FOLDER_COLOR,
+        folder: branch.folder,
+        searchText: `${branch.folder.name} ${folderPath}`.toLowerCase(),
+        children: [
+          ...branch.children.map((childBranch) => makeFolderItem(childBranch)),
+          ...branch.notes.map((note) => makeNoteItem(note))
+        ]
+      };
+    };
+
+    return [
+      ...(orbitalData.rootFoldersByProject.get(currentProjectId) ?? []).map((branch) =>
+        makeFolderItem(branch)
+      ),
+      ...(orbitalData.looseNotesByProject.get(currentProjectId) ?? []).map((note) =>
+        makeNoteItem(note)
+      )
+    ];
+  }, [
+    currentProjectId,
+    folderPathMap,
+    labels.uncategorized,
+    orbitalData.looseNotesByProject,
+    orbitalData.rootFoldersByProject,
+    t
+  ]);
   const filteredNotesMenu = useMemo(
     () =>
       currentProjectNotes.filter((note) =>
@@ -2216,21 +2555,8 @@ export default function OrbitalMapView({
     [currentProjectTagCounts, normalizedInspectorQuery, tags]
   );
   const filteredFoldersMenu = useMemo(
-    () =>
-      folderMenuTree
-        .map(({ root, children }) => ({
-          root,
-          children: children.filter((folder) =>
-            (folderPathMap.get(folder.id) ?? folder.name).toLowerCase().includes(normalizedInspectorQuery)
-          )
-        }))
-        .filter(
-          ({ root, children }) =>
-            !normalizedInspectorQuery ||
-            (folderPathMap.get(root.id) ?? root.name).toLowerCase().includes(normalizedInspectorQuery) ||
-            children.length > 0
-        ),
-    [folderMenuTree, folderPathMap, normalizedInspectorQuery]
+    () => filterInspectorHierarchy(inspectorHierarchyTree, normalizedInspectorQuery),
+    [inspectorHierarchyTree, normalizedInspectorQuery]
   );
   const filteredFilesMenu = useMemo(
     () =>
@@ -2308,7 +2634,7 @@ export default function OrbitalMapView({
     inspectorMenu === "notes"
       ? filteredNotesMenu.length
       : inspectorMenu === "folders"
-        ? filteredFoldersMenu.reduce((count, { children }) => count + 1 + children.length, 0)
+        ? countInspectorHierarchyItems(filteredFoldersMenu)
         : inspectorMenu === "tags"
           ? filteredTagsMenu.length
           : inspectorMenu === "files"
@@ -2328,6 +2654,340 @@ export default function OrbitalMapView({
     { menu: "colors" as const, label: labels.colorsStat, count: colorCounts.size },
     { menu: "pinned" as const, label: labels.pinnedStat, count: pinnedCount }
   ];
+
+  function renderInspectorItemIcon(kind: InspectorCompactIconKind, color: string) {
+    const style = { "--item-color": color } as CSSProperties;
+
+    if (kind === "folder") {
+      return (
+        <span
+          className="orbital-tree-icon is-folder"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M3.5 8.4c0-1.5 1.2-2.7 2.7-2.7h3.4l1.6 1.7h6.6c1.5 0 2.7 1.2 2.7 2.7v5.7c0 1.5-1.2 2.7-2.7 2.7H6.2c-1.5 0-2.7-1.2-2.7-2.7V8.4Z" />
+            <path d="M3.9 10.1h16.2" className="orbital-tree-icon-accent" />
+          </svg>
+        </span>
+      );
+    }
+
+    if (kind === "canvas") {
+      return (
+        <span
+          className="orbital-tree-icon is-canvas"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <rect x="4.2" y="5" width="15.6" height="14" rx="3.2" />
+            <path d="M8.2 9.2h7.6M8.2 12h5.8M8.2 14.8h6.8" className="orbital-tree-icon-accent" />
+          </svg>
+        </span>
+      );
+    }
+
+    if (kind === "tag") {
+      return (
+        <span
+          className="orbital-tree-icon is-tag"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M5.3 8.8c0-1.3 1.1-2.4 2.4-2.4h5.2l5.8 5.8a1.8 1.8 0 0 1 0 2.5l-3.8 3.8a1.8 1.8 0 0 1-2.5 0L6.6 12.7V8.8Z" />
+            <circle cx="9.1" cy="9.4" r="1.15" className="orbital-tree-icon-dot" />
+          </svg>
+        </span>
+      );
+    }
+
+    if (kind === "file") {
+      return (
+        <span
+          className="orbital-tree-icon is-file"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M8 5.2h6.4l3.2 3.3v8.8c0 1.3-1.1 2.4-2.4 2.4H8c-1.3 0-2.4-1.1-2.4-2.4V7.6c0-1.3 1.1-2.4 2.4-2.4Z" />
+            <path d="M14.4 5.5v3.4h3.2" className="orbital-tree-icon-accent" />
+            <path d="M8.7 12h6.6M8.7 14.9h5.1" className="orbital-tree-icon-accent" />
+          </svg>
+        </span>
+      );
+    }
+
+    if (kind === "color") {
+      return (
+        <span
+          className="orbital-tree-icon is-color"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="12" cy="12" r="7.3" />
+            <circle cx="12" cy="12" r="3.1" className="orbital-tree-icon-corefill" />
+          </svg>
+        </span>
+      );
+    }
+
+    return (
+      <span
+        className="orbital-tree-icon is-note"
+        style={style}
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M7.1 4.5h6.7l4.1 4.1v9.3c0 1.4-1.1 2.5-2.5 2.5H7.1c-1.4 0-2.5-1.1-2.5-2.5V7c0-1.4 1.1-2.5 2.5-2.5Z" />
+          <path d="M13.8 4.7V8.8h4.1" className="orbital-tree-icon-accent" />
+          <path d="M8.2 11h7.2M8.2 14h6.1M8.2 17h4.8" className="orbital-tree-icon-accent" />
+        </svg>
+      </span>
+    );
+  }
+
+  function renderInspectorCompactRow({
+    isActive,
+    onClick,
+    title,
+    meta,
+    kindLabel,
+    count,
+    icon,
+    onDoubleClick,
+    onPointerEnter,
+    onPointerMove,
+    onPointerLeave,
+    onPointerCancel
+  }: {
+    isActive: boolean;
+    onClick: () => void;
+    title: string;
+    meta?: string | null;
+    kindLabel?: string | null;
+    count?: number;
+    icon: ReactNode;
+    onDoubleClick?: () => void;
+    onPointerEnter?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+    onPointerMove?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+    onPointerLeave?: () => void;
+    onPointerCancel?: () => void;
+  }) {
+    return (
+      <button
+        type="button"
+        className={`orbital-tree-item orbital-menu-compact-item ${isActive ? "is-active" : ""}`}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onPointerEnter={onPointerEnter}
+        onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
+        onPointerCancel={onPointerCancel}
+      >
+        {icon}
+        <span className="orbital-menu-compact-main">
+          <span className="orbital-menu-compact-copy">
+            <span className="orbital-menu-compact-title">{title}</span>
+            {meta ? <span className="orbital-menu-compact-meta">{meta}</span> : null}
+          </span>
+
+          {kindLabel || typeof count === "number" ? (
+            <span className="orbital-menu-compact-side">
+              {kindLabel ? <span className="orbital-tree-kind">{kindLabel}</span> : null}
+              {typeof count === "number" ? (
+                <span className="orbital-menu-compact-count">{count}</span>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    );
+  }
+
+  function getNoteInspectorTitle(note: Note) {
+    return (
+      note.title.trim() ||
+      (note.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled"))
+    );
+  }
+
+  function renderInspectorHierarchyNode(item: InspectorHierarchyItem, depth = 0): ReactNode {
+    const hasChildren = item.kind === "folder" && item.children.length > 0;
+    const isExpanded = hasChildren
+      ? normalizedInspectorQuery.length > 0 || !collapsedInspectorFolderSet.has(item.id)
+      : false;
+    const isActive =
+      item.kind === "folder"
+        ? activeFolderFilterSet.has(item.id)
+        : activeNoteFilterSet.has(item.id);
+    const metaLabel =
+      item.kind === "folder"
+        ? folderPathMap.get(item.id) ?? item.label
+        : item.note?.folderId
+          ? folderPathMap.get(item.note.folderId) ?? labels.uncategorized
+          : labels.uncategorized;
+
+    return (
+      <div className="orbital-tree-node" key={item.entityId}>
+        <div
+          className="orbital-tree-row"
+          style={{ "--tree-depth": depth } as CSSProperties}
+          role="treeitem"
+          aria-expanded={hasChildren ? isExpanded : undefined}
+          aria-selected={isActive}
+          aria-level={depth + 1}
+        >
+          {hasChildren ? (
+            <button
+              type="button"
+              className={`orbital-tree-toggle ${isExpanded ? "is-expanded" : ""}`}
+              aria-label={item.label}
+              aria-expanded={isExpanded}
+              disabled={normalizedInspectorQuery.length > 0}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleInspectorFolderCollapse(item.id);
+              }}
+            >
+              <span aria-hidden="true">›</span>
+            </button>
+          ) : (
+            <span className="orbital-tree-toggle-spacer" aria-hidden="true" />
+          )}
+
+          <button
+            type="button"
+            className={`orbital-tree-item ${isActive ? "is-active" : ""}`}
+            title={metaLabel}
+            onClick={(event) => handleInspectorHierarchySelection(item, event)}
+            onDoubleClick={
+              item.note
+                ? () => {
+                    closeSelectionHoverPreview();
+                    onOpenNote(item.note!.id);
+                  }
+                : undefined
+            }
+            onPointerEnter={
+              item.note
+                ? (event) => {
+                    openSelectionHoverPreview(
+                      item.note!.id,
+                      event.clientX,
+                      event.clientY,
+                      "inspector",
+                      {
+                        anchorRect: toHoverPreviewAnchorRect(
+                          event.currentTarget.getBoundingClientRect()
+                        )
+                      }
+                    );
+                  }
+                : undefined
+            }
+            onPointerMove={
+              item.note
+                ? (event) => {
+                    updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
+                      anchorRect: toHoverPreviewAnchorRect(
+                        event.currentTarget.getBoundingClientRect()
+                      )
+                    });
+                  }
+                : undefined
+            }
+            onPointerLeave={item.note ? scheduleSelectionHoverPreviewClose : undefined}
+            onPointerCancel={item.note ? scheduleSelectionHoverPreviewClose : undefined}
+          >
+            {renderInspectorItemIcon(item.kind, item.color)}
+            <span className="orbital-tree-item-main">
+              <span className="orbital-tree-label">{item.label}</span>
+              <span className="orbital-tree-kind">
+                {item.kind === "folder"
+                  ? labels.folder
+                  : item.kind === "canvas"
+                    ? labels.canvas
+                    : labels.note}
+              </span>
+            </span>
+          </button>
+        </div>
+
+        {hasChildren && isExpanded ? (
+          <div className="orbital-tree-children" role="group">
+            {item.children.map((child) => renderInspectorHierarchyNode(child, depth + 1))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderEditableProjectTitle(
+    project: Project | null | undefined,
+    fallbackTitle: string,
+    className: string
+  ) {
+    const renameLabel = t("folders.rename");
+
+    if (!project) {
+      return <h2 className={className}>{fallbackTitle}</h2>;
+    }
+
+    if (editingProjectId === project.id) {
+      return (
+        <div className="orbital-inline-title-shell is-editing">
+          <input
+            autoFocus
+            value={projectNameDraft}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setProjectNameDraft(event.target.value)}
+            onBlur={() => {
+              void submitProjectRename();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelProjectRename();
+              }
+            }}
+            className={`orbital-inline-title-input ${className}`}
+            aria-label={`${renameLabel}: ${project.name}`}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="orbital-inline-title-shell">
+        <button
+          type="button"
+          className={`orbital-inline-title-button ${className}`}
+          onClick={() => beginProjectRename(project)}
+          title={project.name}
+        >
+          {project.name}
+        </button>
+        <button
+          type="button"
+          className="orbital-inline-title-edit"
+          onClick={() => beginProjectRename(project)}
+          aria-label={`${renameLabel}: ${project.name}`}
+          title={renameLabel}
+        >
+          ✎
+        </button>
+      </div>
+    );
+  }
+
   const cycleProject = (direction: -1 | 1) => {
     if (!orbitalData.projects.length) {
       return;
@@ -2353,9 +3013,11 @@ export default function OrbitalMapView({
       <div className="orbital-inspector-header orbital-inspector-header-overview">
         <div className="orbital-inspector-heading">
           <p className="panel-kicker orbital-inspector-kicker">{labels.overview}</p>
-          <h2 className="panel-title orbital-inspector-title">
-            {currentProject?.name ?? labels.title}
-          </h2>
+          {renderEditableProjectTitle(
+            currentProject,
+            labels.title,
+            "panel-title orbital-inspector-title"
+          )}
         </div>
         <div className="orbital-inspector-header-actions">
           <span className="orbital-inline-count">
@@ -2501,155 +3163,135 @@ export default function OrbitalMapView({
           </label>
         </div>
 
-        <div className="orbital-menu-list">
+        <div
+          className={`orbital-menu-list ${inspectorMenu === "folders" ? "is-tree" : "is-compact"}`}
+          role={inspectorMenu === "folders" ? "tree" : undefined}
+        >
           {inspectorMenu === "notes"
             ? filteredNotesMenu.map((note) => (
-                <button
-                  key={note.id}
-                  className={`orbital-menu-item ${activeNoteFilterSet.has(note.id) ? "is-active" : ""}`}
-                  onClick={() => toggleNoteFilter(note.id)}
-                  onDoubleClick={() => {
-                    closeSelectionHoverPreview();
-                    onOpenNote(note.id);
-                  }}
-                  onPointerEnter={(event) => {
-                    openSelectionHoverPreview(
-                      note.id,
-                      event.clientX,
-                      event.clientY,
-                      "inspector",
-                      {
+                <div key={note.id}>
+                  {renderInspectorCompactRow({
+                    isActive: activeNoteFilterSet.has(note.id),
+                    onClick: () => toggleNoteFilter(note.id),
+                    onDoubleClick: () => {
+                      closeSelectionHoverPreview();
+                      onOpenNote(note.id);
+                    },
+                    onPointerEnter: (event) => {
+                      openSelectionHoverPreview(
+                        note.id,
+                        event.clientX,
+                        event.clientY,
+                        "inspector",
+                        {
+                          anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                        }
+                      );
+                    },
+                    onPointerMove: (event) => {
+                      updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
                         anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                      }
-                    );
-                  }}
-                  onPointerMove={(event) => {
-                    updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
-                      anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                    });
-                  }}
-                  onPointerLeave={() => {
-                    scheduleSelectionHoverPreviewClose();
-                  }}
-                  onPointerCancel={() => {
-                    scheduleSelectionHoverPreviewClose();
-                  }}
-                >
-                  <span className="orbital-menu-item-head">
-                    <span className="orbital-menu-item-title">{note.title}</span>
-                    {note.contentType === "canvas" ? (
-                      <span className="orbital-menu-item-badge">{labels.canvas}</span>
-                    ) : null}
-                  </span>
-                  <div className="orbital-menu-item-richmeta">
-                    <EntryStaticPreview
-                      note={note}
-                      emptyLabel={labels.empty}
-                      resolveFileUrl={onResolveFileUrl}
-                      compact
-                      interactive={false}
-                      className="orbital-menu-note-preview"
-                      labels={{
-                        canvas: labels.canvas,
-                        elements: labels.elementsStat,
-                        images: labels.assetsStat,
-                        emptyCanvas: labels.emptyCanvas
-                      }}
-                    />
-                  </div>
-                </button>
+                      });
+                    },
+                    onPointerLeave: scheduleSelectionHoverPreviewClose,
+                    onPointerCancel: scheduleSelectionHoverPreviewClose,
+                    title: getNoteInspectorTitle(note),
+                    kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
+                    icon: renderInspectorItemIcon(
+                      note.contentType === "canvas" ? "canvas" : "note",
+                      note.color || DEFAULT_NOTE_COLOR
+                    )
+                  })}
+                </div>
               ))
             : null}
 
           {inspectorMenu === "pinned"
             ? filteredPinnedMenu.map((note) => (
-                <button
-                  key={note.id}
-                  className={`orbital-menu-item ${activeNoteFilterSet.has(note.id) ? "is-active" : ""}`}
-                  onClick={() => toggleNoteFilter(note.id)}
-                  onDoubleClick={() => {
-                    closeSelectionHoverPreview();
-                    onOpenNote(note.id);
-                  }}
-                >
-                  <span className="orbital-menu-item-head">
-                    <span className="orbital-menu-item-title">{note.title}</span>
-                    {note.contentType === "canvas" ? (
-                      <span className="orbital-menu-item-badge">{labels.canvas}</span>
-                    ) : null}
-                  </span>
-                  <span className="orbital-menu-item-meta">{formatTimestamp(note.updatedAt, language)}</span>
-                </button>
+                <div key={note.id}>
+                  {renderInspectorCompactRow({
+                    isActive: activeNoteFilterSet.has(note.id),
+                    onClick: () => toggleNoteFilter(note.id),
+                    onDoubleClick: () => {
+                      closeSelectionHoverPreview();
+                      onOpenNote(note.id);
+                    },
+                    onPointerEnter: (event) => {
+                      openSelectionHoverPreview(
+                        note.id,
+                        event.clientX,
+                        event.clientY,
+                        "inspector",
+                        {
+                          anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                        }
+                      );
+                    },
+                    onPointerMove: (event) => {
+                      updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
+                        anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                      });
+                    },
+                    onPointerLeave: scheduleSelectionHoverPreviewClose,
+                    onPointerCancel: scheduleSelectionHoverPreviewClose,
+                    title: getNoteInspectorTitle(note),
+                    kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
+                    icon: renderInspectorItemIcon(
+                      note.contentType === "canvas" ? "canvas" : "note",
+                      note.color || DEFAULT_NOTE_COLOR
+                    )
+                  })}
+                </div>
               ))
             : null}
 
           {inspectorMenu === "tags"
             ? filteredTagsMenu.map((tag) => (
-                <button
-                  key={tag.id}
-                  className={`orbital-menu-item orbital-menu-chipitem ${activeTagFilterSet.has(tag.id) ? "is-active" : ""}`}
-                  onClick={() => toggleTagFilter(tag.id)}
-                >
-                  <span className="orbital-menu-item-title">{tag.name}</span>
-                  <span className="orbital-menu-item-meta">{currentProjectTagCounts.get(tag.id) ?? 0}</span>
-                </button>
+                <div key={tag.id}>
+                  {renderInspectorCompactRow({
+                    isActive: activeTagFilterSet.has(tag.id),
+                    onClick: () => toggleTagFilter(tag.id),
+                    title: tag.name,
+                    kindLabel: labels.tagsMenu,
+                    count: currentProjectTagCounts.get(tag.id) ?? 0,
+                    icon: renderInspectorItemIcon("tag", currentProject?.color ?? DEFAULT_PROJECT_COLOR)
+                  })}
+                </div>
               ))
             : null}
 
           {inspectorMenu === "files"
             ? filteredFilesMenu.map((asset) => (
-                <button
-                  key={asset.id}
-                  className={`orbital-menu-item ${activeAssetFilterSet.has(asset.id) ? "is-active" : ""}`}
-                  onClick={() => toggleAssetFilter(asset.id)}
-                >
-                  <span className="orbital-menu-item-title">{asset.name}</span>
-                  <span className="orbital-menu-item-meta">
-                    {orbitalData.noteById.get(asset.noteId)?.title ?? labels.empty}
-                  </span>
-                </button>
-              ))
-            : null}
-
-          {inspectorMenu === "folders"
-            ? filteredFoldersMenu.map(({ root, children }) => (
-                <div className="orbital-folder-group" key={root.id}>
-                  <button
-                    className={`orbital-menu-item ${activeFolderFilterSet.has(root.id) ? "is-active" : ""}`}
-                    onClick={() => toggleFolderFilter(root.id)}
-                  >
-                    <span className="orbital-menu-item-title">{root.name}</span>
-                    <span className="orbital-menu-item-meta">{folderPathMap.get(root.id) ?? root.name}</span>
-                  </button>
-
-                  {children.map((folder) => (
-                    <button
-                      key={folder.id}
-                      className={`orbital-menu-item orbital-menu-item-child ${activeFolderFilterSet.has(folder.id) ? "is-active" : ""}`}
-                      onClick={() => toggleFolderFilter(folder.id)}
-                    >
-                      <span className="orbital-menu-item-title">{folder.name}</span>
-                      <span className="orbital-menu-item-meta">{folderPathMap.get(folder.id) ?? folder.name}</span>
-                    </button>
-                  ))}
+                <div key={asset.id}>
+                  {renderInspectorCompactRow({
+                    isActive: activeAssetFilterSet.has(asset.id),
+                    onClick: () => toggleAssetFilter(asset.id),
+                    title: asset.name,
+                    icon: renderInspectorItemIcon(
+                      "file",
+                      orbitalData.noteById.get(asset.noteId)?.color || DEFAULT_NOTE_COLOR
+                    )
+                  })}
                 </div>
               ))
             : null}
 
+          {inspectorMenu === "folders"
+            ? filteredFoldersMenu.map((item) => renderInspectorHierarchyNode(item))
+            : null}
+
           {inspectorMenu === "colors"
             ? filteredColorsMenu.map((entry) => (
-                <button
-                  key={entry.id}
-                  className={`orbital-menu-item orbital-menu-coloritem ${activeColorFilterSet.has(entry.hex) ? "is-active" : ""}`}
-                  onClick={() => toggleColorFilter(entry.hex)}
-                  style={{ "--swatch-color": entry.hex } as CSSProperties}
-                >
-                  <span className="orbital-menu-colorhead">
-                    <span className="orbital-menu-colorchip" />
-                    <span className="orbital-menu-item-title">{entry.label}</span>
-                  </span>
-                  <span className="orbital-menu-item-meta">{entry.count}</span>
-                </button>
+                <div key={entry.id}>
+                  {renderInspectorCompactRow({
+                    isActive: activeColorFilterSet.has(entry.hex),
+                    onClick: () => toggleColorFilter(entry.hex),
+                    title: entry.label,
+                    meta: entry.hex.toUpperCase(),
+                    count: entry.count,
+                    icon: renderInspectorItemIcon("color", entry.hex)
+                  })}
+                </div>
               ))
             : null}
 
@@ -2691,7 +3333,7 @@ export default function OrbitalMapView({
             ) : null}
             {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
             {autoFocusEnabled ? <span className="status-chip accent">{labels.autoFocus}</span> : null}
-            {effectiveFocusMode ? <span className="status-chip online">{labels.focusMode}</span> : null}
+            {isSceneFocusActive ? <span className="status-chip online">{labels.focusMode}</span> : null}
           </div>
         </div>
 
@@ -2699,6 +3341,19 @@ export default function OrbitalMapView({
           <div className="orbital-toolbar-cluster">
             <button className="toolbar-action orbital-toolbar-action" onClick={() => setIsPaused((current) => !current)}>
               {isPaused ? labels.resume : labels.pause}
+            </button>
+            <button
+              className={`toolbar-action orbital-toolbar-action ${effectiveFocusMode ? "accent is-active" : ""}`}
+              onClick={() => {
+                setFocusModeOverride((current) => {
+                  const currentEffectiveMode = current ?? isLargeVault;
+                  return currentEffectiveMode ? false : true;
+                });
+              }}
+              aria-pressed={effectiveFocusMode}
+              title={effectiveFocusMode ? labels.showAll : labels.focusMode}
+            >
+              {effectiveFocusMode ? labels.showAll : labels.focusMode}
             </button>
           </div>
 
@@ -2763,7 +3418,7 @@ export default function OrbitalMapView({
       </header>
 
       <div className="orbital-layout">
-        <aside className="orbital-inspector panel">
+        <aside className="orbital-inspector panel" ref={inspectorPanelRef}>
           {!selectedNode && inspectorMenu === "overview" ? (
             overviewBody
           ) : !selectedNode ? (
@@ -2775,7 +3430,11 @@ export default function OrbitalMapView({
                   <div className="panel-head">
                     <div>
                       <p className="panel-kicker">{labels.project}</p>
-                      <h2 className="panel-title">{selectedNode.project?.name ?? labels.core}</h2>
+                      {renderEditableProjectTitle(
+                        selectedNode.project,
+                        labels.core,
+                        "panel-title orbital-core-title"
+                      )}
                     </div>
                   </div>
 
@@ -2841,6 +3500,17 @@ export default function OrbitalMapView({
                       </label>
                     </div>
                   </div>
+
+                  {selectedNode.project ? (
+                    <div className="orbital-danger-actions">
+                      <button
+                        className="toolbar-action danger"
+                        onClick={() => void onDeleteProject(selectedNode.project!.id)}
+                      >
+                        {labels.deleteSystem}
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -3025,6 +3695,25 @@ export default function OrbitalMapView({
                         </span>
                       </label>
                     </div>
+                  </div>
+
+                  <div className="orbital-danger-actions">
+                    {selectedNode.kind === "folder" && selectedNode.folder ? (
+                      <button
+                        className="toolbar-action danger"
+                        onClick={() => void onDeleteFolder(selectedNode.folder!.id)}
+                      >
+                        {labels.deleteFolder}
+                      </button>
+                    ) : null}
+                    {selectedNode.kind === "note" && selectedNode.note ? (
+                      <button
+                        className="toolbar-action danger"
+                        onClick={() => void onDeleteNote(selectedNode.note!.id)}
+                      >
+                        {labels.moveToTrash}
+                      </button>
+                    ) : null}
                   </div>
                 </>
               )}

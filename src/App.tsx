@@ -1,7 +1,8 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useTranslation } from "react-i18next";
 
+import ConfirmDialog from "./components/ConfirmDialog";
 import FolderPanel from "./components/FolderPanel";
 import KnowledgeMap from "./components/KnowledgeMap";
 import NotesPanel from "./components/NotesPanel";
@@ -19,11 +20,13 @@ import {
   moveNoteToTrash,
   patchSettings,
   resetSyncBinding,
+  removeProject,
   removeFolder,
   removeNote,
   removeTag,
   restoreNoteFromTrash,
   renameFolder,
+  renameProject,
   renameTag,
   loadCanvasFiles,
   resolveAssetUrl,
@@ -78,6 +81,15 @@ import type {
 const EditorPane = lazy(() => import("./components/EditorPane"));
 const CanvasPane = lazy(() => import("./components/CanvasPane"));
 const OrbitalMapView = lazy(() => import("./components/OrbitalMapView"));
+
+interface ConfirmDialogState {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  details?: string[];
+}
+
 function useOnlineStatus() {
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -125,10 +137,12 @@ export default function App() {
     tone: "success" | "error";
     text: string;
   } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [hostedAccountUser, setHostedAccountUser] = useState<HostedAccountUser | null>(null);
   const [hostedAccountVaults, setHostedAccountVaults] = useState<HostedAccountVault[]>([]);
   const [hostedAccountLoading, setHostedAccountLoading] = useState(false);
   const [hostedActionBusy, setHostedActionBusy] = useState(false);
+  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,13 +394,27 @@ export default function App() {
     }
 
     if (note.trashedAt) {
-      if (!window.confirm(t("note.deleteConfirm"))) {
+      const confirmed = await requestConfirmation({
+        title: t("note.delete"),
+        message: t("note.deleteConfirm"),
+        confirmLabel: t("note.deletePermanently"),
+        cancelLabel: t("dialog.cancel")
+      });
+
+      if (!confirmed) {
         return;
       }
 
       await removeNote(note.id);
     } else {
-      if (!window.confirm(t("note.moveToTrashConfirm"))) {
+      const confirmed = await requestConfirmation({
+        title: t("note.moveToTrash"),
+        message: t("note.moveToTrashConfirm"),
+        confirmLabel: t("note.moveToTrash"),
+        cancelLabel: t("dialog.cancel")
+      });
+
+      if (!confirmed) {
         return;
       }
 
@@ -428,13 +456,20 @@ export default function App() {
     const folderName = folderMap.get(folderId)?.name ?? t("folders.thisFolder");
 
     if (impact.folderCount > 1 || impact.noteCount > 0) {
-      const confirmed = window.confirm(
-        t("folders.deleteCascadeConfirm", {
+      const confirmed = await requestConfirmation({
+        title: t("folders.delete"),
+        message: t("folders.deleteCascadeConfirm", {
           name: folderName,
           folderCount: impact.folderCount,
           noteCount: impact.noteCount
-        })
-      );
+        }),
+        confirmLabel: t("folders.delete"),
+        cancelLabel: t("dialog.cancel"),
+        details: [
+          `${t("stats.folders")}: ${impact.folderCount}`,
+          `${t("stats.notes")}: ${impact.noteCount}`
+        ]
+      });
 
       if (!confirmed) {
         return;
@@ -446,6 +481,58 @@ export default function App() {
 
     if (selectedFolderId && deletedFolderIds.includes(selectedFolderId)) {
       setSelectedFolderId(null);
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    const project = projects.find((entry) => entry.id === projectId);
+
+    if (!project) {
+      return;
+    }
+
+    const deletedFolderIds = folders
+      .filter((folder) => folder.projectId === projectId)
+      .map((folder) => folder.id);
+    const deletedFolderIdSet = new Set(deletedFolderIds);
+    const deletedNotes = notes.filter((note) => note.projectId === projectId);
+    const deletedNoteIds = deletedNotes.map((note) => note.id);
+    const deletedNoteIdSet = new Set(deletedNoteIds);
+    const assetCount = assets.filter((asset) => deletedNoteIdSet.has(asset.noteId)).length;
+
+    const confirmed = await requestConfirmation({
+      title: t("project.delete"),
+      message: t("project.deleteConfirm", {
+        name: project.name,
+        folderCount: deletedFolderIds.length,
+        noteCount: deletedNoteIds.length,
+        assetCount
+      }),
+      confirmLabel: t("project.delete"),
+      cancelLabel: t("dialog.cancel"),
+      details: [
+        `${t("stats.folders")}: ${deletedFolderIds.length}`,
+        `${t("stats.notes")}: ${deletedNoteIds.length}`,
+        `${t("stats.assets")}: ${assetCount}`
+      ]
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    await removeProject(projectId);
+
+    if (selectedFolderId && deletedFolderIdSet.has(selectedFolderId)) {
+      setSelectedFolderId(null);
+    }
+
+    if (selectedNoteId && deletedNoteIdSet.has(selectedNoteId)) {
+      setSelectedNoteId(null);
+    }
+
+    if (orbitalEditorNoteId && deletedNoteIdSet.has(orbitalEditorNoteId)) {
+      setOrbitalEditorNoteId(null);
     }
   };
 
@@ -501,11 +588,14 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm(
-      t("sync.localVaultDeleteConfirm", {
+    const confirmed = await requestConfirmation({
+      title: t("sync.localVaultDelete"),
+      message: t("sync.localVaultDeleteConfirm", {
         name: targetVault.name
-      })
-    );
+      }),
+      confirmLabel: t("sync.localVaultDelete"),
+      cancelLabel: t("dialog.cancel")
+    });
 
     if (!confirmed) {
       return;
@@ -587,6 +677,33 @@ export default function App() {
     await handleSelectNote(noteId);
     setOrbitalEditorNoteId(noteId);
   };
+
+  const closeConfirmDialog = (result: boolean) => {
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmDialog(null);
+    resolve?.(result);
+  };
+
+  const requestConfirmation = (payload: ConfirmDialogState) => {
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmDialog(payload);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (confirmResolverRef.current) {
+        confirmResolverRef.current(false);
+        confirmResolverRef.current = null;
+      }
+    };
+  }, []);
 
   const clearHostedAccountState = () => {
     setHostedAccountUser(null);
@@ -1049,7 +1166,8 @@ export default function App() {
 
   return (
     <Suspense fallback={null}>
-      <OrbitalMapView
+      <>
+        <OrbitalMapView
         projects={projects}
         folders={folders}
         notes={notes}
@@ -1294,14 +1412,18 @@ export default function App() {
         onClose={() => undefined}
         onCloseEditor={() => setOrbitalEditorNoteId(null)}
         onCreateProject={handleCreateProjectNode}
+        onRenameProject={(projectId, name) => void renameProject(projectId, name)}
         onUpdateProjectPosition={(projectId, x, y) => void updateProjectPosition(projectId, x, y)}
         onUpdateProjectColor={(projectId, color) => void updateProjectColor(projectId, color)}
+        onDeleteProject={(projectId) => void handleDeleteProject(projectId)}
         onUpdateFolderColor={(folderId, color) => void updateFolderColor(folderId, color)}
+        onDeleteFolder={(folderId) => void handleDeleteFolder(folderId)}
         onUpdateNoteColor={(noteId, color) =>
           void updateNoteMeta(noteId, {
             color
           })
         }
+        onDeleteNote={(noteId) => void handleDeleteNoteById(noteId)}
         onCreateFolder={handleCreateFolderNode}
         onCreateNote={async (folderId, projectId) => {
           const note = await handleCreateNoteAt(folderId, [], projectId);
@@ -1380,6 +1502,9 @@ export default function App() {
           noteColor: t("note.color"),
           chooseColor: t("orbit.chooseColor"),
           customColor: t("orbit.customColor"),
+          deleteSystem: t("project.delete"),
+          deleteFolder: t("folders.delete"),
+          moveToTrash: t("note.moveToTrash"),
           notesStat: t("stats.notes"),
           elementsStat: t("stats.elements"),
           foldersStat: t("stats.folders"),
@@ -1389,7 +1514,19 @@ export default function App() {
           colorsStat: t("orbit.colorsMenu"),
           localVault: t("sync.localVault")
         }}
-      />
+        />
+        <ConfirmDialog
+          open={Boolean(confirmDialog)}
+          kicker={t("dialog.kicker")}
+          title={confirmDialog?.title ?? ""}
+          message={confirmDialog?.message ?? ""}
+          confirmLabel={confirmDialog?.confirmLabel ?? ""}
+          cancelLabel={confirmDialog?.cancelLabel ?? ""}
+          details={confirmDialog?.details}
+          onConfirm={() => closeConfirmDialog(true)}
+          onCancel={() => closeConfirmDialog(false)}
+        />
+      </>
     </Suspense>
   );
 }

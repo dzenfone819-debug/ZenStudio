@@ -2824,6 +2824,19 @@ button {
   justify-content: center;
 }
 
+.orbital-danger-actions {
+  display: grid;
+  gap: 8px;
+  margin: 12px 14px 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.orbital-danger-actions .toolbar-action {
+  width: 100%;
+  justify-content: center;
+}
+
 .orbital-create-card {
   display: grid;
   gap: 10px;

@@ -13,6 +13,10 @@ const ru = {
     notes: "Заметки",
     editor: "Редактор"
   },
+  dialog: {
+    kicker: "Подтверждение",
+    cancel: "Отмена"
+  },
   sections: {
     topology: "Топология знаний",
     folders: "Сетка папок",
@@ -43,6 +47,11 @@ const ru = {
     thisFolder: "эту папку",
     deleteCascadeConfirm:
       "Удалить {{name}}? Вложенные папки исчезнут, а {{noteCount}} заметок будет перемещено в корзину."
+  },
+  project: {
+    delete: "Удалить систему",
+    deleteConfirm:
+      "Удалить систему {{name}} навсегда? Будут удалены {{folderCount}} папок, {{noteCount}} заметок и {{assetCount}} файлов. Это действие нельзя отменить."
   },
   tags: {
     add: "Добавить тег",

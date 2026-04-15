@@ -13,6 +13,10 @@ const en = {
     notes: "Notes",
     editor: "Editor"
   },
+  dialog: {
+    kicker: "Confirm action",
+    cancel: "Cancel"
+  },
   sections: {
     topology: "Knowledge topology",
     folders: "Folder mesh",
@@ -43,6 +47,11 @@ const en = {
     thisFolder: "this folder",
     deleteCascadeConfirm:
       "Delete {{name}}? Nested folders will be removed and {{noteCount}} note(s) will be moved to Trash."
+  },
+  project: {
+    delete: "Delete system",
+    deleteConfirm:
+      "Delete system {{name}} permanently? {{folderCount}} folder(s), {{noteCount}} note(s), and {{assetCount}} file(s) will be removed. This cannot be undone."
   },
   tags: {
     add: "Add tag",

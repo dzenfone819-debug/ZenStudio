@@ -175,7 +175,7 @@
       "userId": "alex",
       "tokenHash": "12457b9b0c2a7602106e71c68d3cda3c6e04bd6406d1690d350dedf3984c2ecb",
       "createdAt": 1776004657638,
-      "lastUsedAt": 1776004657638,
+      "lastUsedAt": 1776006641660,
       "expiresAt": 1778596657638
     },
     {
@@ -183,7 +183,7 @@
       "userId": "test-2",
       "tokenHash": "6c39ed59826ee356b074f438a32c7ef749493214ade5032eb39209d43dd0219b",
       "createdAt": 1776005880719,
-      "lastUsedAt": 1776005949632,
+      "lastUsedAt": 1776006598066,
       "expiresAt": 1778597880719
     },
     {
