@@ -12,6 +12,9 @@ import {
 import { useTranslation } from "react-i18next";
 
 import EntryStaticPreview from "./EntryStaticPreview";
+import OrbitalInspectorContextMenu, {
+  type OrbitalInspectorContextMenuAction
+} from "./OrbitalInspectorContextMenu";
 import "./OrbitalChrome.css";
 import {
   COLOR_PALETTE,
@@ -58,9 +61,12 @@ interface OrbitalMapViewProps {
     color?: string,
     projectId?: string
   ) => Promise<Folder>;
+  onRenameFolder: (folderId: string, name: string) => Promise<void> | void;
   onUpdateFolderColor: (folderId: string, color: string) => void;
   onDeleteFolder: (folderId: string) => Promise<void> | void;
+  onRenameNote: (noteId: string, name: string) => Promise<void> | void;
   onUpdateNoteColor: (noteId: string, color: string) => void;
+  onSetNotePinned: (noteId: string, pinned: boolean) => Promise<void> | void;
   onDeleteNote: (noteId: string) => Promise<void> | void;
   onCreateNote: (folderId: string | null, projectId?: string) => Promise<Note>;
   onCreateCanvas: (folderId: string | null, projectId?: string) => Promise<Note>;
@@ -142,6 +148,7 @@ interface OrbitalMapViewProps {
     colorsStat: string;
     projectsStat: string;
     localVault: string;
+    renameAction: string;
   };
 }
 
@@ -296,6 +303,35 @@ type HoverPreviewAnchorRect = {
 };
 
 type HoverPreviewAnchorSource = "scene" | "inspector";
+type InspectorContextMenuTarget =
+  | {
+      kind: "folder";
+      folder: Folder;
+      label: string;
+      color: string;
+      canCreateFolder: boolean;
+    }
+  | {
+      kind: "note" | "canvas";
+      note: Note;
+      label: string;
+      color: string;
+      pinned: boolean;
+    };
+
+type InspectorContextMenuState = {
+  target: InspectorContextMenuTarget;
+  presentation: "popover" | "sheet";
+  position?: {
+    x: number;
+    y: number;
+  } | null;
+};
+
+type InspectorRenameState = {
+  kind: InspectorContextMenuTarget["kind"];
+  id: string;
+};
 
 const VIEWBOX = {
   minX: -980,
@@ -313,6 +349,8 @@ const ORBIT_ACTIVE_FRAME_MS = 1000 / 18;
 const ORBIT_IDLE_FRAME_MS = 1000 / 10;
 const ORBIT_ACTIVE_FRAME_MS_LARGE = 1000 / 14;
 const ORBIT_IDLE_FRAME_MS_LARGE = 1000 / 7;
+const INSPECTOR_LONG_PRESS_MS = 460;
+const INSPECTOR_LONG_PRESS_MOVE_TOLERANCE = 12;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -1112,8 +1150,11 @@ export default function OrbitalMapView({
   onUpdateProjectColor,
   onDeleteProject,
   onCreateFolder,
+  onRenameFolder,
   onUpdateFolderColor,
+  onRenameNote,
   onUpdateNoteColor,
+  onSetNotePinned,
   onDeleteFolder,
   onDeleteNote,
   onCreateNote,
@@ -1156,6 +1197,9 @@ export default function OrbitalMapView({
   const [inspectorQuery, setInspectorQuery] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [inspectorRenameState, setInspectorRenameState] = useState<InspectorRenameState | null>(null);
+  const [inspectorRenameDraft, setInspectorRenameDraft] = useState("");
+  const [contextMenuState, setContextMenuState] = useState<InspectorContextMenuState | null>(null);
   const [hoveredSelectionNoteId, setHoveredSelectionNoteId] = useState<string | null>(null);
   const [hoverPreviewAnchorSource, setHoverPreviewAnchorSource] =
     useState<HoverPreviewAnchorSource | null>(null);
@@ -1172,6 +1216,13 @@ export default function OrbitalMapView({
   const inspectorPanelRef = useRef<HTMLElement | null>(null);
   const orbitInteractionTimeoutRef = useRef<number | null>(null);
   const orbitInteractionActiveRef = useRef(true);
+  const suppressInspectorClickRef = useRef(false);
+  const inspectorLongPressRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    timeoutId: number;
+  } | null>(null);
   const dragRef = useRef<
     | {
         mode: "camera";
@@ -1634,6 +1685,7 @@ export default function OrbitalMapView({
   useEffect(() => {
     return () => {
       clearHoverPreviewCloseTimeout();
+      clearInspectorLongPress();
     };
   }, []);
 
@@ -1649,6 +1701,46 @@ export default function OrbitalMapView({
       setProjectNameDraft("");
     }
   }, [editingProjectId, orbitalData.projectById]);
+
+  useEffect(() => {
+    if (!inspectorRenameState) {
+      return;
+    }
+
+    const exists =
+      inspectorRenameState.kind === "folder"
+        ? orbitalData.folderById.has(inspectorRenameState.id)
+        : orbitalData.noteById.has(inspectorRenameState.id);
+
+    if (!exists) {
+      cancelInspectorRename();
+    }
+  }, [inspectorRenameState, orbitalData.folderById, orbitalData.noteById]);
+
+  useEffect(() => {
+    if (!contextMenuState) {
+      return;
+    }
+
+    const exists =
+      contextMenuState.target.kind === "folder"
+        ? orbitalData.folderById.has(contextMenuState.target.folder.id)
+        : orbitalData.noteById.has(contextMenuState.target.note.id);
+
+    if (!exists) {
+      closeInspectorContextMenu();
+    }
+  }, [contextMenuState, orbitalData.folderById, orbitalData.noteById]);
+
+  useEffect(() => {
+    closeInspectorContextMenu();
+  }, [inspectorMenu]);
+
+  useEffect(() => {
+    if (editorOpen || activeModal) {
+      closeInspectorContextMenu();
+    }
+  }, [activeModal, editorOpen]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -2220,6 +2312,151 @@ export default function OrbitalMapView({
     cancelProjectRename();
   };
 
+  const clearInspectorLongPress = () => {
+    if (inspectorLongPressRef.current) {
+      window.clearTimeout(inspectorLongPressRef.current.timeoutId);
+      inspectorLongPressRef.current = null;
+    }
+  };
+
+  const closeInspectorContextMenu = () => {
+    setContextMenuState(null);
+  };
+
+  const consumeSuppressedInspectorClick = () => {
+    if (!suppressInspectorClickRef.current) {
+      return false;
+    }
+
+    suppressInspectorClickRef.current = false;
+    return true;
+  };
+
+  const applySingleInspectorTargetSelection = (target: InspectorContextMenuTarget) => {
+    if (target.kind === "folder") {
+      setActiveFolderFilters([target.folder.id]);
+      setActiveNoteFilters([]);
+      return;
+    }
+
+    setActiveNoteFilters([target.note.id]);
+    setActiveFolderFilters([]);
+  };
+
+  const openInspectorContextMenu = (
+    target: InspectorContextMenuTarget,
+    presentation: "popover" | "sheet",
+    position?: { x: number; y: number } | null,
+    options?: {
+      selectTarget?: boolean;
+    }
+  ) => {
+    clearInspectorLongPress();
+    closeSelectionHoverPreview();
+
+    if (options?.selectTarget !== false) {
+      applySingleInspectorTargetSelection(target);
+    }
+
+    setContextMenuState({
+      target,
+      presentation,
+      position
+    });
+  };
+
+  const handleInspectorContextPointerDown = (
+    target: InspectorContextMenuTarget,
+    event: ReactPointerEvent<HTMLElement>
+  ) => {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    clearInspectorLongPress();
+    inspectorLongPressRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      timeoutId: window.setTimeout(() => {
+        suppressInspectorClickRef.current = true;
+        inspectorLongPressRef.current = null;
+        openInspectorContextMenu(target, "sheet", null);
+      }, INSPECTOR_LONG_PRESS_MS)
+    };
+  };
+
+  const handleInspectorContextPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const activeLongPress = inspectorLongPressRef.current;
+
+    if (!activeLongPress || activeLongPress.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (
+      Math.abs(event.clientX - activeLongPress.startX) > INSPECTOR_LONG_PRESS_MOVE_TOLERANCE ||
+      Math.abs(event.clientY - activeLongPress.startY) > INSPECTOR_LONG_PRESS_MOVE_TOLERANCE
+    ) {
+      clearInspectorLongPress();
+    }
+  };
+
+  const handleInspectorContextPointerEnd = (pointerId: number) => {
+    if (inspectorLongPressRef.current?.pointerId === pointerId) {
+      clearInspectorLongPress();
+    }
+  };
+
+  const beginInspectorRename = (target: InspectorContextMenuTarget) => {
+    closeInspectorContextMenu();
+    setInspectorRenameState({
+      kind: target.kind,
+      id: target.kind === "folder" ? target.folder.id : target.note.id
+    });
+    setInspectorRenameDraft(target.label);
+  };
+
+  const cancelInspectorRename = () => {
+    setInspectorRenameState(null);
+    setInspectorRenameDraft("");
+  };
+
+  const submitInspectorRename = async () => {
+    if (!inspectorRenameState) {
+      return;
+    }
+
+    const normalizedName = inspectorRenameDraft.trim();
+
+    if (!normalizedName) {
+      cancelInspectorRename();
+      return;
+    }
+
+    if (inspectorRenameState.kind === "folder") {
+      const folder = orbitalData.folderById.get(inspectorRenameState.id);
+
+      if (!folder || normalizedName === folder.name) {
+        cancelInspectorRename();
+        return;
+      }
+
+      await onRenameFolder(folder.id, normalizedName);
+      cancelInspectorRename();
+      return;
+    }
+
+    const note = orbitalData.noteById.get(inspectorRenameState.id);
+
+    if (!note || normalizedName === (note.title.trim() || getNoteInspectorTitle(note))) {
+      cancelInspectorRename();
+      return;
+    }
+
+    await onRenameNote(note.id, normalizedName);
+    cancelInspectorRename();
+  };
+
   const toggleInspectorFolderCollapse = (folderId: string) => {
     setCollapsedInspectorFolders((current) =>
       current.includes(folderId)
@@ -2655,6 +2892,203 @@ export default function OrbitalMapView({
     { menu: "pinned" as const, label: labels.pinnedStat, count: pinnedCount }
   ];
 
+  const contextMenuColorOptions = useMemo(
+    () =>
+      COLOR_PALETTE.map((entry) => ({
+        id: entry.id,
+        hex: entry.hex,
+        label: t(entry.labelKey)
+      })),
+    [t]
+  );
+
+  const buildInspectorNoteContextTarget = (note: Note): InspectorContextMenuTarget => ({
+    kind: note.contentType === "canvas" ? "canvas" : "note",
+    note,
+    label: getNoteInspectorTitle(note),
+    color: note.color || DEFAULT_NOTE_COLOR,
+    pinned: note.pinned
+  });
+
+  const buildInspectorHierarchyContextTarget = (
+    item: InspectorHierarchyItem
+  ): InspectorContextMenuTarget => {
+    if (item.kind === "folder") {
+      return {
+        kind: "folder",
+        folder: item.folder!,
+        label: item.label,
+        color: item.color,
+        canCreateFolder: (orbitalData.folderMeta.get(item.id)?.depth ?? 0) < 1
+      };
+    }
+
+    return {
+      kind: item.kind,
+      note: item.note!,
+      label: item.label,
+      color: item.color,
+      pinned: item.note?.pinned ?? false
+    };
+  };
+
+  const isEditingInspectorTarget = (target: InspectorContextMenuTarget) =>
+    Boolean(
+      inspectorRenameState &&
+        inspectorRenameState.kind === target.kind &&
+        inspectorRenameState.id === (target.kind === "folder" ? target.folder.id : target.note.id)
+    );
+
+  const renderInspectorRenameField = (
+    target: InspectorContextMenuTarget,
+    className: string
+  ) => {
+    const renameLabel = t("folders.rename");
+    const placeholder =
+      target.kind === "folder"
+        ? t("folders.createPlaceholder")
+        : target.kind === "canvas"
+          ? t("canvas.titlePlaceholder")
+          : t("note.titlePlaceholder");
+
+    return (
+      <input
+        autoFocus
+        value={inspectorRenameDraft}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => setInspectorRenameDraft(event.target.value)}
+        onBlur={() => {
+          void submitInspectorRename();
+        }}
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelInspectorRename();
+          }
+        }}
+        className={className}
+        placeholder={placeholder}
+        aria-label={`${renameLabel}: ${target.label}`}
+      />
+    );
+  };
+
+  const contextMenuActions = useMemo<OrbitalInspectorContextMenuAction[]>(() => {
+    if (!contextMenuState) {
+      return [];
+    }
+
+    const target = contextMenuState.target;
+    const actions: OrbitalInspectorContextMenuAction[] = [
+      {
+        id: "rename",
+        label: labels.renameAction,
+        icon: "rename",
+        onSelect: () => beginInspectorRename(target)
+      }
+    ];
+
+    if (target.kind === "folder") {
+      if (target.canCreateFolder) {
+        actions.push({
+          id: "create-folder",
+          label: labels.addChildFolder,
+          icon: "folder",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            beginFolderDraft(target.folder.id, target.folder.projectId);
+          }
+        });
+      }
+
+      actions.push(
+        {
+          id: "create-note",
+          label: labels.addNote,
+          icon: "note",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void handleCreateNote(target.folder.id, target.folder.projectId);
+          }
+        },
+        {
+          id: "create-canvas",
+          label: labels.addCanvas,
+          icon: "canvas",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void handleCreateCanvas(target.folder.id, target.folder.projectId);
+          }
+        },
+        {
+          id: "delete-folder",
+          label: labels.deleteFolder,
+          icon: "trash",
+          tone: "danger",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void onDeleteFolder(target.folder.id);
+          }
+        }
+      );
+
+      return actions;
+    }
+
+    actions.push(
+      {
+        id: "toggle-pin",
+        label: target.note.pinned ? t("note.unpin") : t("note.pin"),
+        icon: target.note.pinned ? "unpin" : "pin",
+        onSelect: () => {
+          closeInspectorContextMenu();
+          void onSetNotePinned(target.note.id, !target.note.pinned);
+        }
+      },
+      {
+        id: "delete-note",
+        label: labels.moveToTrash,
+        icon: "trash",
+        tone: "danger",
+        onSelect: () => {
+          closeInspectorContextMenu();
+          void onDeleteNote(target.note.id);
+        }
+      }
+    );
+
+    return actions;
+  }, [
+    beginInspectorRename,
+    beginFolderDraft,
+    closeInspectorContextMenu,
+    contextMenuState,
+    handleCreateCanvas,
+    handleCreateNote,
+    labels.addCanvas,
+    labels.addChildFolder,
+    labels.addNote,
+    labels.deleteFolder,
+    labels.moveToTrash,
+    labels.renameAction,
+    onDeleteFolder,
+    onDeleteNote,
+    onSetNotePinned,
+    t
+  ]);
+
   function renderInspectorItemIcon(kind: InspectorCompactIconKind, color: string) {
     const style = { "--item-color": color } as CSSProperties;
 
@@ -2757,6 +3191,7 @@ export default function OrbitalMapView({
     kindLabel,
     count,
     icon,
+    contextMenuTarget,
     onDoubleClick,
     onPointerEnter,
     onPointerMove,
@@ -2770,22 +3205,84 @@ export default function OrbitalMapView({
     kindLabel?: string | null;
     count?: number;
     icon: ReactNode;
+    contextMenuTarget?: InspectorContextMenuTarget;
     onDoubleClick?: () => void;
     onPointerEnter?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
     onPointerMove?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
     onPointerLeave?: () => void;
     onPointerCancel?: () => void;
   }) {
+    if (contextMenuTarget && isEditingInspectorTarget(contextMenuTarget)) {
+      return (
+        <div className="orbital-tree-item orbital-menu-compact-item is-editing">
+          {icon}
+          <span className="orbital-menu-compact-main">
+            <span className="orbital-menu-compact-copy">
+              {renderInspectorRenameField(contextMenuTarget, "orbital-menu-inline-input")}
+              {meta ? <span className="orbital-menu-compact-meta">{meta}</span> : null}
+            </span>
+          </span>
+        </div>
+      );
+    }
+
     return (
       <button
         type="button"
         className={`orbital-tree-item orbital-menu-compact-item ${isActive ? "is-active" : ""}`}
-        onClick={onClick}
+        onClick={(event) => {
+          if (consumeSuppressedInspectorClick()) {
+            event.preventDefault();
+            return;
+          }
+
+          onClick();
+        }}
         onDoubleClick={onDoubleClick}
+        onContextMenu={
+          contextMenuTarget
+            ? (event) => {
+                event.preventDefault();
+                openInspectorContextMenu(contextMenuTarget, "popover", {
+                  x: event.clientX,
+                  y: event.clientY
+                });
+              }
+            : undefined
+        }
+        onPointerDown={
+          contextMenuTarget
+            ? (event) => {
+                handleInspectorContextPointerDown(contextMenuTarget, event);
+              }
+            : undefined
+        }
         onPointerEnter={onPointerEnter}
-        onPointerMove={onPointerMove}
-        onPointerLeave={onPointerLeave}
-        onPointerCancel={onPointerCancel}
+        onPointerMove={(event) => {
+          onPointerMove?.(event);
+          if (contextMenuTarget) {
+            handleInspectorContextPointerMove(event);
+          }
+        }}
+        onPointerUp={
+          contextMenuTarget
+            ? (event) => {
+                handleInspectorContextPointerEnd(event.pointerId);
+              }
+            : undefined
+        }
+        onPointerLeave={(event) => {
+          onPointerLeave?.();
+          if (contextMenuTarget) {
+            handleInspectorContextPointerEnd(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          onPointerCancel?.();
+          if (contextMenuTarget) {
+            handleInspectorContextPointerEnd(event.pointerId);
+          }
+        }}
       >
         {icon}
         <span className="orbital-menu-compact-main">
@@ -2829,6 +3326,8 @@ export default function OrbitalMapView({
         : item.note?.folderId
           ? folderPathMap.get(item.note.folderId) ?? labels.uncategorized
           : labels.uncategorized;
+    const contextMenuTarget = buildInspectorHierarchyContextTarget(item);
+    const isEditing = isEditingInspectorTarget(contextMenuTarget);
 
     return (
       <div className="orbital-tree-node" key={item.entityId}>
@@ -2858,62 +3357,110 @@ export default function OrbitalMapView({
             <span className="orbital-tree-toggle-spacer" aria-hidden="true" />
           )}
 
-          <button
-            type="button"
-            className={`orbital-tree-item ${isActive ? "is-active" : ""}`}
-            title={metaLabel}
-            onClick={(event) => handleInspectorHierarchySelection(item, event)}
-            onDoubleClick={
-              item.note
-                ? () => {
-                    closeSelectionHoverPreview();
-                    onOpenNote(item.note!.id);
-                  }
-                : undefined
-            }
-            onPointerEnter={
-              item.note
-                ? (event) => {
-                    openSelectionHoverPreview(
-                      item.note!.id,
-                      event.clientX,
-                      event.clientY,
-                      "inspector",
-                      {
-                        anchorRect: toHoverPreviewAnchorRect(
-                          event.currentTarget.getBoundingClientRect()
-                        )
-                      }
-                    );
-                  }
-                : undefined
-            }
-            onPointerMove={
-              item.note
-                ? (event) => {
-                    updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
-                      anchorRect: toHoverPreviewAnchorRect(
-                        event.currentTarget.getBoundingClientRect()
-                      )
-                    });
-                  }
-                : undefined
-            }
-            onPointerLeave={item.note ? scheduleSelectionHoverPreviewClose : undefined}
-            onPointerCancel={item.note ? scheduleSelectionHoverPreviewClose : undefined}
-          >
-            {renderInspectorItemIcon(item.kind, item.color)}
-            <span className="orbital-tree-item-main">
-              <span className="orbital-tree-label">{item.label}</span>
-              <span className="orbital-tree-kind">
-                {item.kind === "folder"
-                  ? labels.folder
-                  : item.kind === "canvas"
-                    ? labels.canvas
-                    : labels.note}
+          {isEditing ? (
+            <div className="orbital-tree-item is-editing">
+              {renderInspectorItemIcon(item.kind, item.color)}
+              <span className="orbital-tree-item-main">
+                {renderInspectorRenameField(contextMenuTarget, "orbital-menu-inline-input")}
+                <span className="orbital-tree-kind">
+                  {item.kind === "folder"
+                    ? labels.folder
+                    : item.kind === "canvas"
+                      ? labels.canvas
+                      : labels.note}
+                </span>
               </span>
-            </span>
-          </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={`orbital-tree-item ${isActive ? "is-active" : ""}`}
+              title={metaLabel}
+              onClick={(event) => {
+                if (consumeSuppressedInspectorClick()) {
+                  event.preventDefault();
+                  return;
+                }
+
+                handleInspectorHierarchySelection(item, event);
+              }}
+              onDoubleClick={
+                item.note
+                  ? () => {
+                      closeSelectionHoverPreview();
+                      onOpenNote(item.note!.id);
+                    }
+                  : undefined
+              }
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openInspectorContextMenu(contextMenuTarget, "popover", {
+                  x: event.clientX,
+                  y: event.clientY
+                });
+              }}
+              onPointerDown={(event) => {
+                handleInspectorContextPointerDown(contextMenuTarget, event);
+              }}
+              onPointerEnter={
+                item.note
+                  ? (event) => {
+                      openSelectionHoverPreview(
+                        item.note!.id,
+                        event.clientX,
+                        event.clientY,
+                        "inspector",
+                        {
+                          anchorRect: toHoverPreviewAnchorRect(
+                            event.currentTarget.getBoundingClientRect()
+                          )
+                        }
+                      );
+                    }
+                  : undefined
+              }
+              onPointerMove={(event) => {
+                if (item.note) {
+                  updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
+                    anchorRect: toHoverPreviewAnchorRect(
+                      event.currentTarget.getBoundingClientRect()
+                    )
+                  });
+                }
+
+                handleInspectorContextPointerMove(event);
+              }}
+              onPointerUp={(event) => {
+                handleInspectorContextPointerEnd(event.pointerId);
+              }}
+              onPointerLeave={(event) => {
+                if (item.note) {
+                  scheduleSelectionHoverPreviewClose();
+                }
+
+                handleInspectorContextPointerEnd(event.pointerId);
+              }}
+              onPointerCancel={(event) => {
+                if (item.note) {
+                  scheduleSelectionHoverPreviewClose();
+                }
+
+                handleInspectorContextPointerEnd(event.pointerId);
+              }}
+            >
+              {renderInspectorItemIcon(item.kind, item.color)}
+              <span className="orbital-tree-item-main">
+                <span className="orbital-tree-label">{item.label}</span>
+                <span className="orbital-tree-kind">
+                  {item.kind === "folder"
+                    ? labels.folder
+                    : item.kind === "canvas"
+                      ? labels.canvas
+                      : labels.note}
+                </span>
+              </span>
+            </button>
+          )}
         </div>
 
         {hasChildren && isExpanded ? (
@@ -3197,6 +3744,7 @@ export default function OrbitalMapView({
                     onPointerCancel: scheduleSelectionHoverPreviewClose,
                     title: getNoteInspectorTitle(note),
                     kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
+                    contextMenuTarget: buildInspectorNoteContextTarget(note),
                     icon: renderInspectorItemIcon(
                       note.contentType === "canvas" ? "canvas" : "note",
                       note.color || DEFAULT_NOTE_COLOR
@@ -3236,6 +3784,7 @@ export default function OrbitalMapView({
                     onPointerCancel: scheduleSelectionHoverPreviewClose,
                     title: getNoteInspectorTitle(note),
                     kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
+                    contextMenuTarget: buildInspectorNoteContextTarget(note),
                     icon: renderInspectorItemIcon(
                       note.contentType === "canvas" ? "canvas" : "note",
                       note.color || DEFAULT_NOTE_COLOR
@@ -3308,6 +3857,38 @@ export default function OrbitalMapView({
         </div>
       </>
     );
+  const selectedInspectorContextTarget =
+    selectedNode?.kind === "folder" && selectedNode.folder
+      ? ({
+          kind: "folder",
+          folder: selectedNode.folder,
+          label: selectedNode.label,
+          color: selectedNode.folder.color || DEFAULT_FOLDER_COLOR,
+          canCreateFolder: (selectedFolderMeta?.depth ?? 0) < 1
+        } satisfies InspectorContextMenuTarget)
+      : selectedNode?.kind === "note" && selectedNode.note
+        ? buildInspectorNoteContextTarget(selectedNode.note)
+        : null;
+  const contextMenuTarget = contextMenuState?.target ?? null;
+  const contextMenuKindLabel = !contextMenuTarget
+    ? ""
+    : contextMenuTarget.kind === "folder"
+      ? labels.folder
+      : contextMenuTarget.kind === "canvas"
+        ? labels.canvas
+        : labels.note;
+  const handleContextMenuColorChange = contextMenuTarget
+    ? (color: string) => {
+        closeInspectorContextMenu();
+
+        if (contextMenuTarget.kind === "folder") {
+          onUpdateFolderColor(contextMenuTarget.folder.id, color);
+          return;
+        }
+
+        onUpdateNoteColor(contextMenuTarget.note.id, color);
+      }
+    : undefined;
 
   return (
     <section
@@ -3519,6 +4100,52 @@ export default function OrbitalMapView({
                       selectedEntryIsCanvas ? "is-canvas" : ""
                     }`}
                     style={{ "--selection-accent": selectedInspectorAccent } as CSSProperties}
+                    onContextMenu={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            event.preventDefault();
+                            openInspectorContextMenu(selectedInspectorContextTarget, "popover", {
+                              x: event.clientX,
+                              y: event.clientY
+                            });
+                          }
+                        : undefined
+                    }
+                    onPointerDown={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            handleInspectorContextPointerDown(selectedInspectorContextTarget, event);
+                          }
+                        : undefined
+                    }
+                    onPointerMove={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            handleInspectorContextPointerMove(event);
+                          }
+                        : undefined
+                    }
+                    onPointerUp={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            handleInspectorContextPointerEnd(event.pointerId);
+                          }
+                        : undefined
+                    }
+                    onPointerLeave={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            handleInspectorContextPointerEnd(event.pointerId);
+                          }
+                        : undefined
+                    }
+                    onPointerCancel={
+                      selectedInspectorContextTarget
+                        ? (event) => {
+                            handleInspectorContextPointerEnd(event.pointerId);
+                          }
+                        : undefined
+                    }
                     onDoubleClick={
                       selectedNode.kind === "note"
                         ? () => {
@@ -3541,7 +4168,15 @@ export default function OrbitalMapView({
                           <span className="orbital-selection-systemchip">{focusSystemLabel}</span>
                         ) : null}
                       </div>
-                      <h2 className="orbital-selection-title">{selectedNode.label}</h2>
+                      {selectedInspectorContextTarget &&
+                      isEditingInspectorTarget(selectedInspectorContextTarget) ? (
+                        renderInspectorRenameField(
+                          selectedInspectorContextTarget,
+                          "orbital-menu-inline-input orbital-selection-title-input"
+                        )
+                      ) : (
+                        <h2 className="orbital-selection-title">{selectedNode.label}</h2>
+                      )}
                       <div className="orbital-selection-context-row">
                         {selectedNode.kind === "folder" ? (
                           <span className="orbital-path-chip orbital-path-chip-soft">
@@ -4219,6 +4854,25 @@ export default function OrbitalMapView({
             />
           </div>
         </div>
+      ) : null}
+
+      {contextMenuTarget ? (
+        <OrbitalInspectorContextMenu
+          open
+          presentation={contextMenuState?.presentation ?? "popover"}
+          position={contextMenuState?.position}
+          accentColor={contextMenuTarget.color}
+          title={contextMenuTarget.label}
+          kindLabel={contextMenuKindLabel}
+          actions={contextMenuActions}
+          colorOptions={contextMenuColorOptions}
+          activeColor={contextMenuTarget.color}
+          chooseColorLabel={labels.chooseColor}
+          customColorLabel={labels.customColor}
+          closeLabel={labels.cancel}
+          onClose={closeInspectorContextMenu}
+          onColorChange={handleContextMenuColorChange}
+        />
       ) : null}
 
       {editorOpen ? (

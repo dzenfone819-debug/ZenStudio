@@ -280,6 +280,7 @@ const en = {
     back: "Back",
     searchPlaceholder: "Search notes, text, tags, folders",
     clearFilters: "Clear filters",
+    renameAction: "Rename",
     notesMenu: "Notes",
     foldersMenu: "Folders",
     tagsMenu: "Tags",

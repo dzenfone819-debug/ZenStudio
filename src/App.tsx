@@ -1417,10 +1417,21 @@ export default function App() {
         onUpdateProjectColor={(projectId, color) => void updateProjectColor(projectId, color)}
         onDeleteProject={(projectId) => void handleDeleteProject(projectId)}
         onUpdateFolderColor={(folderId, color) => void updateFolderColor(folderId, color)}
+        onRenameFolder={(folderId, name) => void renameFolder(folderId, name)}
         onDeleteFolder={(folderId) => void handleDeleteFolder(folderId)}
+        onRenameNote={(noteId, name) =>
+          void updateNoteMeta(noteId, {
+            title: name
+          })
+        }
         onUpdateNoteColor={(noteId, color) =>
           void updateNoteMeta(noteId, {
             color
+          })
+        }
+        onSetNotePinned={(noteId, pinned) =>
+          void updateNoteMeta(noteId, {
+            pinned
           })
         }
         onDeleteNote={(noteId) => void handleDeleteNoteById(noteId)}
@@ -1512,7 +1523,8 @@ export default function App() {
           assetsStat: t("stats.assets"),
           pinnedStat: t("stats.pinned"),
           colorsStat: t("orbit.colorsMenu"),
-          localVault: t("sync.localVault")
+          localVault: t("sync.localVault"),
+          renameAction: t("orbit.renameAction")
         }}
         />
         <ConfirmDialog
