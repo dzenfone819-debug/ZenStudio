@@ -343,7 +343,7 @@ const VIEWBOX = {
 
 const CAMERA_MIN_SCALE = 0.45;
 const CAMERA_MAX_SCALE = 2.2;
-const FOCUS_AUTO_THRESHOLD = 34;
+const ORBITAL_SCENE_BODY_BUDGET = 70;
 const PROJECT_MIN_DISTANCE = 430;
 const ORBIT_INTERACTION_WINDOW_MS = 1800;
 const ORBIT_ACTIVE_FRAME_MS = 1000 / 18;
@@ -682,72 +682,447 @@ function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalDat
   return related;
 }
 
-function buildFocusedEntitySet(focusedEntityId: string, data: OrbitalData) {
-  const related = new Set<string>();
-  const projectId = getEntityProjectId(focusedEntityId, data);
+function getEntityVisibilityChain(entityId: string, data: OrbitalData) {
+  const projectId = getEntityProjectId(entityId, data);
 
   if (!projectId || !data.projectById.has(projectId)) {
-    return related;
+    return [];
   }
 
-  const addProjectCore = () => {
-    related.add(getProjectEntityId(projectId));
-  };
+  const chain = [getProjectEntityId(projectId)];
 
-  const addProjectSystem = () => {
-    addProjectCore();
-
-    (data.rootFoldersByProject.get(projectId) ?? []).forEach((branch) => {
-      related.add(`folder:${branch.folder.id}`);
-    });
-
-    (data.looseNotesByProject.get(projectId) ?? []).forEach((note) => {
-      related.add(`note:${note.id}`);
-    });
-  };
-
-  if (focusedEntityId.startsWith("project:")) {
-    addProjectSystem();
-    return related;
+  if (entityId.startsWith("project:")) {
+    return chain;
   }
 
-  if (focusedEntityId.startsWith("folder:")) {
-    const folderId = focusedEntityId.slice("folder:".length);
+  if (entityId.startsWith("folder:")) {
+    const folderId = entityId.slice("folder:".length);
 
     if (!data.folderById.has(folderId)) {
-      return related;
+      return chain;
     }
 
-    addProjectCore();
-    collectFolderAncestryEntityIds(folderId, data).forEach((entityId) => {
-      related.add(entityId);
-    });
-    collectFolderSubtreeEntityIds(folderId, data).forEach((entityId) => {
-      related.add(entityId);
-    });
-    return related;
+    return [...chain, ...collectFolderAncestryEntityIds(folderId, data)];
   }
 
-  if (focusedEntityId.startsWith("note:")) {
-    const noteId = focusedEntityId.slice("note:".length);
+  if (entityId.startsWith("note:")) {
+    const noteId = entityId.slice("note:".length);
     const note = data.noteById.get(noteId);
 
     if (!note) {
-      return related;
+      return chain;
     }
 
-    addProjectCore();
-
-    if (note.folderId) {
-      collectFolderAncestryEntityIds(note.folderId, data).forEach((entityId) => {
-        related.add(entityId);
-      });
-    }
-
-    related.add(`note:${note.id}`);
+    return note.folderId
+      ? [...chain, ...collectFolderAncestryEntityIds(note.folderId, data), `note:${note.id}`]
+      : [...chain, `note:${note.id}`];
   }
 
-  return related;
+  return chain;
+}
+
+function getVisibilityChainAdditionalCost(chain: string[], visibleEntityIds: Set<string>) {
+  return chain.reduce((total, entityId) => {
+    if (entityId.startsWith("project:") || visibleEntityIds.has(entityId)) {
+      return total;
+    }
+
+    return total + 1;
+  }, 0);
+}
+
+function addVisibilityChain(chain: string[], visibleEntityIds: Set<string>) {
+  let addedBodies = 0;
+
+  chain.forEach((entityId) => {
+    if (visibleEntityIds.has(entityId)) {
+      return;
+    }
+
+    visibleEntityIds.add(entityId);
+
+    if (!entityId.startsWith("project:")) {
+      addedBodies += 1;
+    }
+  });
+
+  return addedBodies;
+}
+
+function buildAdaptiveVisibilitySet({
+  data,
+  budget,
+  currentProjectId,
+  priorityProjectId,
+  selectedEntityId,
+  filterPrimaryEntityIds,
+  filterSecondaryEntityIds
+}: {
+  data: OrbitalData;
+  budget: number;
+  currentProjectId: string | null;
+  priorityProjectId: string | null;
+  selectedEntityId: string | null;
+  filterPrimaryEntityIds: Set<string>;
+  filterSecondaryEntityIds: Set<string>;
+}) {
+  const visibleEntityIds = new Set<string>();
+  const totalBodyCount = Math.max(data.totalEntities - data.projects.length, 0);
+  let remainingBudget = Math.min(budget, totalBodyCount);
+
+  data.projects.forEach((project) => {
+    visibleEntityIds.add(getProjectEntityId(project.id));
+  });
+
+  const selectedAncestryEntityIds = new Set<string>();
+  const selectedSubtreeEntityIds = new Set<string>();
+  const selectedDirectChildEntityIds = new Set<string>();
+
+  if (selectedEntityId?.startsWith("project:")) {
+    const selectedProjectId = selectedEntityId.slice("project:".length);
+
+    data.rootFoldersByProject.get(selectedProjectId)?.forEach((branch) => {
+      selectedDirectChildEntityIds.add(`folder:${branch.folder.id}`);
+    });
+
+    data.looseNotesByProject.get(selectedProjectId)?.forEach((note) => {
+      selectedDirectChildEntityIds.add(`note:${note.id}`);
+    });
+
+    data.folderById.forEach((folder) => {
+      if (folder.projectId === selectedProjectId) {
+        selectedSubtreeEntityIds.add(`folder:${folder.id}`);
+      }
+    });
+
+    data.noteById.forEach((note) => {
+      if (note.projectId === selectedProjectId) {
+        selectedSubtreeEntityIds.add(`note:${note.id}`);
+      }
+    });
+  }
+
+  if (selectedEntityId?.startsWith("folder:")) {
+    const selectedFolderId = selectedEntityId.slice("folder:".length);
+
+    collectFolderAncestryEntityIds(selectedFolderId, data).forEach((entityId) => {
+      selectedAncestryEntityIds.add(entityId);
+    });
+
+    collectFolderSubtreeEntityIds(selectedFolderId, data).forEach((entityId) => {
+      selectedSubtreeEntityIds.add(entityId);
+    });
+
+    (data.foldersByParent.get(selectedFolderId) ?? []).forEach((folder) => {
+      selectedDirectChildEntityIds.add(`folder:${folder.id}`);
+    });
+
+    (data.notesByFolder.get(selectedFolderId) ?? []).forEach((note) => {
+      selectedDirectChildEntityIds.add(`note:${note.id}`);
+    });
+  }
+
+  if (selectedEntityId?.startsWith("note:")) {
+    const selectedNoteId = selectedEntityId.slice("note:".length);
+    const selectedNote = data.noteById.get(selectedNoteId);
+
+    if (selectedNote?.folderId) {
+      collectFolderAncestryEntityIds(selectedNote.folderId, data).forEach((entityId) => {
+        selectedAncestryEntityIds.add(entityId);
+      });
+    }
+  }
+
+  const tryAddEntity = (entityId: string) => {
+    if (visibleEntityIds.has(entityId)) {
+      return 0;
+    }
+
+    const chain = getEntityVisibilityChain(entityId, data);
+    const additionalCost = getVisibilityChainAdditionalCost(chain, visibleEntityIds);
+
+    if (additionalCost === 0) {
+      return 0;
+    }
+
+    if (additionalCost > remainingBudget) {
+      return -1;
+    }
+
+    remainingBudget -= additionalCost;
+    return addVisibilityChain(chain, visibleEntityIds);
+  };
+
+  if (selectedEntityId) {
+    tryAddEntity(selectedEntityId);
+  }
+
+  const updatedAtValues = [
+    ...Array.from(data.folderById.values(), (folder) => folder.updatedAt),
+    ...Array.from(data.noteById.values(), (note) => note.updatedAt)
+  ];
+  const minUpdatedAt = updatedAtValues.length > 0 ? Math.min(...updatedAtValues) : 0;
+  const maxUpdatedAt = updatedAtValues.length > 0 ? Math.max(...updatedAtValues) : 0;
+  const updatedAtRange = Math.max(maxUpdatedAt - minUpdatedAt, 1);
+  const hasActiveFilter = filterPrimaryEntityIds.size > 0 || filterSecondaryEntityIds.size > 0;
+  const filterMatchedProjectIds = new Set<string>();
+
+  filterPrimaryEntityIds.forEach((entityId) => {
+    const projectId = getEntityProjectId(entityId, data);
+
+    if (projectId) {
+      filterMatchedProjectIds.add(projectId);
+    }
+  });
+
+  type VisibilityCandidate = {
+    entityId: string;
+    projectId: string;
+    score: number;
+    isRootLevel: boolean;
+  };
+
+  const candidates: VisibilityCandidate[] = [];
+  const rootCandidatesByProject = new Map<string, VisibilityCandidate[]>();
+
+  const registerCandidate = (candidate: VisibilityCandidate) => {
+    candidates.push(candidate);
+
+    if (!candidate.isRootLevel) {
+      return;
+    }
+
+    const queue = rootCandidatesByProject.get(candidate.projectId) ?? [];
+    queue.push(candidate);
+    rootCandidatesByProject.set(candidate.projectId, queue);
+  };
+
+  data.folderById.forEach((folder) => {
+    const entityId = `folder:${folder.id}`;
+    const meta = data.folderMeta.get(folder.id);
+    const isRootLevel = folder.parentId === null;
+    const recencyScore = ((folder.updatedAt - minUpdatedAt) / updatedAtRange) * 180;
+    let score =
+      recencyScore +
+      Math.min(360, (meta?.mass ?? 1) * 42) +
+      Math.min(
+        280,
+        (meta?.descendantNoteCount ?? 0) * 24 + (meta?.descendantFolderCount ?? 0) * 30
+      ) +
+      (isRootLevel ? 540 : 0);
+
+    if (currentProjectId && folder.projectId === currentProjectId) {
+      score += 180;
+    }
+
+    if (priorityProjectId && folder.projectId === priorityProjectId) {
+      score += isRootLevel ? 1460 : 980;
+    }
+
+    if (selectedEntityId === entityId) {
+      score += 8400;
+    }
+
+    if (selectedAncestryEntityIds.has(entityId)) {
+      score += 3200;
+    }
+
+    if (selectedDirectChildEntityIds.has(entityId)) {
+      score += 3000;
+    } else if (selectedSubtreeEntityIds.has(entityId)) {
+      score += 2480;
+    }
+
+    if (filterPrimaryEntityIds.has(entityId)) {
+      score += 7200;
+    }
+
+    if (filterSecondaryEntityIds.has(entityId)) {
+      score += 4400;
+    }
+
+    if (filterMatchedProjectIds.has(folder.projectId)) {
+      score += isRootLevel ? 1400 : 420;
+    }
+
+    registerCandidate({
+      entityId,
+      projectId: folder.projectId,
+      score,
+      isRootLevel
+    });
+  });
+
+  data.noteById.forEach((note) => {
+    const entityId = `note:${note.id}`;
+    const isRootLevel = note.folderId === null;
+    const recencyScore = ((note.updatedAt - minUpdatedAt) / updatedAtRange) * 190;
+    let score =
+      recencyScore +
+      Math.min(160, note.plainText.length / 24) +
+      (note.pinned ? 760 : 0) +
+      (note.favorite ? 320 : 0) +
+      (note.contentType === "canvas" ? 120 : 0) +
+      (isRootLevel ? 510 : 0);
+
+    if (currentProjectId && note.projectId === currentProjectId) {
+      score += 190;
+    }
+
+    if (priorityProjectId && note.projectId === priorityProjectId) {
+      score += isRootLevel ? 1340 : 920;
+    }
+
+    if (selectedEntityId === entityId) {
+      score += 8600;
+    }
+
+    if (selectedDirectChildEntityIds.has(entityId)) {
+      score += 2900;
+    } else if (selectedSubtreeEntityIds.has(entityId)) {
+      score += 2380;
+    }
+
+    if (filterPrimaryEntityIds.has(entityId)) {
+      score += 7200;
+    }
+
+    if (filterSecondaryEntityIds.has(entityId)) {
+      score += 4400;
+    }
+
+    if (filterMatchedProjectIds.has(note.projectId)) {
+      score += isRootLevel ? 1400 : 420;
+    }
+
+    registerCandidate({
+      entityId,
+      projectId: note.projectId,
+      score,
+      isRootLevel
+    });
+  });
+
+  rootCandidatesByProject.forEach((queue) => {
+    queue.sort((left, right) => right.score - left.score);
+  });
+
+  const orderedProjectIds = [...data.projects]
+    .sort((left, right) => {
+      const leftPriority = left.id === priorityProjectId ? 1 : 0;
+      const rightPriority = right.id === priorityProjectId ? 1 : 0;
+
+      if (leftPriority !== rightPriority) {
+        return rightPriority - leftPriority;
+      }
+
+      const leftCurrent = left.id === currentProjectId ? 1 : 0;
+      const rightCurrent = right.id === currentProjectId ? 1 : 0;
+
+      if (leftCurrent !== rightCurrent) {
+        return rightCurrent - leftCurrent;
+      }
+
+      return right.updatedAt - left.updatedAt;
+    })
+    .map((project) => project.id);
+
+  const takeNextRootCandidate = (projectId: string) => {
+    const queue = rootCandidatesByProject.get(projectId);
+
+    while (queue && queue.length > 0) {
+      const candidate = queue.shift()!;
+
+      if (!visibleEntityIds.has(candidate.entityId)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  };
+
+  const globalCandidates = [...candidates].sort((left, right) => right.score - left.score);
+
+  if (!hasActiveFilter) {
+    if (priorityProjectId) {
+      let seededPriorityRoots = 0;
+
+      while (seededPriorityRoots < 4 && remainingBudget > 0) {
+        const candidate = takeNextRootCandidate(priorityProjectId);
+
+        if (!candidate) {
+          break;
+        }
+
+        if (tryAddEntity(candidate.entityId) > 0) {
+          seededPriorityRoots += 1;
+        }
+      }
+
+      orderedProjectIds.forEach((projectId) => {
+        if (projectId === priorityProjectId || remainingBudget <= 0) {
+          return;
+        }
+
+        const candidate = takeNextRootCandidate(projectId);
+
+        if (candidate) {
+          tryAddEntity(candidate.entityId);
+        }
+      });
+    } else {
+      const rootPasses =
+        data.projects.length <= 3 ? 3 : data.projects.length <= 8 ? 2 : 1;
+
+      for (let pass = 0; pass < rootPasses && remainingBudget > 0; pass += 1) {
+        orderedProjectIds.forEach((projectId) => {
+          if (remainingBudget <= 0) {
+            return;
+          }
+
+          const candidate = takeNextRootCandidate(projectId);
+
+          if (candidate) {
+            tryAddEntity(candidate.entityId);
+          }
+        });
+      }
+    }
+  }
+
+  if (priorityProjectId && remainingBudget > 0) {
+    let priorityBodiesAdded = 0;
+    const priorityBodyBudget = Math.min(
+      Math.round(budget * 0.62),
+      Math.max(24, budget - Math.min(data.projects.length, 10))
+    );
+
+    for (const candidate of globalCandidates) {
+      if (candidate.projectId !== priorityProjectId || remainingBudget <= 0) {
+        continue;
+      }
+
+      if (priorityBodiesAdded >= priorityBodyBudget) {
+        break;
+      }
+
+      const addedBodies = tryAddEntity(candidate.entityId);
+
+      if (addedBodies > 0) {
+        priorityBodiesAdded += addedBodies;
+      }
+    }
+  }
+
+  for (const candidate of globalCandidates) {
+    if (remainingBudget <= 0) {
+      break;
+    }
+
+    tryAddEntity(candidate.entityId);
+  }
+
+  return visibleEntityIds;
 }
 
 function buildOrbitalLayout(
@@ -1338,7 +1713,8 @@ export default function OrbitalMapView({
 
     return counts;
   }, [currentProject, currentProjectFolders, currentProjectNotes]);
-  const isLargeVault = orbitalData.totalEntities > FOCUS_AUTO_THRESHOLD;
+  const totalSceneBodyCount = Math.max(orbitalData.totalEntities - orbitalData.projects.length, 0);
+  const isSceneBudgetConstrained = totalSceneBodyCount > ORBITAL_SCENE_BODY_BUDGET;
   const selectedPrimaryEntityIds = useMemo(() => {
     if (selectedEntityId) {
       return new Set<string>([selectedEntityId]);
@@ -1357,16 +1733,7 @@ export default function OrbitalMapView({
     related.delete(selectedEntityId);
     return related;
   }, [selectedEntityId, orbitalData]);
-  const effectiveFocusMode = focusModeOverride ?? isLargeVault;
-  const focusedVisibilityEntityIds = useMemo(() => {
-    const focusTargetId = selectedEntityId ?? currentProjectEntityId;
-
-    if (!focusTargetId) {
-      return null;
-    }
-
-    return buildFocusedEntitySet(focusTargetId, orbitalData);
-  }, [currentProjectEntityId, orbitalData, selectedEntityId]);
+  const isPriorityFocusMode = focusModeOverride === true;
   const searchMatchedEntityIds = useMemo(() => {
     const matches = new Set<string>();
 
@@ -1557,13 +1924,36 @@ export default function OrbitalMapView({
 
     return matches;
   }, [filterPrimaryEntityIds, folderDescendantFilteredEntityIds]);
+  const sceneVisibleEntityIds = useMemo(() => {
+    if (!isSceneBudgetConstrained) {
+      return null;
+    }
+
+    return buildAdaptiveVisibilitySet({
+      data: orbitalData,
+      budget: ORBITAL_SCENE_BODY_BUDGET,
+      currentProjectId,
+      priorityProjectId: isPriorityFocusMode
+        ? selectedEntityId
+          ? getEntityProjectId(selectedEntityId, orbitalData)
+          : currentProjectId
+        : null,
+      selectedEntityId,
+      filterPrimaryEntityIds,
+      filterSecondaryEntityIds
+    });
+  }, [
+    currentProjectId,
+    filterPrimaryEntityIds,
+    filterSecondaryEntityIds,
+    isPriorityFocusMode,
+    isSceneBudgetConstrained,
+    orbitalData,
+    selectedEntityId
+  ]);
   const sceneLayout = useMemo(
-    () =>
-      buildOrbitalLayout(
-        orbitalData,
-        effectiveFocusMode && !hasActiveFilter ? focusedVisibilityEntityIds : null
-      ),
-    [effectiveFocusMode, focusedVisibilityEntityIds, hasActiveFilter, orbitalData]
+    () => buildOrbitalLayout(orbitalData, sceneVisibleEntityIds),
+    [orbitalData, sceneVisibleEntityIds]
   );
   const scene = useMemo(
     () => materializeOrbitalScene(sceneLayout, timeMs),
@@ -1915,8 +2305,8 @@ export default function OrbitalMapView({
       }),
     []
   );
-  const autoFocusEnabled = isLargeVault && focusModeOverride === null && !hasActiveFilter;
-  const isSceneFocusActive = effectiveFocusMode && !hasActiveFilter;
+  const autoFocusEnabled = isSceneBudgetConstrained && !isPriorityFocusMode;
+  const isSceneFocusActive = isSceneBudgetConstrained && isPriorityFocusMode;
   const isDenseOrbitalScene = orbitalData.totalEntities > 80;
   const orbitFrameInterval = isOrbitInteractionActive
     ? isDenseOrbitalScene
@@ -4098,17 +4488,14 @@ export default function OrbitalMapView({
               {isPaused ? labels.resume : labels.pause}
             </button>
             <button
-              className={`toolbar-action orbital-toolbar-action ${effectiveFocusMode ? "accent is-active" : ""}`}
+              className={`toolbar-action orbital-toolbar-action ${isSceneFocusActive ? "accent is-active" : ""}`}
               onClick={() => {
-                setFocusModeOverride((current) => {
-                  const currentEffectiveMode = current ?? isLargeVault;
-                  return currentEffectiveMode ? false : true;
-                });
+                setFocusModeOverride((current) => (current === true ? null : true));
               }}
-              aria-pressed={effectiveFocusMode}
-              title={effectiveFocusMode ? labels.showAll : labels.focusMode}
+              aria-pressed={isSceneFocusActive}
+              title={isSceneFocusActive ? labels.showAll : labels.focusMode}
             >
-              {effectiveFocusMode ? labels.showAll : labels.focusMode}
+              {isSceneFocusActive ? labels.showAll : labels.focusMode}
             </button>
           </div>
 
@@ -4846,7 +5233,8 @@ export default function OrbitalMapView({
                   isFilterRelated ||
                   isEmphasis ||
                   isPassiveHighlight ||
-                  (!isLargeVault && (node.depth <= 1 || (node.kind === "folder" && node.radius >= 28)));
+                  (!isSceneBudgetConstrained &&
+                    (node.depth <= 1 || (node.kind === "folder" && node.radius >= 28)));
 
                 return (
                   <g
