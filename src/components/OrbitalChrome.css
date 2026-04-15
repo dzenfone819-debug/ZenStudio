@@ -151,6 +151,10 @@
     0 12px 26px rgba(2, 4, 12, 0.14);
 }
 
+.orbital-overlay .orbital-inspector.panel::before {
+  display: none;
+}
+
 .orbital-inspector-header {
   display: flex;
   align-items: center;
@@ -566,6 +570,20 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
+.orbital-overlay .orbital-tree-item.is-scene-selected {
+  border-color: rgba(115, 247, 255, 0.22);
+  background:
+    linear-gradient(180deg, rgba(115, 247, 255, 0.065), rgba(255, 255, 255, 0.014)),
+    rgba(255, 255, 255, 0.03);
+  box-shadow:
+    0 0 0 1px rgba(115, 247, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.orbital-overlay .orbital-tree-item.is-scene-selected .orbital-tree-kind {
+  color: rgba(161, 244, 255, 0.82);
+}
+
 .orbital-overlay .orbital-tree-item.is-editing {
   border-color: rgba(255, 224, 138, 0.18);
   background:
@@ -836,6 +854,202 @@
 
 .orbital-overlay .orbital-selection-shell-note {
   margin-top: 6px;
+}
+
+.orbital-overlay .orbital-core-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.orbital-overlay .orbital-core-head {
+  padding-bottom: 6px;
+}
+
+.orbital-overlay .orbital-core-head-copy {
+  min-width: 0;
+}
+
+.orbital-overlay .orbital-core-section {
+  width: auto;
+  min-width: 0;
+  max-width: calc(100% - 24px);
+  margin-left: 12px;
+  margin-right: 12px;
+  padding: 10px 12px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+}
+
+.orbital-overlay .orbital-core-actions-section {
+  padding-top: 12px;
+}
+
+.orbital-overlay .orbital-core-section-kicker {
+  margin: 0 0 8px;
+}
+
+.orbital-overlay .orbital-core-action-list,
+.orbital-overlay .orbital-core-metric-list {
+  display: grid;
+  gap: 6px;
+}
+
+.orbital-overlay .orbital-inspector-static-row {
+  cursor: default;
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-color-field {
+  margin-top: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.orbital-overlay .orbital-core-color-section .color-swatch-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(30px, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border-radius: 16px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.016);
+}
+
+.orbital-overlay .orbital-core-color-section .color-swatch.compact {
+  min-height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: transparent;
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+.orbital-overlay .orbital-core-color-section .color-swatch.compact:hover,
+.orbital-overlay .orbital-core-color-section .color-swatch.compact.is-active {
+  transform: none;
+  border-color: color-mix(in srgb, var(--swatch-color) 52%, rgba(255, 255, 255, 0.14));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--swatch-color) 12%, rgba(255, 255, 255, 0.02)), rgba(255, 255, 255, 0.008)),
+    rgba(255, 255, 255, 0.014);
+}
+
+.orbital-overlay .orbital-core-color-section .color-swatch.compact .color-swatch-fill {
+  width: 14px;
+  height: 14px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch-color) 14%, transparent);
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-picker {
+  gap: 7px;
+  padding: 8px 10px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.016);
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-color-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: rgba(183, 176, 216, 0.62);
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-control {
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-input {
+  width: 34px;
+  height: 22px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-input::-webkit-color-swatch,
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-input::-moz-color-swatch {
+  border-radius: 999px;
+}
+
+.orbital-overlay .orbital-core-color-section .orbital-custom-color-value {
+  font-size: 0.73rem;
+  letter-spacing: 0.1em;
+  color: rgba(233, 236, 255, 0.84);
+}
+
+.orbital-overlay .orbital-core-delete-row {
+  width: auto;
+  min-width: 0;
+  max-width: calc(100% - 24px);
+  margin: 0 12px;
+  padding-top: 2px;
+}
+
+.orbital-overlay .orbital-core-delete-button {
+  width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 120, 120, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 124, 124, 0.035), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.018);
+  color: rgba(255, 190, 190, 0.88);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  font-weight: 600;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.orbital-overlay .orbital-core-delete-button:hover {
+  border-color: rgba(255, 124, 124, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 124, 124, 0.055), rgba(255, 255, 255, 0.014)),
+    rgba(255, 255, 255, 0.024);
+  color: rgba(255, 214, 214, 0.94);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.orbital-overlay .orbital-core-delete-icon {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.92;
+}
+
+.orbital-overlay .orbital-core-delete-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.orbital-overlay .orbital-core-delete-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .orbital-overlay .orbital-selection-head,

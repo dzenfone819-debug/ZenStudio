@@ -281,6 +281,7 @@ const ru = {
     searchPlaceholder: "Поиск по заметкам, тексту, тегам и папкам",
     clearFilters: "Сбросить фильтры",
     renameAction: "Переименовать",
+    totalBodies: "Всего тел",
     notesMenu: "Заметки",
     foldersMenu: "Папки",
     tagsMenu: "Теги",

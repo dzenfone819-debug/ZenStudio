@@ -281,6 +281,7 @@ const en = {
     searchPlaceholder: "Search notes, text, tags, folders",
     clearFilters: "Clear filters",
     renameAction: "Rename",
+    totalBodies: "Total bodies",
     notesMenu: "Notes",
     foldersMenu: "Folders",
     tagsMenu: "Tags",

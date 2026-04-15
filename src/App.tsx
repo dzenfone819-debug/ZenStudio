@@ -1524,7 +1524,8 @@ export default function App() {
           pinnedStat: t("stats.pinned"),
           colorsStat: t("orbit.colorsMenu"),
           localVault: t("sync.localVault"),
-          renameAction: t("orbit.renameAction")
+          renameAction: t("orbit.renameAction"),
+          totalBodies: t("orbit.totalBodies")
         }}
         />
         <ConfirmDialog
