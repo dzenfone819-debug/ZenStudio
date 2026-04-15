@@ -304,6 +304,7 @@ type HoverPreviewAnchorRect = {
 };
 
 type HoverPreviewAnchorSource = "scene" | "inspector";
+type OrbitalChildKind = "folder" | "canvas" | "note";
 type InspectorContextMenuTarget =
   | {
       kind: "folder";
@@ -403,24 +404,6 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
-function getOrbitSlot(index: number) {
-  let remaining = index;
-  let ringIndex = 0;
-  let capacity = 6;
-
-  while (remaining >= capacity) {
-    remaining -= capacity;
-    ringIndex += 1;
-    capacity += 4;
-  }
-
-  return {
-    ringIndex,
-    slotIndex: remaining,
-    capacity
-  };
-}
-
 function noteSorter(left: Note, right: Note) {
   if (left.favorite !== right.favorite) {
     return left.favorite ? -1 : 1;
@@ -479,6 +462,165 @@ function buildStarburstPoints(innerRadius: number, outerRadius: number, points: 
 
 function getChildEntityId(child: OrbitalChild) {
   return child.folder ? `folder:${child.folder.folder.id}` : `note:${child.note!.id}`;
+}
+
+function getOrbitalChildKind(child: OrbitalChild): OrbitalChildKind {
+  if (child.folder) {
+    return "folder";
+  }
+
+  return child.note?.contentType === "canvas" ? "canvas" : "note";
+}
+
+function getOrbitalChildCreatedAt(child: OrbitalChild) {
+  return child.folder?.folder.createdAt ?? child.note?.createdAt ?? 0;
+}
+
+function getOrbitalChildStableId(child: OrbitalChild) {
+  return child.folder?.folder.id ?? child.note?.id ?? "";
+}
+
+function getOrbitalChildGroupOrder(kind: OrbitalChildKind) {
+  if (kind === "folder") {
+    return 0;
+  }
+
+  if (kind === "canvas") {
+    return 1;
+  }
+
+  return 2;
+}
+
+function compareOrbitalChildren(left: OrbitalChild, right: OrbitalChild) {
+  const leftKind = getOrbitalChildKind(left);
+  const rightKind = getOrbitalChildKind(right);
+  const groupDelta = getOrbitalChildGroupOrder(leftKind) - getOrbitalChildGroupOrder(rightKind);
+
+  if (groupDelta !== 0) {
+    return groupDelta;
+  }
+
+  const createdAtDelta = getOrbitalChildCreatedAt(left) - getOrbitalChildCreatedAt(right);
+
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+
+  return getOrbitalChildStableId(left).localeCompare(getOrbitalChildStableId(right));
+}
+
+type OrbitPlanningProfile = {
+  innerPadding: number;
+  laneGap: number;
+  planeRatio: number;
+  rotationRange: number;
+  kindBandOffset: Record<OrbitalChildKind, number>;
+  transitionGap: {
+    folderToCanvas: number;
+    folderToNote: number;
+    canvasToNote: number;
+  };
+  speedRange: {
+    min: number;
+    max: number;
+  };
+};
+
+function getOrbitPlanningProfile(
+  parentKind: SceneNodeKind,
+  depth: number
+): OrbitPlanningProfile {
+  if (parentKind === "core") {
+    return {
+      innerPadding: 188,
+      laneGap: 24,
+      planeRatio: 0.66,
+      rotationRange: 12,
+      kindBandOffset: {
+        folder: 0,
+        canvas: 42,
+        note: 82
+      },
+      transitionGap: {
+        folderToCanvas: 34,
+        folderToNote: 58,
+        canvasToNote: 24
+      },
+      speedRange: {
+        min: 0.000022,
+        max: 0.000049
+      }
+    };
+  }
+
+  if (depth <= 1) {
+    return {
+      innerPadding: 126,
+      laneGap: 18,
+      planeRatio: 0.78,
+      rotationRange: 8,
+      kindBandOffset: {
+        folder: 0,
+        canvas: 30,
+        note: 58
+      },
+      transitionGap: {
+        folderToCanvas: 24,
+        folderToNote: 40,
+        canvasToNote: 18
+      },
+      speedRange: {
+        min: 0.000018,
+        max: 0.000041
+      }
+    };
+  }
+
+  return {
+    innerPadding: 108,
+    laneGap: 15,
+    planeRatio: 0.84,
+    rotationRange: 6,
+    kindBandOffset: {
+      folder: 0,
+      canvas: 24,
+      note: 46
+    },
+    transitionGap: {
+      folderToCanvas: 18,
+      folderToNote: 30,
+      canvasToNote: 14
+    },
+    speedRange: {
+      min: 0.000018,
+      max: 0.000041
+    }
+  };
+}
+
+function getOrbitTransitionGap(
+  previousKind: OrbitalChildKind | null,
+  nextKind: OrbitalChildKind,
+  profile: OrbitPlanningProfile
+) {
+  if (!previousKind || previousKind === nextKind) {
+    return 0;
+  }
+
+  if (previousKind === "folder" && nextKind === "canvas") {
+    return profile.transitionGap.folderToCanvas;
+  }
+
+  if (previousKind === "folder" && nextKind === "note") {
+    return profile.transitionGap.folderToNote;
+  }
+
+  if (previousKind === "canvas" && nextKind === "note") {
+    return profile.transitionGap.canvasToNote;
+  }
+
+  return profile.transitionGap.canvasToNote;
 }
 
 function getProjectEntityId(projectId: string) {
@@ -1137,136 +1279,139 @@ function buildOrbitalLayout(
     children: OrbitalChild[],
     depth: number
   ) => {
-    const folderChildren = children.filter((child) => child.folder);
-    const noteChildren = children.filter((child) => child.note);
-    const scopedFolderChildren = visibleEntityIds
-      ? folderChildren.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
-      : folderChildren;
-    const scopedNoteChildren = visibleEntityIds
-      ? noteChildren.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
-      : noteChildren;
+    const orderedChildren = [...children].sort(compareOrbitalChildren);
+    const visibleChildren = visibleEntityIds
+      ? orderedChildren.filter((child) => visibleEntityIds.has(getChildEntityId(child)))
+      : orderedChildren;
 
-    if (scopedFolderChildren.length === 0 && scopedNoteChildren.length === 0) {
+    if (visibleChildren.length === 0) {
       return [];
     }
 
-    const folderRingSpan =
-      folderChildren.length > 0 ? getOrbitSlot(folderChildren.length - 1).ringIndex + 1 : 0;
-    const nodes: OrbitalLayoutNode[] = [];
+    const profile = getOrbitPlanningProfile(parent.kind, depth);
+    const planeSeed = hashString(`${parent.entityId}:plane`);
+    const planeRotation =
+      ((((planeSeed >> 3) % 1000) / 999) * 2 - 1) * profile.rotationRange;
+    const planeRatio =
+      profile.planeRatio + ((((planeSeed >> 12) % 9) - 4) * 0.0045);
+    const rotationRad = (planeRotation * Math.PI) / 180;
+    const parentPhase = ((hashString(`${parent.entityId}:phase`) % 360) * Math.PI) / 180;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const orbitPlanByEntityId = new Map<
+      string,
+      {
+        mass: number;
+        radius: number;
+        color: string;
+        label: string;
+        kind: SceneNodeKind;
+        orbit: OrbitalLayoutOrbit;
+      }
+    >();
 
-    const renderGroup = (
-      fullGroup: OrbitalChild[],
-      visibleGroup: OrbitalChild[],
-      bandOffset: number
-    ) => {
-      const indexByEntityId = new Map<string, number>();
+    let orbitRadius = 0;
+    let previousChildKind: OrbitalChildKind | null = null;
+    let previousChildRadius = 0;
 
-      fullGroup.forEach((child, index) => {
-        indexByEntityId.set(getChildEntityId(child), index);
-      });
+    orderedChildren.forEach((child, orderIndex) => {
+      const entityId = getChildEntityId(child);
+      const childKind = getOrbitalChildKind(child);
+      const seed = hashString(entityId);
+      const mass = child.folder?.mass ?? getNoteMass(child.note!);
+      const kind: SceneNodeKind = child.folder ? "folder" : "note";
+      const label = child.folder?.folder.name ?? child.note?.title ?? "";
+      const radius = child.folder
+        ? clamp(14 + child.folder.mass * 1.5, 15, 40)
+        : getOrbitalEntryRadius(child.note!);
+      const color = child.folder?.folder.color ?? child.note?.color ?? DEFAULT_NOTE_COLOR;
 
-      visibleGroup.forEach((child) => {
-        const entityId = getChildEntityId(child);
-        const index = indexByEntityId.get(entityId) ?? 0;
-        const seed = hashString(entityId);
-        const slot = getOrbitSlot(index);
-        const mass = child.folder?.mass ?? getNoteMass(child.note!);
-        const kind: SceneNodeKind = child.folder ? "folder" : "note";
-        const bandIndex = slot.ringIndex + bandOffset;
-        const isRootFolderOrbit = parent.kind === "core" && kind === "folder";
-        const ringSpacing = parent.kind === "core" ? 132 : 112;
-        const orbitSpread = parent.kind === "core" ? 18 : 15;
-        const centeredSlotOffset = isRootFolderOrbit
-          ? 0
-          : (slot.slotIndex - (slot.capacity - 1) / 2) * orbitSpread;
-        const rootOrbitOffset = isRootFolderOrbit ? index * 42 : 0;
-        const baseRadius =
-          parent.radius +
-          (parent.kind === "core" ? 232 : 154) +
-          depth * 28 +
-          bandIndex * ringSpacing +
-          centeredSlotOffset +
-          rootOrbitOffset +
-          (kind === "note" ? 18 : 0);
-        const rx = Math.max(
-          parent.radius + 64,
-          baseRadius +
-            (((seed >> 5) % (isRootFolderOrbit ? 7 : 9)) - (isRootFolderOrbit ? 3 : 4)) *
-              (isRootFolderOrbit ? 4 : 6)
-        );
-        const orbitRatio =
-          (parent.kind === "core" ? 0.6 : kind === "folder" ? 0.8 : 0.74) +
-          ((((seed >> 9) % 7) - 3) * 0.016);
-        const ry = Math.max(parent.radius + 42, rx * orbitRatio);
-        const rotation = (((seed >> 3) % 70) - 35) * (parent.kind === "core" ? 0.38 : 0.58);
-        const speedSeed = seededUnit(seed, 11);
-        const speedRange =
-          parent.kind === "core"
-            ? { min: 0.000022, max: 0.000049 }
-            : { min: 0.000018, max: 0.000041 };
-        const bandDrag = Math.max(0.72, 1 - bandIndex * 0.045);
-        const speed =
-          (speedRange.min + (speedRange.max - speedRange.min) * speedSeed) * bandDrag;
-        const direction = (seed % 2 === 0 ? 1 : -1) as 1 | -1;
-        const baseAngle =
-          ((Math.PI * 2) / Math.max(slot.capacity, 1)) * slot.slotIndex +
-          ((hashString(`${parent.entityId}:${kind}:${Math.round(bandIndex * 10)}`) % 360) *
-            Math.PI) /
-            180;
-        const label = child.folder?.folder.name ?? child.note?.title ?? "";
-        const radius = child.folder
-          ? clamp(14 + child.folder.mass * 1.5, 15, 40)
-          : getOrbitalEntryRadius(child.note!);
-        const color = child.folder?.folder.color ?? child.note?.color ?? DEFAULT_NOTE_COLOR;
-        const rotationRad = (rotation * Math.PI) / 180;
-        const node: OrbitalLayoutNode = {
-          id: entityId,
-          entityId,
-          parentEntityId: parent.entityId,
-          kind,
-          label,
-          radius,
+      if (orderIndex === 0) {
+        orbitRadius =
+          parent.radius + profile.innerPadding + profile.kindBandOffset[childKind] + radius;
+      } else {
+        orbitRadius +=
+          previousChildRadius +
+          radius +
+          profile.laneGap +
+          getOrbitTransitionGap(previousChildKind, childKind, profile);
+      }
+
+      const speedSeed = seededUnit(seed, 11);
+      const speed =
+        profile.speedRange.min + (profile.speedRange.max - profile.speedRange.min) * speedSeed;
+      const direction = (seed % 2 === 0 ? 1 : -1) as 1 | -1;
+      const baseAngle =
+        parentPhase +
+        orderIndex * goldenAngle +
+        ((((seed >> 17) % 120) - 60) / 60) * 0.08;
+
+      orbitPlanByEntityId.set(entityId, {
+        mass,
+        radius,
+        color,
+        label,
+        kind,
+        orbit: {
           color,
-          depth,
-          folder: child.folder?.folder,
-          note: child.note,
-          mass,
-          favorite: child.note?.favorite,
-          pinned: child.note?.pinned,
-          orbit: {
-            color,
-            rx,
-            ry,
-            rotation,
-            rotationCos: Math.cos(rotationRad),
-            rotationSin: Math.sin(rotationRad),
-            speed,
-            direction,
-            baseAngle,
-            wobble: ((((seed >> 14) % 240) - 120) / 120) * 0.08
-          },
-          children: []
-        };
-
-        entityMap.set(entityId, node);
-
-        if (child.folder) {
-          node.children = renderChildren(
-            node,
-            [
-              ...child.folder.children.map((branch) => ({ folder: branch })),
-              ...child.folder.notes.map((note) => ({ note }))
-            ],
-            depth + 1
-          );
+          rx: orbitRadius,
+          ry: Math.max(parent.radius + profile.innerPadding * 0.58, orbitRadius * planeRatio),
+          rotation: planeRotation,
+          rotationCos: Math.cos(rotationRad),
+          rotationSin: Math.sin(rotationRad),
+          speed,
+          direction,
+          baseAngle,
+          wobble: ((((seed >> 14) % 240) - 120) / 120) * 0.035
         }
-
-        nodes.push(node);
       });
-    };
 
-    renderGroup(folderChildren, scopedFolderChildren, 0);
-    renderGroup(noteChildren, scopedNoteChildren, folderRingSpan > 0 ? folderRingSpan + 1.2 : 1.2);
+      previousChildKind = childKind;
+      previousChildRadius = radius;
+    });
+
+    const nodes: OrbitalLayoutNode[] = [];
+    visibleChildren.forEach((child) => {
+      const entityId = getChildEntityId(child);
+      const orbitPlan = orbitPlanByEntityId.get(entityId);
+
+      if (!orbitPlan) {
+        return;
+      }
+
+      const node: OrbitalLayoutNode = {
+        id: entityId,
+        entityId,
+        parentEntityId: parent.entityId,
+        kind: orbitPlan.kind,
+        label: orbitPlan.label,
+        radius: orbitPlan.radius,
+        color: orbitPlan.color,
+        depth,
+        folder: child.folder?.folder,
+        note: child.note,
+        mass: orbitPlan.mass,
+        favorite: child.note?.favorite,
+        pinned: child.note?.pinned,
+        orbit: orbitPlan.orbit,
+        children: []
+      };
+
+      entityMap.set(entityId, node);
+
+      if (child.folder) {
+        node.children = renderChildren(
+          node,
+          [
+            ...child.folder.children.map((branch) => ({ folder: branch })),
+            ...child.folder.notes.map((note) => ({ note }))
+          ],
+          depth + 1
+        );
+      }
+
+      nodes.push(node);
+    });
+
     return nodes;
   };
 
