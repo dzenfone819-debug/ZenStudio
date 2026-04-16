@@ -1,17 +1,22 @@
-# Zen Sync Server
+# Zen Sync Cloud
 
-Optional multi-vault self-hosted sync server for Zen Notes.
+Managed multi-account cloud sync server for Zen Notes.
 
-Now also includes:
+This is the hosted/cloud runtime. It keeps the full control plane:
 
-- a hosted-ready registry layer with `user spaces`, so vaults can either stay standalone or belong to a specific user owner
-- optional account auth with email/password sessions
-- a user-facing account portal for creating personal vaults and sync tokens
+- account registration and login
+- user-owned vault spaces
+- token issuing
+- admin UI
+- account portal
+- multi-vault sync
+
+For the minimal free self-hosted runtime use [`../zen-sync-personal-server`](../zen-sync-personal-server/README.md).
 
 ## Run
 
 ```bash
-SYNC_TOKEN=local-dev-token ADMIN_TOKEN=local-admin-token npm run sync-server
+npm run sync-server:cloud
 ```
 
 Optional environment variables:
@@ -24,6 +29,7 @@ Optional environment variables:
 ## API
 
 - `GET /health`
+- `GET /v1/capabilities`
 - `POST /v1/auth/register`
 - `POST /v1/auth/login`
 - `POST /v1/auth/logout`
@@ -33,7 +39,6 @@ Optional environment variables:
 - `GET /v1/account/vaults/:vaultId/tokens`
 - `POST /v1/account/vaults/:vaultId/tokens`
 - `GET /v1/state` and `PUT /v1/state`
-  Legacy alias for the `default` vault
 - `GET /v1/vaults/:vaultId/state`
 - `PUT /v1/vaults/:vaultId/state`
 - `GET /v1/admin/vaults`
@@ -64,11 +69,3 @@ http://localhost:8787/account
 ```
 
 Register a user account or sign in, then create personal vaults and issue sync tokens for the Zen Notes client.
-
-Each vault is isolated and has its own snapshot history, revision counter, and bearer tokens.
-User spaces now support two modes:
-
-- control-plane only entries created from admin
-- authenticated end-user accounts created through the account portal or auth API
-
-The server stores a full sync snapshot plus a monotonic `revision` per vault and uses optimistic concurrency on `baseRevision`.

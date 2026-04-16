@@ -374,6 +374,23 @@ export function switchActiveLocalVaultDatabase(localVaultId: string) {
   db = createDatabaseForLocalVault(localVaultId);
 }
 
+async function withLocalVaultDatabase<T>(
+  localVaultId: string,
+  callback: (database: ZenNotesDatabase) => Promise<T>
+) {
+  const activeLocalVaultId = getStoredActiveLocalVaultId();
+  const isActive = localVaultId === activeLocalVaultId;
+  const database = isActive ? db : createDatabaseForLocalVault(localVaultId);
+
+  try {
+    return await callback(database);
+  } finally {
+    if (!isActive) {
+      database.close();
+    }
+  }
+}
+
 export async function ensureSeedData() {
   const existingSettings = await db.settings.get("app");
 
@@ -518,6 +535,47 @@ export async function resetSyncBinding() {
       if (note.syncState !== "conflict") {
         note.syncState = "local";
       }
+    });
+  });
+}
+
+export async function readLocalVaultSettings(localVaultId: string) {
+  return withLocalVaultDatabase(localVaultId, async (database) => {
+    return (await database.settings.get("app")) ?? null;
+  });
+}
+
+export async function patchLocalVaultSettings(
+  localVaultId: string,
+  patch: Partial<Omit<AppSettings, "id">>
+) {
+  return withLocalVaultDatabase(localVaultId, async (database) => {
+    await database.settings.update("app", patch);
+  });
+}
+
+export async function resetLocalVaultSyncBinding(localVaultId: string) {
+  return withLocalVaultDatabase(localVaultId, async (database) => {
+    await database.transaction("rw", [database.syncShadows, database.settings, database.notes], async () => {
+      await database.syncShadows.clear();
+      await database.settings.update("app", {
+        syncCursor: null,
+        lastSyncAt: null,
+        syncStatus: "idle",
+        syncEnabled: false,
+        syncProvider: "none",
+        selfHostedUrl: "",
+        selfHostedVaultId: "default",
+        selfHostedToken: "",
+        hostedVaultId: "",
+        hostedSyncToken: ""
+      });
+
+      await database.notes.toCollection().modify((note) => {
+        if (note.syncState !== "conflict") {
+          note.syncState = "local";
+        }
+      });
     });
   });
 }

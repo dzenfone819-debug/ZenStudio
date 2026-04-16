@@ -1,11 +1,12 @@
 {
-  "name": "zen-sync-server",
+  "name": "zen-sync-cloud",
   "version": "0.1.0",
   "type": "module",
   "private": false,
-  "description": "Optional multi-vault self-hosted sync server for Zen Notes",
+  "description": "Managed multi-account cloud sync server for Zen Notes",
   "scripts": {
     "start": "node server.mjs",
-    "sync-server": "node server.mjs"
+    "sync-server": "node server.mjs",
+    "sync-cloud": "node server.mjs"
   }
 }

@@ -1,5 +1,6 @@
 export type AppLanguage = "en" | "ru";
 export type SyncProvider = "none" | "googleDrive" | "selfHosted" | "hosted";
+export type SyncConnectionProvider = Exclude<SyncProvider, "none">;
 export type MobileSection = "vault" | "notes" | "editor";
 export type SaveState = "idle" | "saving" | "saved";
 export type AssetKind = "image" | "file" | "audio" | "video";
@@ -132,6 +133,45 @@ export interface AppSettings {
   syncCursor: string | null;
   localDeviceId: string;
   lastOpenedNoteId: string | null;
+}
+
+export interface SyncRemoteVault {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  lastRevision: string | null;
+  lastSyncAt: number | null;
+  tokenCount?: number;
+}
+
+export interface SyncConnection {
+  id: string;
+  provider: SyncConnectionProvider;
+  label: string;
+  serverUrl: string;
+  managementToken: string;
+  sessionToken: string;
+  userId: string | null;
+  userName: string;
+  userEmail: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SyncVaultBinding {
+  id: string;
+  localVaultId: string;
+  connectionId: string;
+  remoteVaultId: string;
+  remoteVaultName: string;
+  syncToken: string;
+  syncStatus: SyncStatus;
+  lastSyncAt: number | null;
+  syncCursor: string | null;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface HostedAccountUser {

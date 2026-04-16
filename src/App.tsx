@@ -6,7 +6,7 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import FolderPanel from "./components/FolderPanel";
 import KnowledgeMap from "./components/KnowledgeMap";
 import NotesPanel from "./components/NotesPanel";
-import SyncPanel from "./components/SyncPanel";
+import SettingsPanel from "./components/SettingsPanel";
 import TrashPanel from "./components/TrashPanel";
 import {
   createCanvas,
@@ -19,7 +19,8 @@ import {
   inspectFolderRemoval,
   moveNoteToTrash,
   patchSettings,
-  resetSyncBinding,
+  readLocalVaultSettings,
+  resetLocalVaultSyncBinding,
   removeProject,
   removeFolder,
   removeNote,
@@ -56,26 +57,26 @@ import {
   setStoredActiveLocalVaultId
 } from "./lib/localVaults";
 import {
-  createHostedVault,
-  issueHostedVaultToken,
-  loadHostedAccountOverview,
-  loginHostedAccount,
-  logoutHostedAccount,
-  registerHostedAccount,
-  runHostedSync,
-  runSelfHostedSync
+  runConfiguredSync
 } from "./lib/sync";
+import {
+  clearSyncBinding,
+  createSyncConnection,
+  listSyncBindings,
+  listSyncConnections,
+  migrateSyncRegistryFromLegacyVaultSettings,
+  removeBindingsForLocalVault,
+  removeSyncConnection,
+  updateSyncBindingState,
+  upsertSyncBinding
+} from "./lib/syncRegistry";
 import i18n from "./i18n";
 import type {
   AppLanguage,
-  HostedAccountUser,
-  HostedAccountVault,
   MobileSection,
   Note,
   NoteListView,
-  Project,
-  SaveState,
-  SyncProvider
+  SaveState
 } from "./types";
 
 const EditorPane = lazy(() => import("./components/EditorPane"));
@@ -116,6 +117,9 @@ export default function App() {
   const online = useOnlineStatus();
   const [activeLocalVaultId, setActiveLocalVaultId] = useState(() => getStoredActiveLocalVaultId());
   const [localVaults, setLocalVaults] = useState(() => listLocalVaultProfiles());
+  const [selectedSyncVaultId, setSelectedSyncVaultId] = useState(() => getStoredActiveLocalVaultId());
+  const [syncConnections, setSyncConnections] = useState(() => listSyncConnections());
+  const [syncBindings, setSyncBindings] = useState(() => listSyncBindings());
   const [vaultBooting, setVaultBooting] = useState(true);
   const projects = useLiveQuery(() => db.projects.toArray(), [activeLocalVaultId], []);
   const folders = useLiveQuery(() => db.folders.toArray(), [activeLocalVaultId], []);
@@ -138,10 +142,6 @@ export default function App() {
     text: string;
   } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const [hostedAccountUser, setHostedAccountUser] = useState<HostedAccountUser | null>(null);
-  const [hostedAccountVaults, setHostedAccountVaults] = useState<HostedAccountVault[]>([]);
-  const [hostedAccountLoading, setHostedAccountLoading] = useState(false);
-  const [hostedActionBusy, setHostedActionBusy] = useState(false);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
 
   useEffect(() => {
@@ -158,6 +158,36 @@ export default function App() {
       cancelled = true;
     };
   }, [activeLocalVaultId]);
+
+  const refreshSyncRegistryState = () => {
+    setSyncConnections(listSyncConnections());
+    setSyncBindings(listSyncBindings());
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void migrateSyncRegistryFromLegacyVaultSettings(
+      listLocalVaultProfiles().map((vault) => vault.id),
+      readLocalVaultSettings
+    ).then(() => {
+      if (!cancelled) {
+        refreshSyncRegistryState();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (localVaults.some((vault) => vault.id === selectedSyncVaultId)) {
+      return;
+    }
+
+    setSelectedSyncVaultId(activeLocalVaultId);
+  }, [activeLocalVaultId, localVaults, selectedSyncVaultId]);
 
   useEffect(() => {
     if (!settings) {
@@ -250,6 +280,18 @@ export default function App() {
     notes.find((note) => note.id === orbitalEditorNoteId && note.trashedAt === null) ?? null;
   const activeLocalVaultName =
     localVaults.find((vault) => vault.id === activeLocalVaultId)?.name ?? null;
+  const syncBindingsByVaultId = useMemo(
+    () => new Map(syncBindings.map((binding) => [binding.localVaultId, binding])),
+    [syncBindings]
+  );
+  const syncConnectionsById = useMemo(
+    () => new Map(syncConnections.map((connection) => [connection.id, connection])),
+    [syncConnections]
+  );
+  const activeVaultBinding = syncBindingsByVaultId.get(activeLocalVaultId) ?? null;
+  const activeVaultConnection = activeVaultBinding
+    ? syncConnectionsById.get(activeVaultBinding.connectionId) ?? null
+    : null;
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
@@ -559,6 +601,7 @@ export default function App() {
     switchActiveLocalVaultDatabase(localVaultId);
     setStoredActiveLocalVaultId(localVaultId);
     setActiveLocalVaultId(localVaultId);
+    setSelectedSyncVaultId(localVaultId);
     setLocalVaults(listLocalVaultProfiles());
     resetUiForVaultSwitch();
   };
@@ -610,42 +653,148 @@ export default function App() {
     }
 
     removeLocalVaultProfile(localVaultId);
+    removeBindingsForLocalVault(localVaultId);
     await deleteLocalVaultDatabase(localVaultId);
     setLocalVaults(listLocalVaultProfiles());
+    refreshSyncRegistryState();
   };
 
-  const handleChangeProvider = async (provider: SyncProvider) => {
-    setSyncFeedback(null);
-    await resetSyncBinding();
-    await patchSettings({
-      syncProvider: provider,
-      syncEnabled: provider !== "none",
-      syncStatus: provider === "none" ? "disabled" : "idle"
+  const handleCreateSyncConnection = (input: {
+    provider: "selfHosted" | "hosted";
+    serverUrl: string;
+    label?: string;
+    managementToken?: string;
+    sessionToken?: string;
+    userId?: string | null;
+    userName?: string;
+    userEmail?: string;
+  }) => {
+    createSyncConnection(input);
+    refreshSyncRegistryState();
+  };
+
+  const handleDeleteSyncConnection = async (connectionId: string) => {
+    const affectedBindings = syncBindings.filter((binding) => binding.connectionId === connectionId);
+
+    if (affectedBindings.length > 0) {
+      const confirmed = await requestConfirmation({
+        title: t("sync.connectionDelete"),
+        message: t("sync.connectionDeleteConfirm", {
+          count: affectedBindings.length
+        }),
+        confirmLabel: t("sync.connectionDelete"),
+        cancelLabel: t("dialog.cancel")
+      });
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    for (const binding of affectedBindings) {
+      await resetLocalVaultSyncBinding(binding.localVaultId);
+    }
+
+    removeSyncConnection(connectionId);
+    refreshSyncRegistryState();
+  };
+
+  const handleBindVaultToConnection = async (input: {
+    localVaultId: string;
+    connectionId: string;
+    remoteVaultId: string;
+    remoteVaultName?: string;
+    syncToken: string;
+  }) => {
+    await resetLocalVaultSyncBinding(input.localVaultId);
+    upsertSyncBinding({
+      ...input,
+      syncStatus: "idle",
+      lastSyncAt: null,
+      syncCursor: null,
+      lastError: null
+    });
+    refreshSyncRegistryState();
+    setSyncFeedback({
+      tone: "success",
+      text: t("sync.bindingUpdated")
     });
   };
 
-  const handleChangeSelfHostedUrl = async (value: string) => {
-    setSyncFeedback(null);
-    await resetSyncBinding();
-    await patchSettings({
-      selfHostedUrl: value
+  const handleClearVaultBinding = async (localVaultId: string) => {
+    const binding = syncBindingsByVaultId.get(localVaultId);
+
+    if (!binding) {
+      return;
+    }
+
+    await resetLocalVaultSyncBinding(localVaultId);
+    clearSyncBinding(localVaultId);
+    refreshSyncRegistryState();
+    setSyncFeedback({
+      tone: "success",
+      text: t("sync.bindingCleared")
     });
   };
 
-  const handleChangeSelfHostedVaultId = async (value: string) => {
-    setSyncFeedback(null);
-    await resetSyncBinding();
-    await patchSettings({
-      selfHostedVaultId: value
-    });
-  };
+  const handleRunActiveBoundSync = async () => {
+    if (!activeVaultBinding || !activeVaultConnection) {
+      setSyncFeedback({
+        tone: "error",
+        text: t("sync.bindingMissing")
+      });
+      return;
+    }
 
-  const handleChangeSelfHostedToken = async (value: string) => {
     setSyncFeedback(null);
-    await resetSyncBinding();
-    await patchSettings({
-      selfHostedToken: value
+    updateSyncBindingState(activeLocalVaultId, {
+      syncStatus: "syncing",
+      lastError: null
     });
+    refreshSyncRegistryState();
+
+    try {
+      const result = await runConfiguredSync(
+        {
+          provider: activeVaultConnection.provider,
+          serverUrl: activeVaultConnection.serverUrl,
+          vaultId: activeVaultBinding.remoteVaultId,
+          token: activeVaultBinding.syncToken
+        },
+        {
+          onStatusChange: (status) => {
+            updateSyncBindingState(activeLocalVaultId, {
+              syncStatus: status
+            });
+            refreshSyncRegistryState();
+          }
+        }
+      );
+
+      updateSyncBindingState(activeLocalVaultId, {
+        syncStatus: "idle",
+        lastSyncAt: Date.now(),
+        syncCursor: result.revision,
+        lastError: null
+      });
+      refreshSyncRegistryState();
+      setSyncFeedback({
+        tone: "success",
+        text: t("sync.completed", {
+          count: result.stats.conflicts
+        })
+      });
+    } catch (error) {
+      updateSyncBindingState(activeLocalVaultId, {
+        syncStatus: "error",
+        lastError: error instanceof Error ? error.message : "SYNC_FAILED"
+      });
+      refreshSyncRegistryState();
+      setSyncFeedback({
+        tone: "error",
+        text: translateSyncError(error, activeVaultConnection.provider)
+      });
+    }
   };
 
   const handleTagToggle = async (tagId: string) => {
@@ -705,57 +854,13 @@ export default function App() {
     };
   }, []);
 
-  const clearHostedAccountState = () => {
-    setHostedAccountUser(null);
-    setHostedAccountVaults([]);
-  };
-
-  const clearHostedSessionSettings = async () => {
-    await patchSettings({
-      hostedSessionToken: "",
-      hostedUserId: null,
-      hostedUserName: "",
-      hostedUserEmail: "",
-      hostedVaultId: "",
-      hostedSyncToken: ""
-    });
-  };
-
-  const translateHostedAccountError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : "HOSTED_FAILED";
-
-    switch (message) {
-      case "EMAIL_REQUIRED":
-        return t("sync.hostedEmailRequired");
-      case "INVALID_EMAIL":
-        return t("sync.hostedInvalidEmail");
-      case "EMAIL_ALREADY_EXISTS":
-        return t("sync.hostedEmailExists");
-      case "PASSWORD_TOO_SHORT":
-        return t("sync.hostedPasswordTooShort");
-      case "EMAIL_AND_PASSWORD_REQUIRED":
-        return t("sync.hostedCredentialsRequired");
-      case "INVALID_CREDENTIALS":
-        return t("sync.hostedInvalidCredentials");
-      case "UNAUTHORIZED":
-        return t("sync.hostedSessionExpired");
-      case "VAULT_NOT_FOUND":
-        return t("sync.vaultNotFound");
-      case "HTTP_404":
-        return t("sync.serverNotFound");
-      default:
-        return t("sync.hostedFailedGeneric");
-    }
-  };
-
-  const translateSyncError = (error: unknown) => {
+  const translateSyncError = (
+    error: unknown,
+    provider: "selfHosted" | "hosted" | "googleDrive" | null = null
+  ) => {
     const message = error instanceof Error ? error.message : "SYNC_FAILED";
 
     switch (message) {
-      case "SELF_HOSTED_PROVIDER_REQUIRED":
-        return t("sync.selfHostedOnly");
-      case "HOSTED_PROVIDER_REQUIRED":
-        return t("sync.hostedFailedGeneric");
       case "SELF_HOSTED_URL_REQUIRED":
         return t("sync.urlRequired");
       case "HOSTED_URL_REQUIRED":
@@ -769,7 +874,7 @@ export default function App() {
       case "HOSTED_VAULT_REQUIRED":
         return t("sync.hostedVaultRequired");
       case "UNAUTHORIZED":
-        return settings?.syncProvider === "hosted"
+        return provider === "hosted"
           ? t("sync.hostedUnauthorized")
           : t("sync.unauthorized");
       case "VAULT_NOT_FOUND":
@@ -780,376 +885,6 @@ export default function App() {
         return t("sync.serverNotFound");
       default:
         return t("sync.failedGeneric");
-    }
-  };
-
-  const hydrateHostedAccount = async (
-    serverUrl: string,
-    sessionToken: string,
-    options: {
-      feedbackOnError?: boolean;
-    } = {}
-  ) => {
-    setHostedAccountLoading(true);
-
-    try {
-      const overview = await loadHostedAccountOverview(serverUrl, sessionToken);
-      setHostedAccountUser(overview.user);
-      setHostedAccountVaults(overview.vaults);
-      await patchSettings({
-        hostedUserId: overview.user.id,
-        hostedUserName: overview.user.name,
-        hostedUserEmail: overview.user.email ?? ""
-      });
-      return overview;
-    } catch (error) {
-      if (error instanceof Error && error.message === "UNAUTHORIZED") {
-        clearHostedAccountState();
-        await resetSyncBinding();
-        await clearHostedSessionSettings();
-
-        if (options.feedbackOnError !== false) {
-          setSyncFeedback({
-            tone: "error",
-            text: t("sync.hostedSessionExpired")
-          });
-        }
-      } else if (options.feedbackOnError) {
-        setSyncFeedback({
-          tone: "error",
-          text: translateHostedAccountError(error)
-        });
-      }
-
-      throw error;
-    } finally {
-      setHostedAccountLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!settings || settings.syncProvider !== "hosted") {
-      setHostedAccountLoading(false);
-      clearHostedAccountState();
-      return;
-    }
-
-    const serverUrl = settings.hostedUrl.trim();
-    const sessionToken = settings.hostedSessionToken.trim();
-
-    if (serverUrl.length === 0 || sessionToken.length === 0) {
-      setHostedAccountLoading(false);
-      clearHostedAccountState();
-      return;
-    }
-
-    let cancelled = false;
-    setHostedAccountLoading(true);
-
-    void loadHostedAccountOverview(serverUrl, sessionToken)
-      .then(async (overview) => {
-        if (cancelled) {
-          return;
-        }
-
-        setHostedAccountUser(overview.user);
-        setHostedAccountVaults(overview.vaults);
-        await patchSettings({
-          hostedUserId: overview.user.id,
-          hostedUserName: overview.user.name,
-          hostedUserEmail: overview.user.email ?? ""
-        });
-
-        if (
-          settings.hostedVaultId &&
-          !overview.vaults.some((vault) => vault.id === settings.hostedVaultId)
-        ) {
-          await resetSyncBinding();
-          await patchSettings({
-            hostedVaultId: "",
-            hostedSyncToken: ""
-          });
-        }
-      })
-      .catch(async (error) => {
-        if (cancelled) {
-          return;
-        }
-
-        if (error instanceof Error && error.message === "UNAUTHORIZED") {
-          clearHostedAccountState();
-          await resetSyncBinding();
-          await clearHostedSessionSettings();
-          setSyncFeedback({
-            tone: "error",
-            text: t("sync.hostedSessionExpired")
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setHostedAccountLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    settings?.hostedSessionToken,
-    settings?.hostedUrl,
-    settings?.hostedVaultId,
-    settings?.syncProvider,
-    t
-  ]);
-
-  const handleRunSelfHostedSync = async () => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-
-    try {
-      const result = await runSelfHostedSync(settings, {
-        onStatusChange: async (status) => {
-          await patchSettings({
-            syncStatus: status
-          });
-        }
-      });
-
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.completed", {
-          count: result.stats.conflicts
-        })
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateSyncError(error)
-      });
-    }
-  };
-
-  const handleChangeHostedUrl = async (value: string) => {
-    setSyncFeedback(null);
-    clearHostedAccountState();
-    await resetSyncBinding();
-    await clearHostedSessionSettings();
-    await patchSettings({
-      hostedUrl: value
-    });
-  };
-
-  const handleHostedRegister = async (payload: {
-    name: string;
-    email: string;
-    password: string;
-  }) => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-    setHostedActionBusy(true);
-
-    try {
-      const result = await registerHostedAccount(settings.hostedUrl, payload);
-      clearHostedAccountState();
-      await resetSyncBinding();
-      await patchSettings({
-        hostedSessionToken: result.session.token,
-        hostedUserId: result.user.id,
-        hostedUserName: result.user.name,
-        hostedUserEmail: result.user.email ?? "",
-        hostedVaultId: "",
-        hostedSyncToken: ""
-      });
-      setHostedAccountUser(result.user);
-      setHostedAccountVaults([]);
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.hostedAccountCreated")
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateHostedAccountError(error)
-      });
-    } finally {
-      setHostedActionBusy(false);
-    }
-  };
-
-  const handleHostedLogin = async (payload: { email: string; password: string }) => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-    setHostedActionBusy(true);
-
-    try {
-      const result = await loginHostedAccount(settings.hostedUrl, payload);
-      await resetSyncBinding();
-      await patchSettings({
-        hostedSessionToken: result.session.token,
-        hostedUserId: result.user.id,
-        hostedUserName: result.user.name,
-        hostedUserEmail: result.user.email ?? "",
-        hostedVaultId: "",
-        hostedSyncToken: ""
-      });
-      await hydrateHostedAccount(settings.hostedUrl, result.session.token, {
-        feedbackOnError: true
-      });
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.hostedLoggedIn")
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateHostedAccountError(error)
-      });
-    } finally {
-      setHostedActionBusy(false);
-    }
-  };
-
-  const handleHostedLogout = async () => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-    setHostedActionBusy(true);
-
-    try {
-      if (settings.hostedUrl.trim() && settings.hostedSessionToken.trim()) {
-        await logoutHostedAccount(settings.hostedUrl, settings.hostedSessionToken);
-      }
-    } catch {
-      // Local logout should still proceed even if the remote session has already expired.
-    } finally {
-      clearHostedAccountState();
-      await resetSyncBinding();
-      await clearHostedSessionSettings();
-      setHostedActionBusy(false);
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.hostedLoggedOut")
-      });
-    }
-  };
-
-  const handleRefreshHostedAccount = async () => {
-    if (!settings || !settings.hostedUrl.trim() || !settings.hostedSessionToken.trim()) {
-      return;
-    }
-
-    setSyncFeedback(null);
-
-    try {
-      await hydrateHostedAccount(settings.hostedUrl, settings.hostedSessionToken, {
-        feedbackOnError: true
-      });
-    } catch {
-      // Feedback already handled in hydrateHostedAccount.
-    }
-  };
-
-  const handleCreateHostedVault = async (payload: { name: string; id?: string }) => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-    setHostedActionBusy(true);
-
-    try {
-      await createHostedVault(settings.hostedUrl, settings.hostedSessionToken, payload);
-      await hydrateHostedAccount(settings.hostedUrl, settings.hostedSessionToken, {
-        feedbackOnError: true
-      });
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.hostedVaultCreated")
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateHostedAccountError(error)
-      });
-    } finally {
-      setHostedActionBusy(false);
-    }
-  };
-
-  const handleBindHostedVault = async (vault: HostedAccountVault) => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-    setHostedActionBusy(true);
-
-    try {
-      const result = await issueHostedVaultToken(
-        settings.hostedUrl,
-        settings.hostedSessionToken,
-        vault.id,
-        `${activeLocalVaultName ?? "Local vault"} · ${settings.localDeviceId}`
-      );
-
-      await resetSyncBinding();
-      await patchSettings({
-        hostedVaultId: vault.id,
-        hostedSyncToken: result.token
-      });
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.hostedVaultBound")
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateHostedAccountError(error)
-      });
-    } finally {
-      setHostedActionBusy(false);
-    }
-  };
-
-  const handleRunHostedSync = async () => {
-    if (!settings) {
-      return;
-    }
-
-    setSyncFeedback(null);
-
-    try {
-      const result = await runHostedSync(settings, {
-        onStatusChange: async (status) => {
-          await patchSettings({
-            syncStatus: status
-          });
-        }
-      });
-
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.completed", {
-          count: result.stats.conflicts
-        })
-      });
-    } catch (error) {
-      setSyncFeedback({
-        tone: "error",
-        text: translateSyncError(error)
-      });
     }
   };
 
@@ -1302,110 +1037,30 @@ export default function App() {
             onDelete={(noteId) => void handleDeleteNoteById(noteId)}
           />
         }
-        syncModalSlot={
-          <SyncPanel
+        settingsModalSlot={
+          <SettingsPanel
             settings={settings}
             online={online}
             localVaults={localVaults}
             activeLocalVaultId={activeLocalVaultId}
-            localVaultName={activeLocalVaultName}
+            selectedLocalVaultId={selectedSyncVaultId}
+            syncConnections={syncConnections}
+            syncBindings={syncBindings}
             syncFeedback={syncFeedback}
-            syncBusy={settings.syncStatus === "syncing"}
-            hostedAccountUser={hostedAccountUser}
-            hostedAccountVaults={hostedAccountVaults}
-            hostedAccountLoading={hostedAccountLoading}
-            hostedActionBusy={hostedActionBusy}
-            labels={{
-              title: t("sections.sync"),
-              panelCaption: t("sync.panelCaption"),
-              language: t("sync.language"),
-              localVaults: t("sync.localVaults"),
-              localVaultsCaption: t("sync.localVaultsCaption"),
-              localVaultActive: t("sync.localVaultActive"),
-              localVaultOpen: t("sync.localVaultOpen"),
-              localVaultCreate: t("sync.localVaultCreate"),
-              localVaultCreatePlaceholder: t("sync.localVaultCreatePlaceholder"),
-              localVaultRename: t("sync.localVaultRename"),
-              localVaultDelete: t("sync.localVaultDelete"),
-              localVaultSave: t("sync.localVaultSave"),
-              localVaultCancel: t("sync.localVaultCancel"),
-              localVaultEmpty: t("sync.localVaultEmpty"),
-              localVaultCannotDeleteLast: t("sync.localVaultCannotDeleteLast"),
-              provider: t("sync.provider"),
-              state: t("sync.state"),
-              none: t("sync.none"),
-              googleDrive: t("sync.googleDrive"),
-              selfHosted: t("sync.selfHosted"),
-              hosted: t("sync.hosted"),
-              ready: t("sync.ready"),
-              planned: t("sync.planned"),
-              endpoint: t("sync.endpoint"),
-              endpointPlaceholder: t("sync.endpointPlaceholder"),
-              vault: t("sync.vault"),
-              vaultPlaceholder: t("sync.vaultPlaceholder"),
-              token: t("sync.token"),
-              tokenPlaceholder: t("sync.tokenPlaceholder"),
-              bindingScope: t("sync.bindingScope"),
-              deviceId: t("sync.deviceId"),
-              conflictStrategy: t("sync.conflictStrategy"),
-              duplicateConflict: t("sync.duplicateConflict"),
-              encryption: t("sync.encryption"),
-              disabled: t("sync.disabled"),
-              lastSync: t("sync.lastSync"),
-              syncNow: t("sync.syncNow"),
-              syncing: t("sync.syncing"),
-              selfHostedOnly: t("sync.selfHostedOnly"),
-              lastRevision: t("sync.lastRevision"),
-              never: t("sync.never"),
-              hostedCaption: t("sync.hostedCaption"),
-              hostedAccount: t("sync.hostedAccount"),
-              hostedAccountLoading: t("sync.hostedAccountLoading"),
-              hostedAccountSignedOut: t("sync.hostedAccountSignedOut"),
-              hostedRegisterTitle: t("sync.hostedRegisterTitle"),
-              hostedLoginTitle: t("sync.hostedLoginTitle"),
-              hostedName: t("sync.hostedName"),
-              hostedNamePlaceholder: t("sync.hostedNamePlaceholder"),
-              hostedEmail: t("sync.hostedEmail"),
-              hostedEmailPlaceholder: t("sync.hostedEmailPlaceholder"),
-              hostedPassword: t("sync.hostedPassword"),
-              hostedPasswordPlaceholder: t("sync.hostedPasswordPlaceholder"),
-              hostedRegister: t("sync.hostedRegister"),
-              hostedLogin: t("sync.hostedLogin"),
-              hostedLogout: t("sync.hostedLogout"),
-              hostedRefresh: t("sync.hostedRefresh"),
-              hostedCreateVaultTitle: t("sync.hostedCreateVaultTitle"),
-              hostedCreateVault: t("sync.hostedCreateVault"),
-              hostedCreateVaultNamePlaceholder: t("sync.hostedCreateVaultNamePlaceholder"),
-              hostedCreateVaultIdPlaceholder: t("sync.hostedCreateVaultIdPlaceholder"),
-              hostedVaults: t("sync.hostedVaults"),
-              hostedNoVaults: t("sync.hostedNoVaults"),
-              hostedBind: t("sync.hostedBind"),
-              hostedBound: t("sync.hostedBound"),
-              hostedSelectedVault: t("sync.hostedSelectedVault"),
-              hostedAccountConnected: t("sync.hostedAccountConnected"),
-              hostedSyncReady: t("sync.hostedSyncReady"),
-              hostedSyncNeedsBinding: t("sync.hostedSyncNeedsBinding")
-            }}
+            syncBusy={activeVaultBinding?.syncStatus === "syncing"}
             onLanguageChange={(language) => void handleChangeLanguage(language)}
-            onSelectLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
+            onSelectLocalVault={(localVaultId) => setSelectedSyncVaultId(localVaultId)}
+            onOpenLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
             onCreateLocalVault={(name) => handleCreateLocalVault(name)}
             onRenameLocalVault={(localVaultId, name) =>
               handleRenameLocalVault(localVaultId, name)
             }
             onDeleteLocalVault={(localVaultId) => void handleDeleteLocalVault(localVaultId)}
-            onProviderChange={(provider) => void handleChangeProvider(provider)}
-            onUrlChange={(value) => void handleChangeSelfHostedUrl(value)}
-            onVaultChange={(value) => void handleChangeSelfHostedVaultId(value)}
-            onTokenChange={(value) => void handleChangeSelfHostedToken(value)}
-            onHostedUrlChange={(value) => void handleChangeHostedUrl(value)}
-            onHostedRegister={(payload) => void handleHostedRegister(payload)}
-            onHostedLogin={(payload) => void handleHostedLogin(payload)}
-            onHostedLogout={() => void handleHostedLogout()}
-            onHostedRefresh={() => void handleRefreshHostedAccount()}
-            onHostedCreateVault={(payload) => void handleCreateHostedVault(payload)}
-            onHostedBindVault={(vault) => void handleBindHostedVault(vault)}
-            onRunHostedSync={() => void handleRunHostedSync()}
-            onRunSync={() => void handleRunSelfHostedSync()}
+            onCreateConnection={handleCreateSyncConnection}
+            onDeleteConnection={(connectionId) => void handleDeleteSyncConnection(connectionId)}
+            onBindVault={(input) => void handleBindVaultToConnection(input)}
+            onClearBinding={(localVaultId) => void handleClearVaultBinding(localVaultId)}
+            onRunActiveSync={() => void handleRunActiveBoundSync()}
           />
         }
         showClose={false}
@@ -1494,7 +1149,7 @@ export default function App() {
           empty: t("orbit.empty"),
           emptyCanvas: t("orbit.emptyCanvas"),
           hints: t("orbit.hints"),
-          sync: t("orbit.sync"),
+          settings: t("orbit.settings"),
           trash: t("orbit.trash"),
           closeModal: t("orbit.closeModal"),
           overview: t("orbit.overview"),

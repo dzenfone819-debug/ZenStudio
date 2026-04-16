@@ -45,7 +45,7 @@ interface OrbitalMapViewProps {
   editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
   editorTitle?: string;
-  syncModalSlot?: ReactNode;
+  settingsModalSlot?: ReactNode;
   trashModalSlot?: ReactNode;
   showClose?: boolean;
   onClose: () => void;
@@ -117,7 +117,7 @@ interface OrbitalMapViewProps {
     empty: string;
     emptyCanvas: string;
     hints: string;
-    sync: string;
+    settings: string;
     trash: string;
     closeModal: string;
     overview: string;
@@ -1660,7 +1660,7 @@ export default function OrbitalMapView({
   editorMode = null,
   editorSlot,
   editorTitle,
-  syncModalSlot,
+  settingsModalSlot,
   trashModalSlot,
   showClose = true,
   onClose,
@@ -1701,7 +1701,7 @@ export default function OrbitalMapView({
   const [projectPositionDrafts, setProjectPositionDrafts] = useState<
     Record<string, { x: number; y: number }>
   >({});
-  const [activeModal, setActiveModal] = useState<"sync" | "trash" | null>(null);
+  const [activeModal, setActiveModal] = useState<"settings" | "trash" | null>(null);
   const [isCanvasEditorFullscreen, setIsCanvasEditorFullscreen] = useState(false);
   const [isDocumentVisible, setIsDocumentVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState !== "hidden"
@@ -4644,16 +4644,16 @@ export default function OrbitalMapView({
             </button>
           </div>
 
-          {(trashModalSlot || syncModalSlot) && (
+          {(trashModalSlot || settingsModalSlot) && (
             <div className="orbital-toolbar-cluster">
               {trashModalSlot ? (
                 <button className="toolbar-action orbital-toolbar-action" onClick={() => setActiveModal("trash")}>
                   {labels.trash}
                 </button>
               ) : null}
-              {syncModalSlot ? (
-                <button className="toolbar-action orbital-toolbar-action" onClick={() => setActiveModal("sync")}>
-                  {labels.sync}
+              {settingsModalSlot ? (
+                <button className="toolbar-action orbital-toolbar-action" onClick={() => setActiveModal("settings")}>
+                  {labels.settings}
                 </button>
               ) : null}
             </div>
@@ -5746,7 +5746,7 @@ export default function OrbitalMapView({
               {labels.closeModal}
             </button>
             <div className="orbital-modal-content">
-              {activeModal === "sync" ? syncModalSlot : trashModalSlot}
+              {activeModal === "settings" ? settingsModalSlot : trashModalSlot}
             </div>
           </div>
         </div>

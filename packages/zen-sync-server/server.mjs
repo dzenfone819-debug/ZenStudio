@@ -6,9 +6,24 @@ import {
   timingSafeEqual
 } from "node:crypto";
 import { createServer } from "node:http";
-import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  collectBody,
+  createEmptyEnvelope,
+  ensureDir,
+  fileExists,
+  getBearerToken,
+  handleOptimisticSyncRoute,
+  now,
+  readJsonFile,
+  sendCorsNoContent,
+  sendJson,
+  serveStaticAsset,
+  writeJsonFile
+} from "../zen-sync-server-core/common.mjs";
 
 const PORT = Number.parseInt(process.env.PORT ?? "8787", 10);
 const SYNC_TOKEN = process.env.SYNC_TOKEN ?? "local-dev-token";
@@ -22,33 +37,8 @@ const REGISTRY_FILE = path.join(DATA_DIR, "registry.json");
 const LEGACY_STATE_FILE = path.join(DATA_DIR, "state.json");
 const ADMIN_DIR = path.join(SERVER_DIR, "admin");
 const ACCOUNT_DIR = path.join(SERVER_DIR, "account");
-const MAX_BODY_BYTES = 128 * 1024 * 1024;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const MIN_PASSWORD_LENGTH = 8;
-
-function now() {
-  return Date.now();
-}
-
-function createEmptySnapshot() {
-  return {
-    deviceId: "server",
-    exportedAt: 0,
-    projects: [],
-    folders: [],
-    tags: [],
-    notes: [],
-    assets: [],
-    tombstones: []
-  };
-}
-
-function createEmptyEnvelope() {
-  return {
-    revision: null,
-    snapshot: createEmptySnapshot()
-  };
-}
 
 function createEmptyRegistry() {
   return {
@@ -108,16 +98,6 @@ function createSessionTokenValue() {
   return `zns_${randomUUID().replace(/-/g, "")}`;
 }
 
-function getBearerToken(request) {
-  const authHeader = request.headers.authorization ?? "";
-
-  if (!authHeader.startsWith("Bearer ")) {
-    return "";
-  }
-
-  return authHeader.slice("Bearer ".length).trim();
-}
-
 function sanitizeVaultId(rawValue) {
   const candidate = String(rawValue ?? "")
     .trim()
@@ -173,35 +153,9 @@ function getVaultStateFile(vaultId) {
   return path.join(VAULTS_DIR, `${vaultId}.json`);
 }
 
-async function fileExists(filePath) {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function ensureDataDirs() {
-  await mkdir(DATA_DIR, { recursive: true });
-  await mkdir(VAULTS_DIR, { recursive: true });
-}
-
-async function readJsonFile(filePath, fallbackValue) {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return fallbackValue;
-    }
-
-    throw error;
-  }
-}
-
-async function writeJsonFile(filePath, value) {
-  await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+  await ensureDir(DATA_DIR);
+  await ensureDir(VAULTS_DIR);
 }
 
 function normalizeTokenRecord(entry) {
@@ -329,7 +283,10 @@ async function readVaultEnvelope(vaultId) {
 
   return {
     revision: typeof parsed.revision === "string" ? parsed.revision : null,
-    snapshot: parsed.snapshot && typeof parsed.snapshot === "object" ? parsed.snapshot : createEmptySnapshot()
+    snapshot:
+      parsed.snapshot && typeof parsed.snapshot === "object"
+        ? parsed.snapshot
+        : createEmptyEnvelope().snapshot
   };
 }
 
@@ -446,24 +403,6 @@ async function ensureInitialized() {
   return migrateLegacySingleVault(registry);
 }
 
-function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS"
-  });
-  response.end(JSON.stringify(payload));
-}
-
-function sendText(response, statusCode, contentType, payload) {
-  response.writeHead(statusCode, {
-    "Content-Type": contentType,
-    "Access-Control-Allow-Origin": "*"
-  });
-  response.end(payload);
-}
-
 function isAdminAuthorized(request) {
   return getBearerToken(request) === ADMIN_TOKEN;
 }
@@ -564,41 +503,6 @@ async function updateVaultMeta(registry, vaultId, patch) {
 
   await writeRegistry(nextRegistry);
   return nextRegistry;
-}
-
-function collectBody(request) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-
-    request.on("data", (chunk) => {
-      size += chunk.length;
-
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error("PAYLOAD_TOO_LARGE"));
-        request.destroy();
-        return;
-      }
-
-      chunks.push(chunk);
-    });
-
-    request.on("end", () => {
-      try {
-        const text = Buffer.concat(chunks).toString("utf8");
-        resolve(text ? JSON.parse(text) : {});
-      } catch (error) {
-        reject(error);
-      }
-    });
-
-    request.on("error", reject);
-  });
-}
-
-async function serveStaticAsset(response, baseDir, relativePath, contentType) {
-  const payload = await readFile(path.join(baseDir, relativePath), "utf8");
-  sendText(response, 200, contentType, payload);
 }
 
 function buildPublicUser(user) {
@@ -922,12 +826,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "OPTIONS") {
-      response.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS"
-      });
-      response.end();
+      sendCorsNoContent(response);
       return;
     }
 
@@ -938,9 +837,27 @@ const server = createServer(async (request, response) => {
     if (pathname === "/health" && request.method === "GET") {
       sendJson(response, 200, {
         ok: true,
+        mode: "cloud",
         userCount: registry.users.length,
         vaultCount: registry.vaults.length,
         sessionCount: registry.sessions.length
+      });
+      return;
+    }
+
+    if (pathname === "/v1/capabilities" && request.method === "GET") {
+      sendJson(response, 200, {
+        mode: "cloud",
+        product: "Zen Sync Cloud",
+        features: {
+          selfHosted: true,
+          hostedAccounts: true,
+          adminUi: true,
+          accountPortal: true,
+          multiUser: true,
+          multiVault: true,
+          standaloneRegistry: true
+        }
       });
       return;
     }
@@ -1343,48 +1260,18 @@ const server = createServer(async (request, response) => {
       }
 
       const registryWithUsage = await markTokenUsed(registry, tokenRecord.id);
-
-      if (request.method === "GET") {
-        sendJson(response, 200, await readVaultEnvelope(stateVaultId));
-        return;
-      }
-
-      const currentState = await readVaultEnvelope(stateVaultId);
-      const payload = await collectBody(request);
-      const baseRevision =
-        payload && typeof payload === "object" && "baseRevision" in payload
-          ? payload.baseRevision ?? null
-          : null;
-      const snapshot =
-        payload && typeof payload === "object" && "snapshot" in payload && payload.snapshot
-          ? payload.snapshot
-          : null;
-
-      if (!snapshot || typeof snapshot !== "object") {
-        sendJson(response, 400, { error: "SNAPSHOT_REQUIRED" });
-        return;
-      }
-
-      if (currentState.revision !== baseRevision) {
-        sendJson(response, 409, currentState);
-        return;
-      }
-
-      const nextEnvelope = {
-        revision: `rev-${Date.now()}-${randomUUID()}`,
-        snapshot: {
-          ...snapshot,
-          exportedAt: Date.now()
+      await handleOptimisticSyncRoute({
+        request,
+        response,
+        readEnvelope: () => readVaultEnvelope(stateVaultId),
+        writeEnvelope: (envelope) => writeVaultEnvelope(stateVaultId, envelope),
+        onAfterWrite: async (envelope) => {
+          await updateVaultMeta(registryWithUsage, stateVaultId, {
+            lastRevision: envelope.revision,
+            lastSyncAt: Date.now()
+          });
         }
-      };
-
-      await writeVaultEnvelope(stateVaultId, nextEnvelope);
-      await updateVaultMeta(registryWithUsage, stateVaultId, {
-        lastRevision: nextEnvelope.revision,
-        lastSyncAt: Date.now()
       });
-
-      sendJson(response, 200, nextEnvelope);
       return;
     }
 
@@ -1398,7 +1285,7 @@ const server = createServer(async (request, response) => {
 await ensureInitialized();
 
 server.listen(PORT, () => {
-  console.log(`Zen sync server listening on http://localhost:${PORT}`);
+  console.log(`Zen Sync Cloud listening on http://localhost:${PORT}`);
   console.log(`Data dir: ${DATA_DIR}`);
   console.log(`Admin UI: http://localhost:${PORT}/admin`);
   console.log(`Account UI: http://localhost:${PORT}/account`);

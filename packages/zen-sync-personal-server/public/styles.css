@@ -1,0 +1,164 @@
+@import url("https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Orbitron:wght@500;700&display=swap");
+
+:root {
+  color-scheme: dark;
+  --bg: #0c1020;
+  --bg-glow: rgba(103, 228, 255, 0.18);
+  --panel: rgba(12, 18, 34, 0.84);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #f5f7ff;
+  --muted: rgba(245, 247, 255, 0.64);
+  --accent: #68e8ff;
+  --accent-warm: #f5c56d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Azeret Mono", monospace;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top, rgba(104, 232, 255, 0.16), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgba(245, 197, 109, 0.14), transparent 24%),
+    linear-gradient(180deg, #10162a 0%, #0a0f1d 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03), transparent 16%, transparent 84%, rgba(255, 255, 255, 0.03)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.03));
+  opacity: 0.52;
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  width: min(980px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+
+.hero,
+.card {
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hero {
+  padding: 28px;
+  margin-bottom: 18px;
+}
+
+.hero h1 {
+  margin: 10px 0 12px;
+  font-family: "Orbitron", sans-serif;
+  font-size: clamp(1.8rem, 4vw, 2.9rem);
+  line-height: 1.08;
+  letter-spacing: 0.03em;
+}
+
+.hero p,
+.card li,
+.card dd {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 20px var(--bg-glow);
+}
+
+.card {
+  padding: 22px 24px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  margin: 0 0 16px;
+  font-family: "Orbitron", sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card.muted h2 {
+  color: var(--accent-warm);
+}
+
+.details {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.details div {
+  display: grid;
+  gap: 6px;
+}
+
+.details dt {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(245, 247, 255, 0.48);
+}
+
+.details dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.feature-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+code {
+  font-family: inherit;
+  color: var(--text);
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100vw, calc(100vw - 20px));
+    padding-top: 16px;
+  }
+
+  .hero,
+  .card {
+    border-radius: 20px;
+  }
+
+  .hero,
+  .card {
+    padding: 20px;
+  }
+}

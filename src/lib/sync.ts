@@ -22,8 +22,10 @@ import type {
   HostedAccountVault,
   Note,
   Project,
+  SyncConnectionProvider,
   SyncEnvelope,
   SyncEntityKind,
+  SyncRemoteVault,
   SyncRunStats,
   SyncShadow,
   SyncSnapshot,
@@ -66,6 +68,13 @@ type HostedAccountOverview = {
   vaults: HostedAccountVault[];
 };
 
+type RemoteSyncConfig = {
+  provider: SyncConnectionProvider;
+  serverUrl: string;
+  vaultId: string;
+  token: string;
+};
+
 function getEntityKey(entityType: SyncEntityKind, entityId: string) {
   return `${entityType}:${entityId}`;
 }
@@ -83,6 +92,10 @@ function buildVaultStateUrl(serverUrl: string, vaultId: string) {
 }
 
 function buildAccountUrl(serverUrl: string, path: string) {
+  return `${normalizeBaseUrl(serverUrl)}${path}`;
+}
+
+function buildPersonalUrl(serverUrl: string, path: string) {
   return `${normalizeBaseUrl(serverUrl)}${path}`;
 }
 
@@ -700,6 +713,56 @@ export async function issueHostedVaultToken(
   });
 }
 
+export async function loadPersonalServerVaults(serverUrl: string, managementToken: string) {
+  return requestJson<{
+    vaults: SyncRemoteVault[];
+  }>(buildPersonalUrl(serverUrl, "/v1/personal/vaults"), {
+    method: "GET",
+    headers: createBearerHeaders(managementToken, false)
+  });
+}
+
+export async function createPersonalServerVault(
+  serverUrl: string,
+  managementToken: string,
+  payload: {
+    name: string;
+    id?: string;
+  }
+) {
+  return requestJson<{
+    vault: SyncRemoteVault;
+  }>(buildPersonalUrl(serverUrl, "/v1/personal/vaults"), {
+    method: "POST",
+    headers: createBearerHeaders(managementToken, true),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function issuePersonalServerVaultToken(
+  serverUrl: string,
+  managementToken: string,
+  vaultId: string,
+  label: string
+) {
+  return requestJson<{
+    token: string;
+    tokenMeta: {
+      id: string;
+      vaultId: string;
+      label: string;
+      createdAt: number;
+      lastUsedAt: number | null;
+    };
+  }>(buildPersonalUrl(serverUrl, `/v1/personal/vaults/${encodeURIComponent(vaultId)}/tokens`), {
+    method: "POST",
+    headers: createBearerHeaders(managementToken, true),
+    body: JSON.stringify({
+      label
+    })
+  });
+}
+
 async function pullSelfHostedEnvelope(serverUrl: string, vaultId: string, token: string) {
   return requestJson<SyncEnvelope>(buildVaultStateUrl(serverUrl, vaultId), {
     method: "GET",
@@ -1164,19 +1227,12 @@ export async function runSelfHostedSync(
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
   }
 ): Promise<SyncExecutionResult> {
-  if (settings.syncProvider !== "selfHosted") {
-    throw new Error("SELF_HOSTED_PROVIDER_REQUIRED");
-  }
-
-  return runRemoteVaultSync(
-    settings,
+  return runConfiguredSync(
     {
+      provider: "selfHosted",
       serverUrl: settings.selfHostedUrl,
       vaultId: settings.selfHostedVaultId,
-      token: settings.selfHostedToken,
-      missingUrlError: "SELF_HOSTED_URL_REQUIRED",
-      missingTokenError: "SELF_HOSTED_TOKEN_REQUIRED",
-      missingVaultError: "SELF_HOSTED_VAULT_REQUIRED"
+      token: settings.selfHostedToken
     },
     options
   );
@@ -1188,34 +1244,19 @@ export async function runHostedSync(
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
   }
 ): Promise<SyncExecutionResult> {
-  if (settings.syncProvider !== "hosted") {
-    throw new Error("HOSTED_PROVIDER_REQUIRED");
-  }
-
-  return runRemoteVaultSync(
-    settings,
+  return runConfiguredSync(
     {
+      provider: "hosted",
       serverUrl: settings.hostedUrl,
       vaultId: settings.hostedVaultId,
-      token: settings.hostedSyncToken,
-      missingUrlError: "HOSTED_URL_REQUIRED",
-      missingTokenError: "HOSTED_SYNC_TOKEN_REQUIRED",
-      missingVaultError: "HOSTED_VAULT_REQUIRED"
+      token: settings.hostedSyncToken
     },
     options
   );
 }
 
-async function runRemoteVaultSync(
-  settings: AppSettings,
-  remote: {
-    serverUrl: string;
-    vaultId: string;
-    token: string;
-    missingUrlError: string;
-    missingTokenError: string;
-    missingVaultError: string;
-  },
+export async function runConfiguredSync(
+  remote: RemoteSyncConfig,
   options?: {
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
   }
@@ -1225,15 +1266,17 @@ async function runRemoteVaultSync(
   const token = remote.token.trim();
 
   if (!serverUrl) {
-    throw new Error(remote.missingUrlError);
+    throw new Error(remote.provider === "hosted" ? "HOSTED_URL_REQUIRED" : "SELF_HOSTED_URL_REQUIRED");
   }
 
   if (!token) {
-    throw new Error(remote.missingTokenError);
+    throw new Error(
+      remote.provider === "hosted" ? "HOSTED_SYNC_TOKEN_REQUIRED" : "SELF_HOSTED_TOKEN_REQUIRED"
+    );
   }
 
   if (!vaultId) {
-    throw new Error(remote.missingVaultError);
+    throw new Error(remote.provider === "hosted" ? "HOSTED_VAULT_REQUIRED" : "SELF_HOSTED_VAULT_REQUIRED");
   }
 
   await options?.onStatusChange?.("syncing");
