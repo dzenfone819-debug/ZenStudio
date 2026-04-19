@@ -5762,11 +5762,25 @@ export default function OrbitalMapView({
             aria-label={labels.closeModal}
             onClick={() => setActiveModal(null)}
           />
-          <div className={`orbital-modal-window ${activeModal === "settings" ? "is-settings-mode" : ""}`}>
-            <button className="toolbar-action danger orbital-modal-close" onClick={() => setActiveModal(null)}>
-              {labels.closeModal}
-            </button>
-            <div className="orbital-modal-content">
+          <div
+            className={`orbital-modal-window orbital-utility-modal-window ${
+              activeModal === "settings" ? "is-settings-mode" : "is-trash-mode"
+            }`}
+          >
+            <div className="orbital-utility-modal-head">
+              <div className="orbital-utility-modal-heading">
+                <p className="panel-kicker orbital-utility-modal-kicker">
+                  {activeModal === "settings" ? labels.settings : labels.trash}
+                </p>
+              </div>
+              <button
+                className="toolbar-action orbital-utility-modal-close"
+                onClick={() => setActiveModal(null)}
+              >
+                {labels.closeModal}
+              </button>
+            </div>
+            <div className="orbital-modal-content orbital-utility-modal-content">
               {activeModal === "settings" ? settingsModalSlot : trashModalSlot}
             </div>
           </div>

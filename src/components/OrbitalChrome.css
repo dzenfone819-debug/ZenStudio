@@ -3,6 +3,10 @@
 }
 
 .orbital-overlay .orbital-topbar-minimal {
+  position: relative;
+  z-index: 6;
+  isolation: isolate;
+  overflow: visible;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
@@ -23,6 +27,7 @@
   min-width: 0;
   display: grid;
   gap: 8px;
+  overflow: visible;
 }
 
 .orbital-topbar-copy {
@@ -48,6 +53,7 @@
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  overflow: visible;
 }
 
 .orbital-context-pill {
