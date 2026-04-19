@@ -264,9 +264,28 @@ export interface SyncSnapshot {
   tombstones: SyncTombstone[];
 }
 
+export interface SyncChangeSet {
+  deviceId: string;
+  exportedAt: number;
+  projects: Project[];
+  folders: Folder[];
+  tags: Tag[];
+  notes: SyncedNoteRecord[];
+  assets: SyncedAssetRecord[];
+  tombstones: SyncTombstone[];
+}
+
 export interface SyncEnvelope {
   revision: string | null;
   snapshot: SyncSnapshot;
+}
+
+export interface SyncChangeFeed {
+  mode: "delta" | "snapshot";
+  revision: string | null;
+  baseRevision: string | null;
+  changes: SyncChangeSet | null;
+  snapshot: SyncSnapshot | null;
 }
 
 export interface SyncRunStats {

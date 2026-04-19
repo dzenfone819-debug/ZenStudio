@@ -67,6 +67,28 @@
   text-overflow: ellipsis;
 }
 
+.orbital-sync-pill {
+  border-color: rgba(147, 173, 255, 0.16);
+}
+
+.orbital-sync-pill.is-success {
+  border-color: rgba(116, 241, 182, 0.24);
+  background: rgba(82, 208, 152, 0.08);
+  color: #c9ffe1;
+}
+
+.orbital-sync-pill.is-warning {
+  border-color: rgba(255, 213, 126, 0.26);
+  background: rgba(255, 197, 82, 0.08);
+  color: #ffe4ad;
+}
+
+.orbital-sync-pill.is-error {
+  border-color: rgba(255, 128, 141, 0.24);
+  background: rgba(255, 102, 120, 0.08);
+  color: #ffd0d6;
+}
+
 .orbital-overlay .orbital-topbar-minimal .status-chip {
   min-height: 28px;
   padding: 5px 9px;

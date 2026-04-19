@@ -18,6 +18,7 @@ import {
   loadHostedAccountOverview,
   loadPersonalServerVaults,
   loginHostedAccount,
+  probeSyncConnectionAvailability,
   registerHostedAccount
 } from "../lib/sync";
 import type { AppSettings, SyncConnection, SyncVaultBinding } from "../types";
@@ -97,6 +98,12 @@ type LinkMetric = {
   color: string;
   statusTone: "idle" | "syncing" | "error";
 };
+
+type ConnectionAvailabilityState =
+  | "checking"
+  | "available"
+  | "unavailable"
+  | "authError";
 
 function ChevronLeftGlyph() {
   return (
@@ -271,6 +278,9 @@ function translateSyncManagerError(message: string, t: ReturnType<typeof useTran
       return t("sync.hostedUrlRequired");
     case "UNAUTHORIZED":
       return t("sync.unauthorized");
+    case "SERVER_UNAVAILABLE":
+    case "HTTP_404":
+      return t("sync.serverNotFound");
     case "INVALID_CREDENTIALS":
       return t("sync.hostedInvalidCredentials");
     case "EMAIL_AND_PASSWORD_REQUIRED":
@@ -367,13 +377,24 @@ export default function SyncSettingsPanel({
   const [hostedPasswordDraft, setHostedPasswordDraft] = useState("");
   const [pendingBindVaultId, setPendingBindVaultId] = useState<string | null>(null);
   const [draftLink, setDraftLink] = useState<DraftLink>(null);
+  const [hoverConnectionId, setHoverConnectionId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [linkMetrics, setLinkMetrics] = useState<LinkMetric[]>([]);
+  const [connectionAvailability, setConnectionAvailability] = useState<Record<string, ConnectionAvailabilityState>>({});
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const vaultListRef = useRef<HTMLDivElement | null>(null);
+  const connectionListRef = useRef<HTMLDivElement | null>(null);
   const vaultRefs = useRef(new Map<string, HTMLElement>());
   const connectionRefs = useRef(new Map<string, HTMLElement>());
 
   const feedback = internalFeedback ?? syncFeedback;
+  const availabilitySignature = useMemo(
+    () =>
+      syncConnections
+        .map((connection) => `${connection.id}:${connection.updatedAt}:${connection.serverUrl}`)
+        .join("|"),
+    [syncConnections]
+  );
 
   const registerVaultRef = (vaultId: string, node: HTMLElement | null) => {
     if (node) {
@@ -393,14 +414,37 @@ export default function SyncSettingsPanel({
     connectionRefs.current.delete(connectionId);
   };
 
+  const findConnectionAtPoint = (clientX: number, clientY: number) => {
+    for (const [connectionId, node] of connectionRefs.current.entries()) {
+      const rect = node.getBoundingClientRect();
+      const hitSlop = 10;
+      const isWithinBounds =
+        clientX >= rect.left - hitSlop &&
+        clientX <= rect.right + hitSlop &&
+        clientY >= rect.top - hitSlop &&
+        clientY <= rect.bottom + hitSlop;
+
+      if (isWithinBounds) {
+        return connectionId;
+      }
+    }
+
+    return null;
+  };
+
   useLayoutEffect(() => {
     const stage = stageRef.current;
+    const vaultList = vaultListRef.current;
+    const connectionList = connectionListRef.current;
 
     if (!stage) {
       return;
     }
 
+    let frameId: number | null = null;
+
     const compute = () => {
+      frameId = null;
       const stageRect = stage.getBoundingClientRect();
       const nextMetrics = syncBindings
         .map((binding) => {
@@ -436,17 +480,47 @@ export default function SyncSettingsPanel({
       setLinkMetrics(nextMetrics);
     };
 
-    compute();
+    const schedule = () => {
+      if (frameId !== null) {
+        return;
+      }
 
-    const observer = new ResizeObserver(compute);
+      frameId = window.requestAnimationFrame(compute);
+    };
+
+    schedule();
+
+    const observer = new ResizeObserver(schedule);
     observer.observe(stage);
+    if (vaultList) {
+      observer.observe(vaultList);
+      vaultList.addEventListener("scroll", schedule, {
+        passive: true
+      });
+    }
+    if (connectionList) {
+      observer.observe(connectionList);
+      connectionList.addEventListener("scroll", schedule, {
+        passive: true
+      });
+    }
     vaultRefs.current.forEach((node) => observer.observe(node));
     connectionRefs.current.forEach((node) => observer.observe(node));
-    window.addEventListener("resize", compute);
+    window.addEventListener("resize", schedule);
 
     return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
       observer.disconnect();
-      window.removeEventListener("resize", compute);
+      if (vaultList) {
+        vaultList.removeEventListener("scroll", schedule);
+      }
+      if (connectionList) {
+        connectionList.removeEventListener("scroll", schedule);
+      }
+      window.removeEventListener("resize", schedule);
     };
   }, [connectionsById, syncBindings, syncConnections, sortedVaults]);
 
@@ -462,6 +536,8 @@ export default function SyncSettingsPanel({
         return;
       }
 
+      const connectionId = findConnectionAtPoint(event.clientX, event.clientY);
+
       setDraftLink((current) =>
         current
           ? {
@@ -472,16 +548,15 @@ export default function SyncSettingsPanel({
             }
           : null
       );
+      setHoverConnectionId((current) => (current === connectionId ? current : connectionId));
     };
 
     const handlePointerUp = (event: PointerEvent) => {
       const currentDraft = draftLink;
-      const connectionTarget = (document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null)?.closest<HTMLElement>(
-        "[data-sync-connection-id]"
-      );
-      const connectionId = connectionTarget?.dataset.syncConnectionId ?? null;
+      const connectionId = findConnectionAtPoint(event.clientX, event.clientY);
 
       setDraftLink(null);
+      setHoverConnectionId(null);
 
       if (connectionId) {
         void requestVaultBinding(currentDraft.vaultId, connectionId);
@@ -503,6 +578,54 @@ export default function SyncSettingsPanel({
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [draftLink]);
+
+  useEffect(() => {
+    if (!draftLink) {
+      setHoverConnectionId(null);
+    }
+  }, [draftLink]);
+
+  useEffect(() => {
+    if (syncConnections.length === 0) {
+      setConnectionAvailability({});
+      return;
+    }
+
+    if (!online) {
+      return;
+    }
+
+    let cancelled = false;
+
+    setConnectionAvailability(
+      Object.fromEntries(syncConnections.map((connection) => [connection.id, "checking" satisfies ConnectionAvailabilityState]))
+    );
+
+    void Promise.all(
+      syncConnections.map(async (connection) => {
+        const status = await probeSyncConnectionAvailability(connection);
+
+        if (cancelled) {
+          return;
+        }
+
+        setConnectionAvailability((current) => {
+          if (current[connection.id] === status) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [connection.id]: status
+          };
+        });
+      })
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availabilitySignature, online, syncConnections]);
 
   const boundVaultCountByConnectionId = useMemo(() => {
     const counts = new Map<string, number>();
@@ -713,9 +836,22 @@ export default function SyncSettingsPanel({
       try {
         await performVaultBinding(vault, connection);
         setPendingBindVaultId(null);
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]: "available"
+        }));
         showFeedback("success", t("sync.bindingUpdated"));
       } catch (error) {
         const message = error instanceof Error ? error.message : "SYNC_FAILED";
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]:
+            message === "UNAUTHORIZED" || message === "INVALID_CREDENTIALS"
+              ? "authError"
+              : message === "SERVER_UNAVAILABLE" || message === "HTTP_404"
+                ? "unavailable"
+                : current[connection.id] ?? "checking"
+        }));
         showFeedback("error", translateSyncManagerError(message, t));
       } finally {
         setBusyKey(null);
@@ -757,9 +893,22 @@ export default function SyncSettingsPanel({
         }
 
         setPendingBindVaultId(null);
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]: "available"
+        }));
         showFeedback("success", t("settings.bindAllCompleted", { count: sortedVaults.length }));
       } catch (error) {
         const message = error instanceof Error ? error.message : "SYNC_FAILED";
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]:
+            message === "UNAUTHORIZED" || message === "INVALID_CREDENTIALS"
+              ? "authError"
+              : message === "SERVER_UNAVAILABLE" || message === "HTTP_404"
+                ? "unavailable"
+                : current[connection.id] ?? "checking"
+        }));
         showFeedback("error", translateSyncManagerError(message, t));
       } finally {
         setBusyKey(null);
@@ -848,19 +997,25 @@ export default function SyncSettingsPanel({
       </header>
 
       <div className="sync-settings-stage" ref={stageRef}>
-        <svg className="sync-settings-links" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <svg className="sync-settings-links" aria-hidden="true">
           {linkMetrics.map((metric) => (
-            <path
-              key={metric.id}
-              d={metric.path}
-              className={`sync-settings-link is-${metric.statusTone}`}
-              style={{ "--link-color": metric.color } as CSSProperties}
-            />
+            <g key={metric.id}>
+              <path
+                d={metric.path}
+                className={`sync-settings-link-wire is-${metric.statusTone}`}
+                style={{ "--link-color": metric.color } as CSSProperties}
+              />
+              <path
+                d={metric.path}
+                className={`sync-settings-link-stream is-${metric.statusTone}`}
+                style={{ "--link-color": metric.color } as CSSProperties}
+              />
+            </g>
           ))}
 
-          {draftLink && pendingBindVaultId ? (
+          {draftLink ? (
             (() => {
-              const vaultNode = vaultRefs.current.get(pendingBindVaultId);
+              const vaultNode = vaultRefs.current.get(draftLink.vaultId);
               const stageRect = stageRef.current?.getBoundingClientRect();
 
               if (!vaultNode || !stageRect) {
@@ -874,18 +1029,25 @@ export default function SyncSettingsPanel({
               const y2 = draftLink.y;
 
               return (
-                <path
-                  d={buildLinkPath(x1, y1, x2, y2)}
-                  className="sync-settings-link is-draft"
-                  style={{ "--link-color": "#ffe29b" } as CSSProperties}
-                />
+                <>
+                  <path
+                    d={buildLinkPath(x1, y1, x2, y2)}
+                    className="sync-settings-link-wire is-draft"
+                    style={{ "--link-color": "#ffe29b" } as CSSProperties}
+                  />
+                  <path
+                    d={buildLinkPath(x1, y1, x2, y2)}
+                    className="sync-settings-link-stream is-draft"
+                    style={{ "--link-color": "#ffe29b" } as CSSProperties}
+                  />
+                </>
               );
             })()
           ) : null}
         </svg>
 
         <div className="sync-settings-columns">
-          <section className="sync-settings-column">
+          <section className="sync-settings-column is-vaults">
             <div className="sync-settings-column-head">
               <div className="sync-settings-column-copy">
                 <span className="setting-label">{t("settings.vaultsTitle")}</span>
@@ -901,7 +1063,7 @@ export default function SyncSettingsPanel({
               </button>
             </div>
 
-            <div className="sync-settings-card-list">
+            <div className="sync-settings-card-list" ref={vaultListRef}>
               {sortedVaults.map((vault) => {
                 const isActive = vault.id === activeLocalVaultId;
                 const isSelected = vault.id === selectedLocalVaultId;
@@ -923,26 +1085,31 @@ export default function SyncSettingsPanel({
                     onClick={() => onSelectLocalVault(vault.id)}
                   >
                     <div className="sync-settings-card-main">
-                      <span
-                        className="sync-settings-card-icon"
-                        style={{ "--item-color": bindingConnection ? providerAccent(bindingConnection.provider) : "#e7d6a2" } as CSSProperties}
-                      >
-                        <VaultGlyph />
-                      </span>
-
                       <div className="sync-settings-card-copy">
+                        <div className="sync-settings-chip-row sync-settings-chip-row-card">
+                          {isActive ? <span className="sync-settings-chip is-accent">{t("sync.localVaultActive")}</span> : null}
+                          <span
+                            className={`sync-settings-chip ${
+                              !bindingConnection
+                                ? "is-unbound"
+                                : binding?.syncStatus === "error"
+                                  ? "is-error"
+                                  : binding?.syncStatus === "syncing"
+                                    ? "is-info"
+                                    : "is-ready"
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
                         <div className="sync-settings-card-titleline">
+                          <span
+                            className="sync-settings-card-icon"
+                            style={{ "--item-color": bindingConnection ? providerAccent(bindingConnection.provider) : "#e7d6a2" } as CSSProperties}
+                          >
+                            <VaultGlyph />
+                          </span>
                           <strong>{vault.name}</strong>
-                          <div className="sync-settings-chip-row">
-                            {isActive ? <span className="sync-settings-chip is-accent">{t("sync.localVaultActive")}</span> : null}
-                            {bindingConnection ? (
-                              <span className={`sync-settings-chip ${binding?.syncStatus === "error" ? "is-error" : binding?.syncStatus === "syncing" ? "is-info" : "is-neutral"}`}>
-                                {statusLabel}
-                              </span>
-                            ) : (
-                              <span className="sync-settings-chip is-neutral">{statusLabel}</span>
-                            )}
-                          </div>
                         </div>
                         <span className="sync-settings-card-meta">
                           {bindingConnection
@@ -962,7 +1129,7 @@ export default function SyncSettingsPanel({
                     <div className="sync-settings-card-actions">
                       <button
                         type="button"
-                        className="sync-settings-icon-button"
+                        className="sync-settings-icon-button sync-settings-link-handle"
                         title={t("settings.linkVault")}
                         onPointerDown={(event) => startLinkDraft(event, vault.id)}
                         onClick={(event) => {
@@ -1027,7 +1194,7 @@ export default function SyncSettingsPanel({
             </div>
           </section>
 
-          <section className="sync-settings-column">
+          <section className="sync-settings-column is-connections">
             <div className="sync-settings-column-head">
               <div className="sync-settings-column-copy">
                 <span className="setting-label">{t("settings.connectionsTitle")}</span>
@@ -1043,7 +1210,7 @@ export default function SyncSettingsPanel({
               </button>
             </div>
 
-            <div className="sync-settings-card-list">
+            <div className="sync-settings-card-list" ref={connectionListRef}>
               {syncConnections.length === 0 ? (
                 <div className="sync-settings-empty-card">
                   <strong>{t("settings.noConnectionsTitle")}</strong>
@@ -1054,13 +1221,36 @@ export default function SyncSettingsPanel({
                   const previewNames = connectionPreviewNames(connection.id);
                   const boundCount = boundVaultCountByConnectionId.get(connection.id) ?? 0;
                   const canBindSelected = pendingBindVaultId !== null;
+                  const availability = online
+                    ? connectionAvailability[connection.id] ?? "checking"
+                    : "offline";
+                  const availabilityLabel =
+                    availability === "available"
+                      ? t("settings.connectionAvailable")
+                      : availability === "unavailable"
+                        ? t("settings.connectionUnavailable")
+                        : availability === "authError"
+                          ? t("settings.connectionAuthError")
+                          : availability === "offline"
+                            ? t("settings.connectionOffline")
+                            : t("settings.connectionChecking");
+                  const availabilityChipClass =
+                    availability === "available"
+                      ? "is-ready"
+                      : availability === "unavailable"
+                        ? "is-error"
+                        : availability === "authError"
+                          ? "is-info"
+                          : availability === "offline"
+                            ? "is-offline"
+                            : "is-neutral";
 
                   return (
                     <article
                       key={connection.id}
                       data-sync-connection-id={connection.id}
                       ref={(node) => registerConnectionRef(connection.id, node)}
-                      className={`sync-settings-card sync-settings-connection-card ${canBindSelected ? "is-bind-target" : ""}`}
+                      className={`sync-settings-card sync-settings-connection-card ${canBindSelected ? "is-bind-target" : ""} ${hoverConnectionId === connection.id ? "is-bind-hover" : ""}`}
                       style={{ "--connection-accent": providerAccent(connection.provider) } as CSSProperties}
                       onClick={() => {
                         if (pendingBindVaultId) {
@@ -1069,21 +1259,21 @@ export default function SyncSettingsPanel({
                       }}
                     >
                       <div className="sync-settings-card-main">
-                        <span className="sync-settings-card-icon" style={{ "--item-color": providerAccent(connection.provider) } as CSSProperties}>
-                          <SyncConnectionIcon provider={connection.provider} />
-                        </span>
-
                         <div className="sync-settings-card-copy">
+                          <div className="sync-settings-chip-row sync-settings-chip-row-card">
+                            <span className={`sync-settings-chip ${connection.provider === "hosted" ? "is-hosted" : "is-self-hosted"}`}>
+                              {connection.provider === "hosted" ? t("sync.hosted") : t("sync.selfHosted")}
+                            </span>
+                            <span className="sync-settings-chip is-count">
+                              {t("settings.boundVaultCount", { count: boundCount })}
+                            </span>
+                            <span className={`sync-settings-chip ${availabilityChipClass}`}>{availabilityLabel}</span>
+                          </div>
                           <div className="sync-settings-card-titleline">
+                            <span className="sync-settings-card-icon" style={{ "--item-color": providerAccent(connection.provider) } as CSSProperties}>
+                              <SyncConnectionIcon provider={connection.provider} />
+                            </span>
                             <strong>{connection.label}</strong>
-                            <div className="sync-settings-chip-row">
-                              <span className="sync-settings-chip is-neutral">
-                                {connection.provider === "hosted" ? t("sync.hosted") : t("sync.selfHosted")}
-                              </span>
-                              <span className="sync-settings-chip is-neutral">
-                                {t("settings.boundVaultCount", { count: boundCount })}
-                              </span>
-                            </div>
                           </div>
                           <span className="sync-settings-card-meta">
                             {connection.provider === "hosted"

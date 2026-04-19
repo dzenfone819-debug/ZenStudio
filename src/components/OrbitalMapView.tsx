@@ -41,6 +41,11 @@ interface OrbitalMapViewProps {
   assetCount: number;
   language: AppLanguage;
   localVaultName?: string;
+  syncStatusChip?: {
+    tone: "default" | "success" | "warning" | "error";
+    text: string;
+    title?: string;
+  };
   editorOpen: boolean;
   editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
@@ -1656,6 +1661,7 @@ export default function OrbitalMapView({
   assetCount,
   language,
   localVaultName,
+  syncStatusChip,
   editorOpen,
   editorMode = null,
   editorSlot,
@@ -4622,6 +4628,14 @@ export default function OrbitalMapView({
               </span>
             ) : null}
             {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
+            {syncStatusChip ? (
+              <span
+                className={`orbital-context-pill orbital-sync-pill is-${syncStatusChip.tone}`}
+                title={syncStatusChip.title ?? syncStatusChip.text}
+              >
+                {syncStatusChip.text}
+              </span>
+            ) : null}
             {autoFocusEnabled ? <span className="status-chip accent">{labels.autoFocus}</span> : null}
             {isSceneFocusActive ? <span className="status-chip online">{labels.focusMode}</span> : null}
           </div>

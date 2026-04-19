@@ -22,7 +22,10 @@ import type {
   HostedAccountVault,
   Note,
   Project,
+  SyncConnection,
   SyncConnectionProvider,
+  SyncChangeFeed,
+  SyncChangeSet,
   SyncEnvelope,
   SyncEntityKind,
   SyncRemoteVault,
@@ -91,6 +94,16 @@ function buildVaultStateUrl(serverUrl: string, vaultId: string) {
   return `${normalizeBaseUrl(serverUrl)}/v1/vaults/${encodeURIComponent(normalizeVaultId(vaultId))}/state`;
 }
 
+function buildVaultChangesUrl(serverUrl: string, vaultId: string, sinceRevision?: string | null) {
+  const baseUrl = `${normalizeBaseUrl(serverUrl)}/v1/vaults/${encodeURIComponent(normalizeVaultId(vaultId))}/changes`;
+
+  if (!sinceRevision) {
+    return baseUrl;
+  }
+
+  return `${baseUrl}?since=${encodeURIComponent(sinceRevision)}`;
+}
+
 function buildAccountUrl(serverUrl: string, path: string) {
   return `${normalizeBaseUrl(serverUrl)}${path}`;
 }
@@ -104,6 +117,20 @@ function createBearerHeaders(token: string, includeJson = false) {
     ...(includeJson ? JSON_HEADERS : {}),
     Authorization: `Bearer ${token}`
   };
+}
+
+function normalizeRequestError(error: unknown) {
+  if (error instanceof Error) {
+    if (error.name === "AbortError" || error instanceof TypeError) {
+      return "SERVER_UNAVAILABLE";
+    }
+
+    if (error.message) {
+      return error.message;
+    }
+  }
+
+  return "SYNC_FAILED";
 }
 
 function sortObjectKeys(value: unknown): unknown {
@@ -152,6 +179,245 @@ function sortById<T extends { id: string }>(records: readonly T[]) {
 
 function sortTombstones(records: readonly SyncTombstone[]) {
   return [...records].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function createEmptyChangeSet(deviceId = "server"): SyncChangeSet {
+  return {
+    deviceId,
+    exportedAt: 0,
+    projects: [],
+    folders: [],
+    tags: [],
+    notes: [],
+    assets: [],
+    tombstones: []
+  };
+}
+
+function isChangeSetEmpty(changeSet: SyncChangeSet) {
+  return (
+    changeSet.projects.length === 0 &&
+    changeSet.folders.length === 0 &&
+    changeSet.tags.length === 0 &&
+    changeSet.notes.length === 0 &&
+    changeSet.assets.length === 0 &&
+    changeSet.tombstones.length === 0
+  );
+}
+
+function countChangeSetEntries(changeSet: SyncChangeSet) {
+  return (
+    changeSet.projects.length +
+    changeSet.folders.length +
+    changeSet.tags.length +
+    changeSet.notes.length +
+    changeSet.assets.length +
+    changeSet.tombstones.length
+  );
+}
+
+function buildRecordChangeSetFromSnapshot(snapshot: SyncSnapshot, shadows: readonly SyncShadow[]) {
+  const changeSet = createEmptyChangeSet(snapshot.deviceId);
+  const shadowMap = buildShadowMap(shadows);
+
+  changeSet.exportedAt = snapshot.exportedAt;
+
+  snapshot.projects.forEach((project) => {
+    const state = createRecordState("project", project, project.updatedAt);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.projects.push(project);
+    }
+  });
+
+  snapshot.folders.forEach((folder) => {
+    const state = createRecordState("folder", folder, folder.updatedAt);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.folders.push(folder);
+    }
+  });
+
+  snapshot.tags.forEach((tag) => {
+    const state = createRecordState("tag", tag, tag.updatedAt);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.tags.push(tag);
+    }
+  });
+
+  snapshot.notes.forEach((note) => {
+    const state = createRecordState("note", note, note.updatedAt);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.notes.push(note);
+    }
+  });
+
+  snapshot.assets.forEach((asset) => {
+    const state = createRecordState("asset", asset, asset.updatedAt);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.assets.push(asset);
+    }
+  });
+
+  snapshot.tombstones.forEach((tombstone) => {
+    const state = createTombstoneState(tombstone);
+
+    if ((shadowMap.get(state.key)?.hash ?? null) !== state.hash) {
+      changeSet.tombstones.push(tombstone);
+    }
+  });
+
+  return {
+    ...changeSet,
+    projects: sortById(changeSet.projects),
+    folders: sortById(changeSet.folders),
+    tags: sortById(changeSet.tags),
+    notes: sortById(changeSet.notes),
+    assets: sortById(changeSet.assets),
+    tombstones: sortTombstones(changeSet.tombstones)
+  };
+}
+
+function buildChangeSetBetweenSnapshots(previous: SyncSnapshot, next: SyncSnapshot) {
+  const changeSet = createEmptyChangeSet(next.deviceId);
+  changeSet.exportedAt = next.exportedAt;
+
+  const appendEntityChanges = <T extends { id: string }>(
+    entityType: SyncEntityKind,
+    nextRecords: readonly T[],
+    previousRecords: readonly T[],
+    timestampAccessor: (record: T) => number
+  ) => {
+    const nextMap = buildStateMap(entityType, nextRecords, next.tombstones, timestampAccessor);
+    const previousMap = buildStateMap(entityType, previousRecords, previous.tombstones, timestampAccessor);
+    const keys = new Set([...nextMap.keys(), ...previousMap.keys()]);
+
+    keys.forEach((key) => {
+      const nextState = nextMap.get(key) ?? null;
+      const previousState = previousMap.get(key) ?? null;
+
+      if (!nextState || nextState.hash === previousState?.hash) {
+        return;
+      }
+
+      appendResolvedStateToChangeSet(entityType, changeSet, nextState);
+    });
+  };
+
+  appendEntityChanges("project", next.projects, previous.projects, (record: Project) => record.updatedAt);
+  appendEntityChanges("folder", next.folders, previous.folders, (record: Folder) => record.updatedAt);
+  appendEntityChanges("tag", next.tags, previous.tags, (record: Tag) => record.updatedAt);
+  appendEntityChanges("note", next.notes, previous.notes, (record: SyncedNoteRecord) => record.updatedAt);
+  appendEntityChanges("asset", next.assets, previous.assets, (record: SyncedAssetRecord) => record.updatedAt);
+
+  return {
+    ...changeSet,
+    projects: sortById(changeSet.projects),
+    folders: sortById(changeSet.folders),
+    tags: sortById(changeSet.tags),
+    notes: sortById(changeSet.notes),
+    assets: sortById(changeSet.assets),
+    tombstones: sortTombstones(changeSet.tombstones)
+  } satisfies SyncChangeSet;
+}
+
+function createSyncShadowRecord<T extends { id: string }>(
+  entityType: SyncEntityKind,
+  record: T,
+  syncedAt: number,
+  revision: string | null
+) {
+  return {
+    key: getEntityKey(entityType, record.id),
+    entityType,
+    entityId: record.id,
+    hash: hashStableValue(record),
+    deleted: false,
+    syncedAt,
+    revision
+  } satisfies SyncShadow;
+}
+
+function createSyncTombstoneShadow(tombstone: SyncTombstone, syncedAt: number, revision: string | null) {
+  return {
+    key: tombstone.key,
+    entityType: tombstone.entityType,
+    entityId: tombstone.entityId,
+    hash: createTombstoneHash(tombstone),
+    deleted: true,
+    syncedAt,
+    revision
+  } satisfies SyncShadow;
+}
+
+function buildShadowEntries(
+  source: Pick<SyncChangeSet, "projects" | "folders" | "tags" | "notes" | "assets" | "tombstones">,
+  syncedAt: number,
+  revision: string | null
+) {
+  const shadows: SyncShadow[] = [];
+
+  source.projects.forEach((project) => {
+    shadows.push(createSyncShadowRecord("project", project, syncedAt, revision));
+  });
+
+  source.folders.forEach((folder) => {
+    shadows.push(createSyncShadowRecord("folder", folder, syncedAt, revision));
+  });
+
+  source.tags.forEach((tag) => {
+    shadows.push(createSyncShadowRecord("tag", tag, syncedAt, revision));
+  });
+
+  source.notes.forEach((note) => {
+    shadows.push(createSyncShadowRecord("note", note, syncedAt, revision));
+  });
+
+  source.assets.forEach((asset) => {
+    shadows.push(createSyncShadowRecord("asset", asset, syncedAt, revision));
+  });
+
+  source.tombstones.forEach((tombstone) => {
+    shadows.push(createSyncTombstoneShadow(tombstone, syncedAt, revision));
+  });
+
+  return shadows;
+}
+
+function appendResolvedStateToChangeSet<T extends { id: string }>(
+  entityType: SyncEntityKind,
+  changeSet: SyncChangeSet,
+  resolved: SnapshotEntityState<T>
+) {
+  if (resolved.deleted && resolved.tombstone) {
+    changeSet.tombstones.push(resolved.tombstone);
+    return;
+  }
+
+  if (!resolved.record) {
+    return;
+  }
+
+  switch (entityType) {
+    case "project":
+      changeSet.projects.push(resolved.record as unknown as Project);
+      break;
+    case "folder":
+      changeSet.folders.push(resolved.record as unknown as Folder);
+      break;
+    case "tag":
+      changeSet.tags.push(resolved.record as unknown as Tag);
+      break;
+    case "note":
+      changeSet.notes.push(resolved.record as unknown as SyncedNoteRecord);
+      break;
+    case "asset":
+      changeSet.assets.push(resolved.record as unknown as SyncedAssetRecord);
+      break;
+  }
 }
 
 function serializeNote(note: Note): SyncedNoteRecord {
@@ -590,7 +856,14 @@ function pruneUnreferencedAssets(
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
+  let response: Response;
+
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    throw new Error(normalizeRequestError(error));
+  }
+
   const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
 
   if (!response.ok) {
@@ -602,6 +875,47 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
   }
 
   return payload as T;
+}
+
+export async function probeSyncConnectionAvailability(
+  connection: Pick<SyncConnection, "provider" | "serverUrl" | "managementToken" | "sessionToken">
+): Promise<"available" | "unavailable" | "authError"> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 3500);
+
+  try {
+    if (connection.provider === "hosted") {
+      await requestJson<{
+        user: HostedAccountUser;
+        session: Omit<HostedAccountSession, "token">;
+        vaultCount: number;
+      }>(buildAccountUrl(connection.serverUrl, "/v1/auth/me"), {
+        method: "GET",
+        headers: createBearerHeaders(connection.sessionToken, false),
+        signal: controller.signal
+      });
+    } else {
+      await requestJson<{
+        vaults: SyncRemoteVault[];
+      }>(buildPersonalUrl(connection.serverUrl, "/v1/personal/vaults"), {
+        method: "GET",
+        headers: createBearerHeaders(connection.managementToken, false),
+        signal: controller.signal
+      });
+    }
+
+    return "available";
+  } catch (error) {
+    const message = normalizeRequestError(error);
+
+    if (message === "UNAUTHORIZED" || message === "INVALID_CREDENTIALS") {
+      return "authError";
+    }
+
+    return "unavailable";
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 export async function registerHostedAccount(
@@ -770,6 +1084,71 @@ async function pullSelfHostedEnvelope(serverUrl: string, vaultId: string, token:
   });
 }
 
+async function pullSelfHostedChanges(
+  serverUrl: string,
+  vaultId: string,
+  token: string,
+  sinceRevision: string
+) {
+  return requestJson<SyncChangeFeed>(buildVaultChangesUrl(serverUrl, vaultId, sinceRevision), {
+    method: "GET",
+    headers: createBearerHeaders(token, false)
+  });
+}
+
+async function pushSelfHostedChanges(
+  serverUrl: string,
+  vaultId: string,
+  token: string,
+  baseRevision: string | null,
+  changes: SyncChangeSet
+) {
+  let response: Response;
+
+  try {
+    response = await fetch(buildVaultChangesUrl(serverUrl, vaultId), {
+      method: "POST",
+      headers: createBearerHeaders(token, true),
+      body: JSON.stringify({
+        baseRevision,
+        changes
+      })
+    });
+  } catch (error) {
+    throw new Error(normalizeRequestError(error));
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { revision?: string | null; error?: string }
+    | null;
+
+  if (response.status === 409) {
+    return {
+      conflict: true,
+      revision:
+        payload && typeof payload === "object" && "revision" in payload
+          ? payload.revision ?? null
+          : null
+    };
+  }
+
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP_${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    conflict: false,
+    revision:
+      payload && typeof payload === "object" && typeof payload.revision === "string"
+        ? payload.revision
+        : null
+  };
+}
+
 async function pushSelfHostedEnvelope(
   serverUrl: string,
   vaultId: string,
@@ -777,14 +1156,20 @@ async function pushSelfHostedEnvelope(
   baseRevision: string | null,
   snapshot: SyncSnapshot
 ) {
-  const response = await fetch(buildVaultStateUrl(serverUrl, vaultId), {
-    method: "PUT",
-    headers: createBearerHeaders(token, true),
-    body: JSON.stringify({
-      baseRevision,
-      snapshot
-    })
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(buildVaultStateUrl(serverUrl, vaultId), {
+      method: "PUT",
+      headers: createBearerHeaders(token, true),
+      body: JSON.stringify({
+        baseRevision,
+        snapshot
+      })
+    });
+  } catch (error) {
+    throw new Error(normalizeRequestError(error));
+  }
 
   const payload = (await response.json().catch(() => null)) as SyncEnvelope | { error?: string } | null;
 
@@ -868,6 +1253,281 @@ function countChangedKeys<T>(
   return {
     pulled,
     pushed
+  };
+}
+
+function createChangeStateMaps(changeSet: SyncChangeSet) {
+  return {
+    projects: buildStateMap("project", changeSet.projects, changeSet.tombstones, (record) => record.updatedAt),
+    folders: buildStateMap("folder", changeSet.folders, changeSet.tombstones, (record) => record.updatedAt),
+    tags: buildStateMap("tag", changeSet.tags, changeSet.tombstones, (record) => record.updatedAt),
+    notes: buildStateMap("note", changeSet.notes, changeSet.tombstones, (record) => record.updatedAt),
+    assets: buildStateMap("asset", changeSet.assets, changeSet.tombstones, (record) => record.updatedAt)
+  };
+}
+
+function mergeChangeSetsIntoSnapshot(
+  localSnapshot: SyncSnapshot,
+  localChanges: SyncChangeSet,
+  remoteChanges: SyncChangeSet,
+  shadows: readonly SyncShadow[]
+) {
+  const shadowMap = buildShadowMap(shadows);
+  const stats: SyncRunStats = {
+    pulled: countChangeSetEntries(remoteChanges),
+    pushed: 0,
+    conflicts: 0
+  };
+  const outgoingChanges = createEmptyChangeSet(localSnapshot.deviceId);
+  outgoingChanges.exportedAt = Date.now();
+
+  const localStateMaps = createChangeStateMaps(localChanges);
+  const remoteStateMaps = createChangeStateMaps(remoteChanges);
+  const currentProjectsMap = new Map(localSnapshot.projects.map((project) => [project.id, project]));
+  const currentFoldersMap = new Map(localSnapshot.folders.map((folder) => [folder.id, folder]));
+  const currentTagsMap = new Map(localSnapshot.tags.map((tag) => [tag.id, tag]));
+  const currentNotesMap = new Map(localSnapshot.notes.map((note) => [note.id, note]));
+  const currentAssetsMap = new Map(localSnapshot.assets.map((asset) => [asset.id, asset]));
+  const mergedTombstones = new Map(localSnapshot.tombstones.map((tombstone) => [tombstone.key, tombstone]));
+  const localAssetsById = new Map(localSnapshot.assets.map((asset) => [asset.id, asset]));
+  let localMutationCount = 0;
+
+  const registerResolvedGenericState = <T extends { id: string }>(
+    entityType: SyncEntityKind,
+    resolved: SnapshotEntityState<T>,
+    localState: SnapshotEntityState<T> | null,
+    remoteState: SnapshotEntityState<T> | null
+  ) => {
+    const remoteCurrentHash = remoteState?.hash ?? shadowMap.get(resolved.key)?.hash ?? null;
+    const localCurrentHash = localState?.hash ?? shadowMap.get(resolved.key)?.hash ?? null;
+
+    if (resolved.hash !== localCurrentHash) {
+      localMutationCount += 1;
+    }
+
+    if (resolved.hash !== remoteCurrentHash && resolved.hash === (localState?.hash ?? null)) {
+      appendResolvedStateToChangeSet(entityType, outgoingChanges, resolved);
+    }
+  };
+
+  const projectKeys = new Set([...localStateMaps.projects.keys(), ...remoteStateMaps.projects.keys()]);
+  projectKeys.forEach((key) => {
+    const localState = localStateMaps.projects.get(key) ?? null;
+    const remoteState = remoteStateMaps.projects.get(key) ?? null;
+    const resolved = resolveGenericState<Project>({
+      local: localState,
+      remote: remoteState,
+      shadowHash: shadowMap.get(key)?.hash ?? null
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    registerResolvedGenericState("project", resolved, localState, remoteState);
+
+    if (resolved.deleted && resolved.tombstone) {
+      currentProjectsMap.delete(resolved.tombstone.entityId);
+      mergedTombstones.set(resolved.tombstone.key, resolved.tombstone);
+      return;
+    }
+
+    if (resolved.record) {
+      currentProjectsMap.set(resolved.record.id, resolved.record);
+      mergedTombstones.delete(key);
+    }
+  });
+
+  const folderKeys = new Set([...localStateMaps.folders.keys(), ...remoteStateMaps.folders.keys()]);
+  folderKeys.forEach((key) => {
+    const localState = localStateMaps.folders.get(key) ?? null;
+    const remoteState = remoteStateMaps.folders.get(key) ?? null;
+    const resolved = resolveGenericState<Folder>({
+      local: localState,
+      remote: remoteState,
+      shadowHash: shadowMap.get(key)?.hash ?? null
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    registerResolvedGenericState("folder", resolved, localState, remoteState);
+
+    if (resolved.deleted && resolved.tombstone) {
+      currentFoldersMap.delete(resolved.tombstone.entityId);
+      mergedTombstones.set(resolved.tombstone.key, resolved.tombstone);
+      return;
+    }
+
+    if (resolved.record && currentProjectsMap.has(resolved.record.projectId)) {
+      currentFoldersMap.set(resolved.record.id, resolved.record);
+      mergedTombstones.delete(key);
+    } else if (resolved.record) {
+      currentFoldersMap.delete(resolved.record.id);
+    }
+  });
+
+  const tagKeys = new Set([...localStateMaps.tags.keys(), ...remoteStateMaps.tags.keys()]);
+  tagKeys.forEach((key) => {
+    const localState = localStateMaps.tags.get(key) ?? null;
+    const remoteState = remoteStateMaps.tags.get(key) ?? null;
+    const resolved = resolveGenericState<Tag>({
+      local: localState,
+      remote: remoteState,
+      shadowHash: shadowMap.get(key)?.hash ?? null
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    registerResolvedGenericState("tag", resolved, localState, remoteState);
+
+    if (resolved.deleted && resolved.tombstone) {
+      currentTagsMap.delete(resolved.tombstone.entityId);
+      mergedTombstones.set(resolved.tombstone.key, resolved.tombstone);
+      return;
+    }
+
+    if (resolved.record) {
+      currentTagsMap.set(resolved.record.id, resolved.record);
+      mergedTombstones.delete(key);
+    }
+  });
+
+  const noteKeys = new Set([...localStateMaps.notes.keys(), ...remoteStateMaps.notes.keys()]);
+  const conflictAssets: SyncedAssetRecord[] = [];
+
+  noteKeys.forEach((key) => {
+    const localState = localStateMaps.notes.get(key) ?? null;
+    const remoteState = remoteStateMaps.notes.get(key) ?? null;
+    const resolved = resolveNoteState(
+      {
+        local: localState,
+        remote: remoteState,
+        shadowHash: shadowMap.get(key)?.hash ?? null
+      },
+      localAssetsById,
+      currentProjectsMap,
+      currentFoldersMap,
+      currentTagsMap,
+      stats
+    );
+    const remoteCurrentHash = remoteState?.hash ?? shadowMap.get(key)?.hash ?? null;
+    const localCurrentHash = localState?.hash ?? shadowMap.get(key)?.hash ?? null;
+
+    if (resolved.canonical) {
+      if (resolved.canonical.hash !== localCurrentHash) {
+        localMutationCount += 1;
+      }
+
+      if (
+        resolved.canonical.hash !== remoteCurrentHash &&
+        resolved.canonical.hash === (localState?.hash ?? null)
+      ) {
+        appendResolvedStateToChangeSet("note", outgoingChanges, resolved.canonical);
+      }
+
+      if (resolved.canonical.deleted && resolved.canonical.tombstone) {
+        currentNotesMap.delete(resolved.canonical.tombstone.entityId);
+        mergedTombstones.set(resolved.canonical.tombstone.key, resolved.canonical.tombstone);
+      } else if (resolved.canonical.record) {
+        const record = resolved.canonical.record;
+        const projectId = sanitizeProjectId(record, currentProjectsMap);
+        const folderId = sanitizeFolderId(record, currentFoldersMap, projectId);
+
+        currentNotesMap.set(record.id, {
+          ...record,
+          projectId,
+          folderId,
+          tagIds: sanitizeTagIds(record, currentTagsMap)
+        });
+        mergedTombstones.delete(key);
+      }
+    }
+
+    if (resolved.conflictClone) {
+      currentNotesMap.set(resolved.conflictClone.id, resolved.conflictClone);
+      outgoingChanges.notes.push(resolved.conflictClone);
+      localMutationCount += 1;
+    }
+
+    resolved.conflictAssets.forEach((asset) => {
+      conflictAssets.push(asset);
+      outgoingChanges.assets.push(asset);
+    });
+  });
+
+  const assetKeys = new Set([...localStateMaps.assets.keys(), ...remoteStateMaps.assets.keys()]);
+  assetKeys.forEach((key) => {
+    const localState = localStateMaps.assets.get(key) ?? null;
+    const remoteState = remoteStateMaps.assets.get(key) ?? null;
+    const resolved = resolveGenericState<SyncedAssetRecord>({
+      local: localState,
+      remote: remoteState,
+      shadowHash: shadowMap.get(key)?.hash ?? null
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    registerResolvedGenericState("asset", resolved, localState, remoteState);
+
+    if (resolved.deleted && resolved.tombstone) {
+      currentAssetsMap.delete(resolved.tombstone.entityId);
+      mergedTombstones.set(resolved.tombstone.key, resolved.tombstone);
+      return;
+    }
+
+    if (resolved.record) {
+      currentAssetsMap.set(resolved.record.id, resolved.record);
+      mergedTombstones.delete(key);
+    }
+  });
+
+  conflictAssets.forEach((asset) => {
+    currentAssetsMap.set(asset.id, asset);
+    mergedTombstones.delete(getEntityKey("asset", asset.id));
+  });
+
+  const notes = sortById([...currentNotesMap.values()]);
+  const assets = sortById(pruneUnreferencedAssets([...currentAssetsMap.values()], notes));
+  const liveAssetIds = new Set(assets.map((asset) => asset.id));
+
+  [...mergedTombstones.keys()].forEach((key) => {
+    if (key.startsWith("asset:")) {
+      const assetId = key.replace("asset:", "");
+
+      if (liveAssetIds.has(assetId)) {
+        mergedTombstones.delete(key);
+      }
+    }
+  });
+
+  outgoingChanges.projects = sortById(outgoingChanges.projects);
+  outgoingChanges.folders = sortById(outgoingChanges.folders);
+  outgoingChanges.tags = sortById(outgoingChanges.tags);
+  outgoingChanges.notes = sortById(outgoingChanges.notes);
+  outgoingChanges.assets = sortById(outgoingChanges.assets);
+  outgoingChanges.tombstones = sortTombstones(outgoingChanges.tombstones);
+  stats.pushed = countChangeSetEntries(outgoingChanges);
+
+  return {
+    snapshot: {
+      deviceId: localSnapshot.deviceId,
+      exportedAt: Date.now(),
+      projects: sortById([...currentProjectsMap.values()]),
+      folders: sortById([...currentFoldersMap.values()]),
+      tags: sortById([...currentTagsMap.values()]),
+      notes,
+      assets,
+      tombstones: sortTombstones([...mergedTombstones.values()])
+    } satisfies SyncSnapshot,
+    outgoingChanges,
+    stats,
+    requiresLocalReplace: localMutationCount > 0
   };
 }
 
@@ -1128,87 +1788,136 @@ async function replaceLocalDataFromSnapshot(snapshot: SyncSnapshot, settings: Ap
   );
 }
 
+async function applySyncChangeSetToLocalData(changeSet: SyncChangeSet) {
+  if (isChangeSetEmpty(changeSet)) {
+    return;
+  }
+
+  const projectIdsToDelete = changeSet.tombstones
+    .filter((tombstone) => tombstone.entityType === "project")
+    .map((tombstone) => tombstone.entityId);
+  const folderIdsToDelete = changeSet.tombstones
+    .filter((tombstone) => tombstone.entityType === "folder")
+    .map((tombstone) => tombstone.entityId);
+  const tagIdsToDelete = changeSet.tombstones
+    .filter((tombstone) => tombstone.entityType === "tag")
+    .map((tombstone) => tombstone.entityId);
+  const noteIdsToDelete = changeSet.tombstones
+    .filter((tombstone) => tombstone.entityType === "note")
+    .map((tombstone) => tombstone.entityId);
+  const assetIdsToDelete = changeSet.tombstones
+    .filter((tombstone) => tombstone.entityType === "asset")
+    .map((tombstone) => tombstone.entityId);
+  const restoredTombstoneKeys = [
+    ...changeSet.projects.map((project) => getEntityKey("project", project.id)),
+    ...changeSet.folders.map((folder) => getEntityKey("folder", folder.id)),
+    ...changeSet.tags.map((tag) => getEntityKey("tag", tag.id)),
+    ...changeSet.notes.map((note) => getEntityKey("note", note.id)),
+    ...changeSet.assets.map((asset) => getEntityKey("asset", asset.id))
+  ];
+  const hydratedNotes = sortById(changeSet.notes).map((note) => hydrateNote(note));
+  const hydratedAssets = sortById(changeSet.assets).map((asset) => hydrateAsset(asset));
+  const needsAssetCacheReset = changeSet.assets.length > 0 || assetIdsToDelete.length > 0;
+
+  await db.transaction(
+    "rw",
+    [db.projects, db.folders, db.tags, db.notes, db.assets, db.syncTombstones, db.settings],
+    async () => {
+      if (projectIdsToDelete.length > 0) {
+        await db.projects.bulkDelete(projectIdsToDelete);
+      }
+
+      if (folderIdsToDelete.length > 0) {
+        await db.folders.bulkDelete(folderIdsToDelete);
+      }
+
+      if (tagIdsToDelete.length > 0) {
+        await db.tags.bulkDelete(tagIdsToDelete);
+      }
+
+      if (noteIdsToDelete.length > 0) {
+        await db.notes.bulkDelete(noteIdsToDelete);
+      }
+
+      if (assetIdsToDelete.length > 0) {
+        await db.assets.bulkDelete(assetIdsToDelete);
+      }
+
+      if (changeSet.projects.length > 0) {
+        await db.projects.bulkPut(sortById(changeSet.projects));
+      }
+
+      if (changeSet.folders.length > 0) {
+        await db.folders.bulkPut(sortById(changeSet.folders));
+      }
+
+      if (changeSet.tags.length > 0) {
+        await db.tags.bulkPut(sortById(changeSet.tags));
+      }
+
+      if (hydratedNotes.length > 0) {
+        await db.notes.bulkPut(hydratedNotes);
+      }
+
+      if (hydratedAssets.length > 0) {
+        await db.assets.bulkPut(hydratedAssets);
+      }
+
+      if (restoredTombstoneKeys.length > 0) {
+        await db.syncTombstones.bulkDelete(restoredTombstoneKeys);
+      }
+
+      if (changeSet.tombstones.length > 0) {
+        await db.syncTombstones.bulkPut(sortTombstones(changeSet.tombstones));
+      }
+
+      const currentSettings = await db.settings.get("app");
+
+      if (!currentSettings) {
+        throw new Error("SETTINGS_MISSING");
+      }
+
+      const nextOpenedNoteId =
+        currentSettings.lastOpenedNoteId && (await db.notes.get(currentSettings.lastOpenedNoteId))
+          ? currentSettings.lastOpenedNoteId
+          : ((await db.notes.orderBy("id").first())?.id ?? null);
+
+      if (nextOpenedNoteId !== currentSettings.lastOpenedNoteId) {
+        await db.settings.update("app", {
+          lastOpenedNoteId: nextOpenedNoteId
+        });
+      }
+    }
+  );
+
+  if (needsAssetCacheReset) {
+    resetResolvedAssetCache();
+  }
+}
+
 async function persistSyncShadows(snapshot: SyncSnapshot, revision: string | null) {
   const syncedAt = Date.now();
-  const shadows: SyncShadow[] = [];
-
-  snapshot.projects.forEach((project) => {
-    shadows.push({
-      key: getEntityKey("project", project.id),
-      entityType: "project",
-      entityId: project.id,
-      hash: hashStableValue(project),
-      deleted: false,
-      syncedAt,
-      revision
-    });
-  });
-
-  snapshot.folders.forEach((folder) => {
-    shadows.push({
-      key: getEntityKey("folder", folder.id),
-      entityType: "folder",
-      entityId: folder.id,
-      hash: hashStableValue(folder),
-      deleted: false,
-      syncedAt,
-      revision
-    });
-  });
-
-  snapshot.tags.forEach((tag) => {
-    shadows.push({
-      key: getEntityKey("tag", tag.id),
-      entityType: "tag",
-      entityId: tag.id,
-      hash: hashStableValue(tag),
-      deleted: false,
-      syncedAt,
-      revision
-    });
-  });
-
-  snapshot.notes.forEach((note) => {
-    shadows.push({
-      key: getEntityKey("note", note.id),
-      entityType: "note",
-      entityId: note.id,
-      hash: hashStableValue(note),
-      deleted: false,
-      syncedAt,
-      revision
-    });
-  });
-
-  snapshot.assets.forEach((asset) => {
-    shadows.push({
-      key: getEntityKey("asset", asset.id),
-      entityType: "asset",
-      entityId: asset.id,
-      hash: hashStableValue(asset),
-      deleted: false,
-      syncedAt,
-      revision
-    });
-  });
-
-  snapshot.tombstones.forEach((tombstone) => {
-    shadows.push({
-      key: tombstone.key,
-      entityType: tombstone.entityType,
-      entityId: tombstone.entityId,
-      hash: createTombstoneHash(tombstone),
-      deleted: true,
-      syncedAt,
-      revision
-    });
-  });
+  const shadows = buildShadowEntries(snapshot, syncedAt, revision);
 
   await db.transaction("rw", db.syncShadows, async () => {
     await db.syncShadows.clear();
 
     if (shadows.length > 0) {
       await db.syncShadows.bulkAdd(shadows);
+    }
+  });
+}
+
+async function persistSyncShadowChanges(changeSet: SyncChangeSet, revision: string | null) {
+  if (isChangeSetEmpty(changeSet)) {
+    return;
+  }
+
+  const shadows = buildShadowEntries(changeSet, Date.now(), revision);
+
+  await db.transaction("rw", db.syncShadows, async () => {
+    if (shadows.length > 0) {
+      await db.syncShadows.bulkPut(shadows);
     }
   });
 }
@@ -1225,6 +1934,7 @@ export async function runSelfHostedSync(
   settings: AppSettings,
   options?: {
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+    localPendingCount?: number;
   }
 ): Promise<SyncExecutionResult> {
   return runConfiguredSync(
@@ -1242,6 +1952,7 @@ export async function runHostedSync(
   settings: AppSettings,
   options?: {
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+    localPendingCount?: number;
   }
 ): Promise<SyncExecutionResult> {
   return runConfiguredSync(
@@ -1255,10 +1966,169 @@ export async function runHostedSync(
   );
 }
 
+function shouldFallbackToSnapshotSync(error: unknown) {
+  const message = parseSyncError(error);
+  return message === "NOT_FOUND" || message === "HTTP_404";
+}
+
+async function runSnapshotSyncCycle(
+  serverUrl: string,
+  vaultId: string,
+  token: string,
+  providedEnvelope?: SyncEnvelope | null
+) {
+  const [remoteEnvelope, localSnapshot, shadows] = await Promise.all([
+    providedEnvelope ? Promise.resolve(providedEnvelope) : pullSelfHostedEnvelope(serverUrl, vaultId, token),
+    exportLocalSyncSnapshot(),
+    db.syncShadows.toArray()
+  ]);
+  const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
+  const pushed = await pushSelfHostedEnvelope(
+    serverUrl,
+    vaultId,
+    token,
+    remoteEnvelope.revision,
+    merged.snapshot
+  );
+
+  if (pushed.conflict) {
+    return "retry" as const;
+  }
+
+  const nextSettings = await db.settings.get("app");
+
+  if (!nextSettings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  await replaceLocalDataFromSnapshot(merged.snapshot, nextSettings);
+  await persistSyncShadows(merged.snapshot, pushed.envelope.revision);
+  await db.settings.update("app", {
+    syncStatus: "idle",
+    lastSyncAt: Date.now(),
+    syncCursor: pushed.envelope.revision
+  });
+
+  return {
+    revision: pushed.envelope.revision ?? "",
+    stats: merged.stats
+  } satisfies SyncExecutionResult;
+}
+
+async function runDeltaSyncCycle(
+  serverUrl: string,
+  vaultId: string,
+  token: string,
+  options?: {
+    localPendingCount?: number;
+  }
+) {
+  const [settings, shadows] = await Promise.all([db.settings.get("app"), db.syncShadows.toArray()]);
+
+  if (!settings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  if (!settings.syncCursor || shadows.length === 0) {
+    return null;
+  }
+
+  let remoteFeed: SyncChangeFeed;
+
+  try {
+    remoteFeed = await pullSelfHostedChanges(serverUrl, vaultId, token, settings.syncCursor);
+  } catch (error) {
+    if (shouldFallbackToSnapshotSync(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (remoteFeed.mode === "snapshot") {
+    if (remoteFeed.snapshot) {
+      return runSnapshotSyncCycle(serverUrl, vaultId, token, {
+        revision: remoteFeed.revision,
+        snapshot: remoteFeed.snapshot
+      });
+    }
+
+    return null;
+  }
+
+  const remoteChanges = remoteFeed.changes ?? createEmptyChangeSet("server");
+  const localPendingCount =
+    typeof options?.localPendingCount === "number" ? Math.max(0, options.localPendingCount) : null;
+
+  if (localPendingCount === 0) {
+    const finalRevision = remoteFeed.revision ?? settings.syncCursor;
+
+    if (!isChangeSetEmpty(remoteChanges)) {
+      await applySyncChangeSetToLocalData(remoteChanges);
+      await persistSyncShadowChanges(remoteChanges, finalRevision);
+    }
+
+    await db.settings.update("app", {
+      syncStatus: "idle",
+      lastSyncAt: Date.now(),
+      syncCursor: finalRevision
+    });
+
+    return {
+      revision: finalRevision ?? "",
+      stats: {
+        pulled: countChangeSetEntries(remoteChanges),
+        pushed: 0,
+        conflicts: 0
+      }
+    } satisfies SyncExecutionResult;
+  }
+
+  const localSnapshot = await exportLocalSyncSnapshot();
+  const localChanges = buildRecordChangeSetFromSnapshot(localSnapshot, shadows);
+  const merged = mergeChangeSetsIntoSnapshot(localSnapshot, localChanges, remoteChanges, shadows);
+  const localDeltaToApply = buildChangeSetBetweenSnapshots(localSnapshot, merged.snapshot);
+  const shadowChanges = buildRecordChangeSetFromSnapshot(merged.snapshot, shadows);
+  let finalRevision = remoteFeed.revision ?? settings.syncCursor;
+
+  if (!isChangeSetEmpty(merged.outgoingChanges)) {
+    const pushed = await pushSelfHostedChanges(
+      serverUrl,
+      vaultId,
+      token,
+      remoteFeed.revision,
+      merged.outgoingChanges
+    );
+
+    if (pushed.conflict) {
+      return "retry" as const;
+    }
+
+    finalRevision = pushed.revision ?? finalRevision;
+  }
+
+  if (!isChangeSetEmpty(localDeltaToApply)) {
+    await applySyncChangeSetToLocalData(localDeltaToApply);
+  }
+
+  await persistSyncShadowChanges(shadowChanges, finalRevision);
+  await db.settings.update("app", {
+    syncStatus: "idle",
+    lastSyncAt: Date.now(),
+    syncCursor: finalRevision
+  });
+
+  return {
+    revision: finalRevision ?? "",
+    stats: merged.stats
+  } satisfies SyncExecutionResult;
+}
+
 export async function runConfiguredSync(
   remote: RemoteSyncConfig,
   options?: {
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+    localPendingCount?: number;
   }
 ): Promise<SyncExecutionResult> {
   const serverUrl = normalizeBaseUrl(remote.serverUrl);
@@ -1283,44 +2153,27 @@ export async function runConfiguredSync(
 
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const [remoteEnvelope, localSnapshot, shadows] = await Promise.all([
-        pullSelfHostedEnvelope(serverUrl, vaultId, token),
-        exportLocalSyncSnapshot(),
-        db.syncShadows.toArray()
-      ]);
-      const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
-      const pushed = await pushSelfHostedEnvelope(
-        serverUrl,
-        vaultId,
-        token,
-        remoteEnvelope.revision,
-        merged.snapshot
-      );
+      const deltaResult = await runDeltaSyncCycle(serverUrl, vaultId, token, {
+        localPendingCount: options?.localPendingCount
+      });
 
-      if (pushed.conflict) {
+      if (deltaResult === "retry") {
         continue;
       }
 
-      const nextSettings = await db.settings.get("app");
-
-      if (!nextSettings) {
-        throw new Error("SETTINGS_MISSING");
+      if (deltaResult) {
+        await options?.onStatusChange?.("idle");
+        return deltaResult;
       }
 
-      await replaceLocalDataFromSnapshot(merged.snapshot, nextSettings);
-      await persistSyncShadows(merged.snapshot, pushed.envelope.revision);
-      await db.settings.update("app", {
-        syncStatus: "idle",
-        lastSyncAt: Date.now(),
-        syncCursor: pushed.envelope.revision
-      });
+      const snapshotResult = await runSnapshotSyncCycle(serverUrl, vaultId, token);
+
+      if (snapshotResult === "retry") {
+        continue;
+      }
 
       await options?.onStatusChange?.("idle");
-
-      return {
-        revision: pushed.envelope.revision ?? "",
-        stats: merged.stats
-      };
+      return snapshotResult;
     }
 
     throw new Error("SYNC_REVISION_CONFLICT");

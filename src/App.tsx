@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useTranslation } from "react-i18next";
 
@@ -59,6 +59,7 @@ import {
 import {
   runConfiguredSync
 } from "./lib/sync";
+import { computePendingSyncSummary } from "./lib/syncStatus";
 import {
   clearSyncBinding,
   createSyncConnection,
@@ -126,6 +127,8 @@ export default function App() {
   const tags = useLiveQuery(() => db.tags.toArray(), [activeLocalVaultId], []);
   const notes = useLiveQuery(() => db.notes.toArray(), [activeLocalVaultId], []);
   const assets = useLiveQuery(() => db.assets.toArray(), [activeLocalVaultId], []);
+  const syncShadows = useLiveQuery(() => db.syncShadows.toArray(), [activeLocalVaultId], []);
+  const syncTombstones = useLiveQuery(() => db.syncTombstones.toArray(), [activeLocalVaultId], []);
   const settings = useLiveQuery(() => db.settings.get("app"), [activeLocalVaultId], undefined);
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -142,7 +145,18 @@ export default function App() {
     text: string;
   } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    typeof document === "undefined" ? true : document.visibilityState !== "hidden"
+  );
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const autoSyncTimerRef = useRef<number | null>(null);
+  const syncInFlightRef = useRef(false);
+  const syncRerunRequestedRef = useRef(false);
+  const bootSyncKeyRef = useRef<string | null>(null);
+  const lastRemoteRefreshAtRef = useRef<Record<string, number>>({});
+  const previousOnlineRef = useRef(online);
+  const previousVisibilityRef = useRef(isDocumentVisible);
+  const previousOrbitalEditorNoteIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,6 +213,18 @@ export default function App() {
       document.documentElement.lang = settings.language;
     }
   }, [settings]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsDocumentVisible(document.visibilityState !== "hidden");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const folderMap = useMemo(() => new Map(folders.map((folder) => [folder.id, folder])), [folders]);
   const tagMap = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
@@ -292,6 +318,137 @@ export default function App() {
   const activeVaultConnection = activeVaultBinding
     ? syncConnectionsById.get(activeVaultBinding.connectionId) ?? null
     : null;
+  const translateSyncError = useCallback(
+    (
+      error: unknown,
+      provider: "selfHosted" | "hosted" | "googleDrive" | null = null
+    ) => {
+      const message = error instanceof Error ? error.message : "SYNC_FAILED";
+
+      switch (message) {
+        case "SELF_HOSTED_URL_REQUIRED":
+          return t("sync.urlRequired");
+        case "HOSTED_URL_REQUIRED":
+          return t("sync.hostedUrlRequired");
+        case "SELF_HOSTED_TOKEN_REQUIRED":
+          return t("sync.tokenRequired");
+        case "HOSTED_SYNC_TOKEN_REQUIRED":
+          return t("sync.hostedTokenRequired");
+        case "SELF_HOSTED_VAULT_REQUIRED":
+          return t("sync.vaultRequired");
+        case "HOSTED_VAULT_REQUIRED":
+          return t("sync.hostedVaultRequired");
+        case "UNAUTHORIZED":
+          return provider === "hosted"
+            ? t("sync.hostedUnauthorized")
+            : t("sync.unauthorized");
+        case "VAULT_NOT_FOUND":
+          return t("sync.vaultNotFound");
+        case "SYNC_REVISION_CONFLICT":
+          return t("sync.revisionConflict");
+        case "HTTP_404":
+        case "SERVER_UNAVAILABLE":
+          return t("sync.serverNotFound");
+        default:
+          return t("sync.failedGeneric");
+      }
+    },
+    [t]
+  );
+  const activeVaultPendingSync = useMemo(
+    () =>
+      computePendingSyncSummary({
+        projects,
+        folders,
+        tags,
+        notes,
+        assets,
+        shadows: syncShadows,
+        tombstones: syncTombstones
+      }),
+    [assets, folders, notes, projects, syncShadows, syncTombstones, tags]
+  );
+  const syncChipTimestampFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(settings?.language ?? "en", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }),
+    [settings?.language]
+  );
+  const activeVaultSyncChip = useMemo(() => {
+    const pendingCount = activeVaultPendingSync.total;
+
+    if (!activeVaultBinding || !activeVaultConnection) {
+      return {
+        tone: "default" as const,
+        text: t("sync.statusLocalOnly")
+      };
+    }
+
+    if (activeVaultBinding.syncStatus === "syncing") {
+      return {
+        tone: "warning" as const,
+        text: t("sync.statusSyncing")
+      };
+    }
+
+    if (activeVaultBinding.lastError) {
+      const message =
+        activeVaultBinding.lastError === "UNAUTHORIZED"
+          ? pendingCount > 0
+            ? t("sync.statusAuthRequiredPending", { count: pendingCount })
+            : t("sync.statusAuthRequired")
+          : pendingCount > 0
+            ? t("sync.statusUnavailablePending", { count: pendingCount })
+            : t("sync.statusUnavailable");
+
+      return {
+        tone: "error" as const,
+        text: message,
+        title: translateSyncError(
+          new Error(activeVaultBinding.lastError),
+          activeVaultConnection.provider
+        )
+      };
+    }
+
+    if (!online && pendingCount > 0) {
+      return {
+        tone: "warning" as const,
+        text: t("sync.statusOfflinePending", { count: pendingCount })
+      };
+    }
+
+    if (pendingCount > 0) {
+      return {
+        tone: "warning" as const,
+        text: t("sync.statusPending", { count: pendingCount })
+      };
+    }
+
+    if (activeVaultBinding.lastSyncAt) {
+      return {
+        tone: "success" as const,
+        text: t("sync.statusSyncedAt", {
+          time: syncChipTimestampFormatter.format(activeVaultBinding.lastSyncAt)
+        })
+      };
+    }
+
+    return {
+      tone: "default" as const,
+      text: t("sync.statusReady")
+    };
+  }, [
+    activeVaultBinding,
+    activeVaultConnection,
+    activeVaultPendingSync.total,
+    online,
+    syncChipTimestampFormatter,
+    t,
+    translateSyncError
+  ]);
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
@@ -340,6 +497,249 @@ export default function App() {
     }
   }, [orbitalEditorEntry, orbitalEditorNoteId]);
 
+  const clearScheduledAutoSync = useCallback(() => {
+    if (autoSyncTimerRef.current !== null) {
+      window.clearTimeout(autoSyncTimerRef.current);
+      autoSyncTimerRef.current = null;
+    }
+  }, []);
+
+  const runActiveVaultSync = useCallback(
+    async ({
+      showFeedback = false
+    }: {
+      showFeedback?: boolean;
+    } = {}) => {
+      if (!activeVaultBinding || !activeVaultConnection) {
+        if (showFeedback) {
+          setSyncFeedback({
+            tone: "error",
+            text: t("sync.bindingMissing")
+          });
+        }
+        return false;
+      }
+
+      if (!online) {
+        if (showFeedback) {
+          setSyncFeedback({
+            tone: "error",
+            text: t("app.networkOffline")
+          });
+        }
+        return false;
+      }
+
+      if (syncInFlightRef.current) {
+        syncRerunRequestedRef.current = true;
+        return false;
+      }
+
+      clearScheduledAutoSync();
+      syncInFlightRef.current = true;
+
+      if (showFeedback) {
+        setSyncFeedback(null);
+      }
+
+      updateSyncBindingState(activeLocalVaultId, {
+        syncStatus: "syncing",
+        lastError: null
+      });
+      refreshSyncRegistryState();
+
+      try {
+        const result = await runConfiguredSync(
+          {
+            provider: activeVaultConnection.provider,
+            serverUrl: activeVaultConnection.serverUrl,
+            vaultId: activeVaultBinding.remoteVaultId,
+            token: activeVaultBinding.syncToken
+          },
+          {
+            localPendingCount: activeVaultPendingSync.total,
+            onStatusChange: (status) => {
+              updateSyncBindingState(activeLocalVaultId, {
+                syncStatus: status
+              });
+              refreshSyncRegistryState();
+            }
+          }
+        );
+
+        const completedAt = Date.now();
+        lastRemoteRefreshAtRef.current[activeLocalVaultId] = completedAt;
+        updateSyncBindingState(activeLocalVaultId, {
+          syncStatus: "idle",
+          lastSyncAt: completedAt,
+          syncCursor: result.revision,
+          lastError: null
+        });
+        refreshSyncRegistryState();
+
+        if (showFeedback) {
+          setSyncFeedback({
+            tone: "success",
+            text: t("sync.completed", {
+              count: result.stats.conflicts
+            })
+          });
+        }
+
+        return true;
+      } catch (error) {
+        updateSyncBindingState(activeLocalVaultId, {
+          syncStatus: "error",
+          lastError: error instanceof Error ? error.message : "SYNC_FAILED"
+        });
+        refreshSyncRegistryState();
+
+        if (showFeedback) {
+          setSyncFeedback({
+            tone: "error",
+            text: translateSyncError(error, activeVaultConnection.provider)
+          });
+        }
+
+        return false;
+      } finally {
+        syncInFlightRef.current = false;
+
+        if (syncRerunRequestedRef.current) {
+          syncRerunRequestedRef.current = false;
+          window.setTimeout(() => {
+            void runActiveVaultSync();
+          }, 450);
+        }
+      }
+    },
+    [
+      activeLocalVaultId,
+      activeVaultBinding,
+      activeVaultConnection,
+      clearScheduledAutoSync,
+      online,
+      t,
+      translateSyncError
+    ]
+  );
+
+  const requestAutoSync = useCallback(
+    ({
+      delayMs = 1600,
+      force = false
+    }: {
+      delayMs?: number;
+      force?: boolean;
+    } = {}) => {
+      if (vaultBooting || !activeVaultBinding || !activeVaultConnection || !online) {
+        return;
+      }
+
+      clearScheduledAutoSync();
+      const scheduledDelay = force ? Math.min(delayMs, 900) : delayMs;
+      autoSyncTimerRef.current = window.setTimeout(() => {
+        autoSyncTimerRef.current = null;
+        void runActiveVaultSync();
+      }, scheduledDelay);
+    },
+    [
+      activeVaultBinding,
+      activeVaultConnection,
+      clearScheduledAutoSync,
+      online,
+      runActiveVaultSync,
+      vaultBooting
+    ]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearScheduledAutoSync();
+    };
+  }, [clearScheduledAutoSync]);
+
+  useEffect(() => {
+    if (!activeVaultBinding || !activeVaultConnection || vaultBooting || !online) {
+      return;
+    }
+
+    const syncKey = `${activeLocalVaultId}:${activeVaultBinding.id}:${activeVaultBinding.remoteVaultId}`;
+
+    if (bootSyncKeyRef.current === syncKey) {
+      return;
+    }
+
+    bootSyncKeyRef.current = syncKey;
+    requestAutoSync({
+      delayMs: 900,
+      force: true
+    });
+  }, [
+    activeLocalVaultId,
+    activeVaultBinding,
+    activeVaultConnection,
+    online,
+    requestAutoSync,
+    vaultBooting
+  ]);
+
+  useEffect(() => {
+    const previousOnline = previousOnlineRef.current;
+    previousOnlineRef.current = online;
+
+    if (previousOnline || !online) {
+      return;
+    }
+
+    requestAutoSync({
+      delayMs: 800,
+      force: true
+    });
+  }, [online, requestAutoSync]);
+
+  useEffect(() => {
+    const wasVisible = previousVisibilityRef.current;
+    previousVisibilityRef.current = isDocumentVisible;
+
+    if (wasVisible || !isDocumentVisible || !activeVaultBinding || !activeVaultConnection || !online) {
+      return;
+    }
+
+    const lastRemoteRefreshAt =
+      lastRemoteRefreshAtRef.current[activeLocalVaultId] ?? activeVaultBinding.lastSyncAt ?? 0;
+
+    if (activeVaultPendingSync.total <= 0 && Date.now() - lastRemoteRefreshAt < 60_000) {
+      return;
+    }
+
+    requestAutoSync({
+      delayMs: 700,
+      force: true
+    });
+  }, [
+    activeLocalVaultId,
+    activeVaultBinding,
+    activeVaultConnection,
+    activeVaultPendingSync.total,
+    isDocumentVisible,
+    online,
+    requestAutoSync
+  ]);
+
+  useEffect(() => {
+    const previousEditorNoteId = previousOrbitalEditorNoteIdRef.current;
+    previousOrbitalEditorNoteIdRef.current = orbitalEditorNoteId;
+
+    if (!previousEditorNoteId || orbitalEditorNoteId !== null) {
+      return;
+    }
+
+    requestAutoSync({
+      delayMs: 380
+    });
+  }, [orbitalEditorNoteId, requestAutoSync]);
+
   const handleSelectNote = async (noteId: string) => {
     setSelectedNoteId(noteId);
     await patchSettings({
@@ -357,7 +757,11 @@ export default function App() {
     color?: string,
     projectId?: string
   ) => {
-    return createFolder(name, parentId, color, projectId);
+    const folder = await createFolder(name, parentId, color, projectId);
+    requestAutoSync({
+      delayMs: 1500
+    });
+    return folder;
   };
 
   const handleCreateNoteAt = async (
@@ -369,6 +773,9 @@ export default function App() {
     const note = await createNote(language, folderId, tagIds, projectId);
     setSelectedNoteId(note.id);
     setSaveState("saved");
+    requestAutoSync({
+      delayMs: 1500
+    });
     return note;
   };
 
@@ -381,6 +788,9 @@ export default function App() {
     const canvas = await createCanvas(language, folderId, tagIds, projectId);
     setSelectedNoteId(canvas.id);
     setSaveState("saved");
+    requestAutoSync({
+      delayMs: 1500
+    });
     return canvas;
   };
 
@@ -391,7 +801,78 @@ export default function App() {
         ? `Проект ${projects.length + 1}`
         : `Project ${projects.length + 1}`;
 
-    return createProject(name, x, y);
+    const project = await createProject(name, x, y);
+    requestAutoSync({
+      delayMs: 1500
+    });
+    return project;
+  };
+
+  const handleRenameProject = async (projectId: string, name: string) => {
+    await renameProject(projectId, name);
+    requestAutoSync({
+      delayMs: 1800
+    });
+  };
+
+  const handleUpdateProjectPosition = async (projectId: string, x: number, y: number) => {
+    await updateProjectPosition(projectId, x, y);
+    requestAutoSync({
+      delayMs: 2600
+    });
+  };
+
+  const handleUpdateProjectColor = async (projectId: string, color: string) => {
+    await updateProjectColor(projectId, color);
+    requestAutoSync({
+      delayMs: 1800
+    });
+  };
+
+  const handleRenameFolder = async (folderId: string, name: string) => {
+    await renameFolder(folderId, name);
+    requestAutoSync({
+      delayMs: 1800
+    });
+  };
+
+  const handleUpdateFolderColor = async (folderId: string, color: string) => {
+    await updateFolderColor(folderId, color);
+    requestAutoSync({
+      delayMs: 1800
+    });
+  };
+
+  const handleCreateTag = async (name: string) => {
+    const tag = await createTag(name);
+    requestAutoSync({
+      delayMs: 1800
+    });
+    return tag;
+  };
+
+  const handleUpdateNoteMeta = async (
+    noteId: string,
+    patch: Partial<
+      Pick<
+        Note,
+        | "title"
+        | "projectId"
+        | "folderId"
+        | "color"
+        | "tagIds"
+        | "pinned"
+        | "favorite"
+        | "archived"
+        | "trashedAt"
+      >
+    >,
+    delayMs = 1800
+  ) => {
+    await updateNoteMeta(noteId, patch);
+    requestAutoSync({
+      delayMs
+    });
   };
 
   const handleToggleTagForNote = async (noteId: string, tagId: string) => {
@@ -405,13 +886,13 @@ export default function App() {
       ? note.tagIds.filter((currentTagId) => currentTagId !== tagId)
       : [...note.tagIds, tagId];
 
-    await updateNoteMeta(noteId, {
+    await handleUpdateNoteMeta(noteId, {
       tagIds: nextTagIds
     });
   };
 
   const handleSetTagIdsForNote = async (noteId: string, tagIds: string[]) => {
-    await updateNoteMeta(noteId, {
+    await handleUpdateNoteMeta(noteId, {
       tagIds: Array.from(new Set(tagIds))
     });
   };
@@ -425,7 +906,42 @@ export default function App() {
 
     if (state === "saved") {
       await saveNoteContent(noteId, content);
+      requestAutoSync({
+        delayMs: 6000
+      });
     }
+  };
+
+  const handleSaveCanvasContentForNote = async (
+    noteId: string,
+    content: Note["canvasContent"],
+    files: Awaited<ReturnType<typeof loadCanvasFiles>>,
+    fileNames: Record<string, string>,
+    state: SaveState
+  ) => {
+    setSaveState(state);
+
+    if (state === "saved" && content) {
+      await saveCanvasContent(noteId, content, files, fileNames);
+      requestAutoSync({
+        delayMs: 6000
+      });
+    }
+  };
+
+  const handleStoreAsset = async (noteId: string, file: File) => {
+    const assetUrl = await storeAsset(noteId, file);
+    requestAutoSync({
+      delayMs: 2400
+    });
+    return assetUrl;
+  };
+
+  const handleRestoreNoteById = async (noteId: string) => {
+    await restoreNoteFromTrash(noteId);
+    requestAutoSync({
+      delayMs: 1500
+    });
   };
 
   const handleDeleteNoteById = async (noteId: string) => {
@@ -462,6 +978,10 @@ export default function App() {
 
       await moveNoteToTrash(note.id);
     }
+
+    requestAutoSync({
+      delayMs: 1500
+    });
 
     if (selectedNoteId === note.id) {
       setSelectedNoteId(null);
@@ -520,6 +1040,9 @@ export default function App() {
 
     const deletedFolderIds = getFolderCascade(folderId, folders, notes).folderIds;
     await removeFolder(folderId);
+    requestAutoSync({
+      delayMs: 1500
+    });
 
     if (selectedFolderId && deletedFolderIds.includes(selectedFolderId)) {
       setSelectedFolderId(null);
@@ -564,6 +1087,9 @@ export default function App() {
     }
 
     await removeProject(projectId);
+    requestAutoSync({
+      delayMs: 1500
+    });
 
     if (selectedFolderId && deletedFolderIdSet.has(selectedFolderId)) {
       setSelectedFolderId(null);
@@ -585,6 +1111,7 @@ export default function App() {
   };
 
   const resetUiForVaultSwitch = () => {
+    clearScheduledAutoSync();
     setSelectedFolderId(null);
     setSelectedTagId(null);
     setSelectedNoteId(null);
@@ -719,6 +1246,15 @@ export default function App() {
       tone: "success",
       text: t("sync.bindingUpdated")
     });
+
+    if (input.localVaultId === activeLocalVaultId) {
+      window.setTimeout(() => {
+        requestAutoSync({
+          delayMs: 700,
+          force: true
+        });
+      }, 0);
+    }
   };
 
   const handleClearVaultBinding = async (localVaultId: string) => {
@@ -738,63 +1274,9 @@ export default function App() {
   };
 
   const handleRunActiveBoundSync = async () => {
-    if (!activeVaultBinding || !activeVaultConnection) {
-      setSyncFeedback({
-        tone: "error",
-        text: t("sync.bindingMissing")
-      });
-      return;
-    }
-
-    setSyncFeedback(null);
-    updateSyncBindingState(activeLocalVaultId, {
-      syncStatus: "syncing",
-      lastError: null
+    await runActiveVaultSync({
+      showFeedback: true
     });
-    refreshSyncRegistryState();
-
-    try {
-      const result = await runConfiguredSync(
-        {
-          provider: activeVaultConnection.provider,
-          serverUrl: activeVaultConnection.serverUrl,
-          vaultId: activeVaultBinding.remoteVaultId,
-          token: activeVaultBinding.syncToken
-        },
-        {
-          onStatusChange: (status) => {
-            updateSyncBindingState(activeLocalVaultId, {
-              syncStatus: status
-            });
-            refreshSyncRegistryState();
-          }
-        }
-      );
-
-      updateSyncBindingState(activeLocalVaultId, {
-        syncStatus: "idle",
-        lastSyncAt: Date.now(),
-        syncCursor: result.revision,
-        lastError: null
-      });
-      refreshSyncRegistryState();
-      setSyncFeedback({
-        tone: "success",
-        text: t("sync.completed", {
-          count: result.stats.conflicts
-        })
-      });
-    } catch (error) {
-      updateSyncBindingState(activeLocalVaultId, {
-        syncStatus: "error",
-        lastError: error instanceof Error ? error.message : "SYNC_FAILED"
-      });
-      refreshSyncRegistryState();
-      setSyncFeedback({
-        tone: "error",
-        text: translateSyncError(error, activeVaultConnection.provider)
-      });
-    }
   };
 
   const handleTagToggle = async (tagId: string) => {
@@ -854,40 +1336,6 @@ export default function App() {
     };
   }, []);
 
-  const translateSyncError = (
-    error: unknown,
-    provider: "selfHosted" | "hosted" | "googleDrive" | null = null
-  ) => {
-    const message = error instanceof Error ? error.message : "SYNC_FAILED";
-
-    switch (message) {
-      case "SELF_HOSTED_URL_REQUIRED":
-        return t("sync.urlRequired");
-      case "HOSTED_URL_REQUIRED":
-        return t("sync.hostedUrlRequired");
-      case "SELF_HOSTED_TOKEN_REQUIRED":
-        return t("sync.tokenRequired");
-      case "HOSTED_SYNC_TOKEN_REQUIRED":
-        return t("sync.hostedTokenRequired");
-      case "SELF_HOSTED_VAULT_REQUIRED":
-        return t("sync.vaultRequired");
-      case "HOSTED_VAULT_REQUIRED":
-        return t("sync.hostedVaultRequired");
-      case "UNAUTHORIZED":
-        return provider === "hosted"
-          ? t("sync.hostedUnauthorized")
-          : t("sync.unauthorized");
-      case "VAULT_NOT_FOUND":
-        return t("sync.vaultNotFound");
-      case "SYNC_REVISION_CONFLICT":
-        return t("sync.revisionConflict");
-      case "HTTP_404":
-        return t("sync.serverNotFound");
-      default:
-        return t("sync.failedGeneric");
-    }
-  };
-
   if (vaultBooting || !settings) {
     return (
       <div className="boot-screen">
@@ -929,42 +1377,44 @@ export default function App() {
                 saveState={saveState}
                 immersive
                 onTitleChange={(title) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     title
                   })
                 }
                 onFolderChange={(folderId) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     folderId
                   })
                 }
                 onNoteColorChange={(color) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     color
                   })
                 }
                 onTagIdsChange={(tagIds) =>
                   void handleSetTagIdsForNote(orbitalEditorEntry.id, tagIds)
                 }
-                onCreateTag={createTag}
+                onCreateTag={handleCreateTag}
                 onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
-                onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
+                onRestore={() => void handleRestoreNoteById(orbitalEditorEntry.id)}
                 onTogglePin={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     pinned: !orbitalEditorEntry.pinned
                   })
                 }
                 onToggleFavorite={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     favorite: !orbitalEditorEntry.favorite
                   })
                 }
                 onContentChange={(content, files, fileNames, state) => {
-                  setSaveState(state);
-
-                  if (state === "saved") {
-                    void saveCanvasContent(orbitalEditorEntry.id, content, files, fileNames);
-                  }
+                  void handleSaveCanvasContentForNote(
+                    orbitalEditorEntry.id,
+                    content,
+                    files,
+                    fileNames,
+                    state
+                  );
                 }}
                 onLoadFiles={() => loadCanvasFiles(orbitalEditorEntry.id)}
               />
@@ -978,40 +1428,40 @@ export default function App() {
                 saveState={saveState}
                 immersive
                 onTitleChange={(title) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     title
                   })
                 }
                 onFolderChange={(folderId) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     folderId
                   })
                 }
                 onNoteColorChange={(color) =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     color
                   })
                 }
                 onTagIdsChange={(tagIds) =>
                   void handleSetTagIdsForNote(orbitalEditorEntry.id, tagIds)
                 }
-                onCreateTag={createTag}
+                onCreateTag={handleCreateTag}
                 onDelete={() => void handleDeleteNoteById(orbitalEditorEntry.id)}
-                onRestore={() => void restoreNoteFromTrash(orbitalEditorEntry.id)}
+                onRestore={() => void handleRestoreNoteById(orbitalEditorEntry.id)}
                 onTogglePin={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     pinned: !orbitalEditorEntry.pinned
                   })
                 }
                 onToggleFavorite={() =>
-                  void updateNoteMeta(orbitalEditorEntry.id, {
+                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
                     favorite: !orbitalEditorEntry.favorite
                   })
                 }
                 onContentChange={(content, state) =>
                   void handleContentChangeForNote(orbitalEditorEntry.id, content, state)
                 }
-                onUploadFile={(file) => storeAsset(orbitalEditorEntry.id, file)}
+                onUploadFile={(file) => handleStoreAsset(orbitalEditorEntry.id, file)}
                 onResolveFileUrl={resolveAssetUrl}
               />
             )
@@ -1033,7 +1483,7 @@ export default function App() {
               noteCount: t("noteList.noteCount"),
               allNotes: t("filters.allNotes")
             }}
-            onRestore={(noteId) => void restoreNoteFromTrash(noteId)}
+            onRestore={(noteId) => void handleRestoreNoteById(noteId)}
             onDelete={(noteId) => void handleDeleteNoteById(noteId)}
           />
         }
@@ -1066,26 +1516,31 @@ export default function App() {
         showClose={false}
         onClose={() => undefined}
         onCloseEditor={() => setOrbitalEditorNoteId(null)}
+        syncStatusChip={activeVaultSyncChip}
         onCreateProject={handleCreateProjectNode}
-        onRenameProject={(projectId, name) => void renameProject(projectId, name)}
-        onUpdateProjectPosition={(projectId, x, y) => void updateProjectPosition(projectId, x, y)}
-        onUpdateProjectColor={(projectId, color) => void updateProjectColor(projectId, color)}
+        onRenameProject={(projectId, name) => void handleRenameProject(projectId, name)}
+        onUpdateProjectPosition={(projectId, x, y) =>
+          void handleUpdateProjectPosition(projectId, x, y)
+        }
+        onUpdateProjectColor={(projectId, color) =>
+          void handleUpdateProjectColor(projectId, color)
+        }
         onDeleteProject={(projectId) => void handleDeleteProject(projectId)}
-        onUpdateFolderColor={(folderId, color) => void updateFolderColor(folderId, color)}
-        onRenameFolder={(folderId, name) => void renameFolder(folderId, name)}
+        onUpdateFolderColor={(folderId, color) => void handleUpdateFolderColor(folderId, color)}
+        onRenameFolder={(folderId, name) => void handleRenameFolder(folderId, name)}
         onDeleteFolder={(folderId) => void handleDeleteFolder(folderId)}
         onRenameNote={(noteId, name) =>
-          void updateNoteMeta(noteId, {
+          void handleUpdateNoteMeta(noteId, {
             title: name
           })
         }
         onUpdateNoteColor={(noteId, color) =>
-          void updateNoteMeta(noteId, {
+          void handleUpdateNoteMeta(noteId, {
             color
           })
         }
         onSetNotePinned={(noteId, pinned) =>
-          void updateNoteMeta(noteId, {
+          void handleUpdateNoteMeta(noteId, {
             pinned
           })
         }

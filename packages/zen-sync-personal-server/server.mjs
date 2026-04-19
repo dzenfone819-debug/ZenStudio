@@ -4,13 +4,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  applyChangeSetToSnapshot,
+  buildChangeSetFromSnapshots,
+  collapseChangeSets,
   collectBody,
   createEmptyEnvelope,
+  createEmptyChangeSet,
   ensureDir,
   fileExists,
   getBearerToken,
   handleOptimisticSyncRoute,
+  isChangeSetEmpty,
+  normalizeChangeSet,
   now,
+  pruneChangeHistory,
   readJsonFile,
   sendCorsNoContent,
   sendJson,
@@ -69,6 +76,40 @@ function createEmptyRegistry() {
 
 function getVaultStateFile(vaultId) {
   return path.join(VAULTS_DIR, `${vaultId}.json`);
+}
+
+function getVaultJournalFile(vaultId) {
+  return path.join(VAULTS_DIR, `${vaultId}.journal.json`);
+}
+
+async function readVaultJournal(vaultId) {
+  const parsed = await readJsonFile(getVaultJournalFile(vaultId), []);
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      return {
+        revision: typeof entry.revision === "string" ? entry.revision : null,
+        baseRevision:
+          typeof entry.baseRevision === "string" || entry.baseRevision === null
+            ? entry.baseRevision ?? null
+            : null,
+        createdAt: typeof entry.createdAt === "number" ? entry.createdAt : now(),
+        changes: normalizeChangeSet(entry.changes, "server")
+      };
+    })
+    .filter((entry) => entry && entry.revision);
+}
+
+async function writeVaultJournal(vaultId, journal) {
+  await writeJsonFile(getVaultJournalFile(vaultId), pruneChangeHistory(journal));
 }
 
 function buildVaultList(registry) {
@@ -189,6 +230,10 @@ async function writeVaultEnvelope(vaultId, envelope) {
 async function ensureDefaultVaultState(vaultId) {
   if (!(await fileExists(getVaultStateFile(vaultId)))) {
     await writeVaultEnvelope(vaultId, createEmptyEnvelope());
+  }
+
+  if (!(await fileExists(getVaultJournalFile(vaultId)))) {
+    await writeVaultJournal(vaultId, []);
   }
 }
 
@@ -373,6 +418,21 @@ async function updateVaultMeta(registry, vaultId, patch) {
   return nextRegistry;
 }
 
+function buildSnapshotFallbackFeed(envelope) {
+  return {
+    mode: "snapshot",
+    revision: envelope.revision,
+    baseRevision: null,
+    changes: null,
+    snapshot: envelope.snapshot
+  };
+}
+
+async function appendVaultJournalEntry(vaultId, entry) {
+  const journal = await readVaultJournal(vaultId);
+  await writeVaultJournal(vaultId, [...journal, entry]);
+}
+
 async function createVaultRecord(registry, payload) {
   const name = sanitizeDisplayName(payload?.name, "New vault");
   const requestedId = sanitizeVaultId(payload?.id ?? "");
@@ -550,7 +610,8 @@ const server = createServer(async (request, response) => {
           multiUser: false,
           multiVault: true,
           standaloneRegistry: true,
-          managementApi: true
+          managementApi: true,
+          deltaSync: true
         },
         defaultVaultId: config.defaultVaultId
       });
@@ -635,6 +696,121 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const changesMatch = pathname.match(/^\/v1\/vaults\/([a-z0-9-_]{1,64})\/changes$/i);
+    const legacyDefaultChangesRoute = pathname === "/v1/changes" ? ["", config.defaultVaultId] : null;
+    const changesVaultId = sanitizeVaultId(changesMatch?.[1] ?? legacyDefaultChangesRoute?.[1] ?? "");
+
+    if (changesVaultId && (request.method === "GET" || request.method === "POST")) {
+      const vault = getVaultById(registry, changesVaultId);
+
+      if (!vault) {
+        sendJson(response, 404, { error: "VAULT_NOT_FOUND" });
+        return;
+      }
+
+      const tokenValue = getBearerToken(request);
+      const tokenRecord = tokenValue ? getAuthorizedTokenRecord(registry, changesVaultId, tokenValue) : null;
+
+      if (!tokenRecord) {
+        sendJson(response, 401, { error: "UNAUTHORIZED" });
+        return;
+      }
+
+      const registryWithUsage = await markTokenUsed(registry, tokenRecord.id);
+      const currentEnvelope = await readVaultEnvelope(changesVaultId);
+
+      if (request.method === "GET") {
+        const sinceRevision = url.searchParams.get("since")?.trim() ?? "";
+
+        if (!sinceRevision || !currentEnvelope.revision) {
+          sendJson(response, 200, buildSnapshotFallbackFeed(currentEnvelope));
+          return;
+        }
+
+        if (sinceRevision === currentEnvelope.revision) {
+          sendJson(response, 200, {
+            mode: "delta",
+            revision: currentEnvelope.revision,
+            baseRevision: sinceRevision,
+            changes: createEmptyChangeSet("server"),
+            snapshot: null
+          });
+          return;
+        }
+
+        const journal = await readVaultJournal(changesVaultId);
+        const cursorIndex = journal.findIndex((entry) => entry.revision === sinceRevision);
+
+        if (cursorIndex === -1) {
+          sendJson(response, 200, buildSnapshotFallbackFeed(currentEnvelope));
+          return;
+        }
+
+        sendJson(response, 200, {
+          mode: "delta",
+          revision: currentEnvelope.revision,
+          baseRevision: sinceRevision,
+          changes: collapseChangeSets(journal.slice(cursorIndex + 1).map((entry) => entry.changes)),
+          snapshot: null
+        });
+        return;
+      }
+
+      const payload = await collectBody(request);
+      const baseRevision =
+        payload && typeof payload === "object" && "baseRevision" in payload
+          ? payload.baseRevision ?? null
+          : null;
+      const rawChanges =
+        payload && typeof payload === "object" && "changes" in payload ? payload.changes : null;
+      const changes = normalizeChangeSet(rawChanges, "server");
+
+      if (currentEnvelope.revision !== baseRevision) {
+        sendJson(response, 409, {
+          error: "SYNC_REVISION_CONFLICT",
+          revision: currentEnvelope.revision
+        });
+        return;
+      }
+
+      if (isChangeSetEmpty(changes)) {
+        sendJson(response, 200, {
+          revision: currentEnvelope.revision
+        });
+        return;
+      }
+
+      const nextSnapshot = applyChangeSetToSnapshot(currentEnvelope.snapshot, changes);
+      const nextEnvelope = {
+        ...currentEnvelope,
+        revision: `rev-${Date.now()}-${randomUUID()}`,
+        snapshot: {
+          ...nextSnapshot,
+          exportedAt: Date.now()
+        }
+      };
+
+      await writeVaultEnvelope(changesVaultId, nextEnvelope);
+      await appendVaultJournalEntry(changesVaultId, {
+        revision: nextEnvelope.revision,
+        baseRevision,
+        createdAt: now(),
+        changes: {
+          ...changes,
+          exportedAt: nextEnvelope.snapshot.exportedAt
+        }
+      });
+      await updateVaultMeta(registryWithUsage, changesVaultId, {
+        lastRevision: nextEnvelope.revision,
+        lastSyncAt: Date.now()
+      });
+
+      sendJson(response, 200, {
+        revision: nextEnvelope.revision
+      });
+      return;
+    }
+
     const stateMatch = pathname.match(/^\/v1\/vaults\/([a-z0-9-_]{1,64})\/state$/i);
     const legacyDefaultStateRoute = pathname === "/v1/state" ? ["", config.defaultVaultId] : null;
     const stateVaultId = sanitizeVaultId(stateMatch?.[1] ?? legacyDefaultStateRoute?.[1] ?? "");
@@ -662,7 +838,18 @@ const server = createServer(async (request, response) => {
         response,
         readEnvelope: () => readVaultEnvelope(stateVaultId),
         writeEnvelope: (envelope) => writeVaultEnvelope(stateVaultId, envelope),
-        onAfterWrite: async (envelope) => {
+        onAfterWrite: async (envelope, previousEnvelope) => {
+          const changeSet = buildChangeSetFromSnapshots(previousEnvelope?.snapshot, envelope.snapshot);
+
+          if (!isChangeSetEmpty(changeSet)) {
+            await appendVaultJournalEntry(stateVaultId, {
+              revision: envelope.revision,
+              baseRevision: previousEnvelope?.revision ?? null,
+              createdAt: now(),
+              changes: changeSet
+            });
+          }
+
           await updateVaultMeta(registryWithUsage, stateVaultId, {
             lastRevision: envelope.revision,
             lastSyncAt: Date.now()
