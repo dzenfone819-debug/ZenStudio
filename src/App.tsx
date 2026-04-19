@@ -49,17 +49,26 @@ import {
 import {
   createLocalVaultProfile,
   deleteLocalVaultDatabase,
+  getLocalVaultProfileByGuid,
   getNextLocalVaultAfterDelete,
   getStoredActiveLocalVaultId,
   listLocalVaultProfiles,
   removeLocalVaultProfile,
   renameLocalVaultProfile,
-  setStoredActiveLocalVaultId
+  resolveUniqueLocalVaultName,
+  setStoredActiveLocalVaultId,
+  syncLocalVaultGuidsWithBindings,
+  updateLocalVaultProfile
 } from "./lib/localVaults";
 import {
+  deleteHostedVault,
+  deletePersonalServerVault,
+  importRemoteVaultIntoLocalVault,
+  issueHostedVaultToken,
+  issuePersonalServerVaultToken,
   runConfiguredSync
 } from "./lib/sync";
-import { computePendingSyncSummary } from "./lib/syncStatus";
+import { computePendingSyncSummaryFromDirtyEntries } from "./lib/syncStatus";
 import {
   clearSyncBinding,
   createSyncConnection,
@@ -77,6 +86,7 @@ import type {
   MobileSection,
   Note,
   NoteListView,
+  RemoteVaultImportResult,
   SaveState
 } from "./types";
 
@@ -127,8 +137,7 @@ export default function App() {
   const tags = useLiveQuery(() => db.tags.toArray(), [activeLocalVaultId], []);
   const notes = useLiveQuery(() => db.notes.toArray(), [activeLocalVaultId], []);
   const assets = useLiveQuery(() => db.assets.toArray(), [activeLocalVaultId], []);
-  const syncShadows = useLiveQuery(() => db.syncShadows.toArray(), [activeLocalVaultId], []);
-  const syncTombstones = useLiveQuery(() => db.syncTombstones.toArray(), [activeLocalVaultId], []);
+  const syncDirtyEntries = useLiveQuery(() => db.syncDirtyEntries.toArray(), [activeLocalVaultId], []);
   const settings = useLiveQuery(() => db.settings.get("app"), [activeLocalVaultId], undefined);
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -202,6 +211,17 @@ export default function App() {
 
     setSelectedSyncVaultId(activeLocalVaultId);
   }, [activeLocalVaultId, localVaults, selectedSyncVaultId]);
+
+  useEffect(() => {
+    const nextVaults = syncLocalVaultGuidsWithBindings(syncBindings);
+
+    if (
+      nextVaults.length !== localVaults.length ||
+      nextVaults.some((vault, index) => vault.vaultGuid !== localVaults[index]?.vaultGuid)
+    ) {
+      setLocalVaults(nextVaults);
+    }
+  }, [localVaults, syncBindings]);
 
   useEffect(() => {
     if (!settings) {
@@ -304,8 +324,6 @@ export default function App() {
     null;
   const orbitalEditorEntry =
     notes.find((note) => note.id === orbitalEditorNoteId && note.trashedAt === null) ?? null;
-  const activeLocalVaultName =
-    localVaults.find((vault) => vault.id === activeLocalVaultId)?.name ?? null;
   const syncBindingsByVaultId = useMemo(
     () => new Map(syncBindings.map((binding) => [binding.localVaultId, binding])),
     [syncBindings]
@@ -344,6 +362,8 @@ export default function App() {
             : t("sync.unauthorized");
         case "VAULT_NOT_FOUND":
           return t("sync.vaultNotFound");
+        case "LAST_VAULT_REQUIRED":
+          return t("sync.lastRemoteVaultRequired");
         case "SYNC_REVISION_CONFLICT":
           return t("sync.revisionConflict");
         case "HTTP_404":
@@ -356,17 +376,8 @@ export default function App() {
     [t]
   );
   const activeVaultPendingSync = useMemo(
-    () =>
-      computePendingSyncSummary({
-        projects,
-        folders,
-        tags,
-        notes,
-        assets,
-        shadows: syncShadows,
-        tombstones: syncTombstones
-      }),
-    [assets, folders, notes, projects, syncShadows, syncTombstones, tags]
+    () => computePendingSyncSummaryFromDirtyEntries(syncDirtyEntries),
+    [syncDirtyEntries]
   );
   const syncChipTimestampFormatter = useMemo(
     () =>
@@ -449,6 +460,46 @@ export default function App() {
     t,
     translateSyncError
   ]);
+  const localVaultSwitcherItems = useMemo(
+    () =>
+      localVaults.map((vault) => {
+        const binding = syncBindingsByVaultId.get(vault.id) ?? null;
+        const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
+
+        return {
+          id: vault.id,
+          name: vault.name,
+          statusLabel: !binding
+            ? t("settings.statusUnbound")
+            : binding.syncStatus === "syncing"
+              ? t("settings.statusSyncing")
+              : binding.syncStatus === "error"
+                ? t("settings.statusError")
+                : t("settings.statusReady"),
+          statusTone: !binding
+            ? ("default" as const)
+            : binding.syncStatus === "syncing"
+              ? ("warning" as const)
+              : binding.syncStatus === "error"
+                ? ("error" as const)
+                : ("success" as const),
+          providerLabel: connection
+            ? connection.provider === "hosted"
+              ? t("sync.hosted")
+              : connection.provider === "googleDrive"
+                ? t("sync.googleDrive")
+                : t("sync.selfHosted")
+            : null,
+          providerTone: connection?.provider ?? ("local" as const),
+          detail: connection
+            ? binding?.remoteVaultName
+              ? `${connection.label} · ${binding.remoteVaultName}`
+              : connection.label
+            : t("sync.statusLocalOnly")
+        };
+      }),
+    [localVaults, syncBindingsByVaultId, syncConnectionsById, t]
+  );
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
@@ -504,13 +555,20 @@ export default function App() {
     }
   }, []);
 
-  const runActiveVaultSync = useCallback(
-    async ({
-      showFeedback = false
-    }: {
-      showFeedback?: boolean;
-    } = {}) => {
-      if (!activeVaultBinding || !activeVaultConnection) {
+  const runBoundVaultSync = useCallback(
+    async (
+      localVaultId: string,
+      {
+        showFeedback = false
+      }: {
+        showFeedback?: boolean;
+      } = {}
+    ) => {
+      const binding = syncBindingsByVaultId.get(localVaultId) ?? null;
+      const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
+      const isActiveVaultSync = localVaultId === activeLocalVaultId;
+
+      if (!binding || !connection) {
         if (showFeedback) {
           setSyncFeedback({
             tone: "error",
@@ -531,18 +589,29 @@ export default function App() {
       }
 
       if (syncInFlightRef.current) {
-        syncRerunRequestedRef.current = true;
+        if (showFeedback) {
+          setSyncFeedback({
+            tone: "error",
+            text: t("sync.syncing")
+          });
+        }
+        if (isActiveVaultSync) {
+          syncRerunRequestedRef.current = true;
+        }
         return false;
       }
 
-      clearScheduledAutoSync();
+      if (isActiveVaultSync) {
+        clearScheduledAutoSync();
+      }
+
       syncInFlightRef.current = true;
 
       if (showFeedback) {
         setSyncFeedback(null);
       }
 
-      updateSyncBindingState(activeLocalVaultId, {
+      updateSyncBindingState(localVaultId, {
         syncStatus: "syncing",
         lastError: null
       });
@@ -551,15 +620,16 @@ export default function App() {
       try {
         const result = await runConfiguredSync(
           {
-            provider: activeVaultConnection.provider,
-            serverUrl: activeVaultConnection.serverUrl,
-            vaultId: activeVaultBinding.remoteVaultId,
-            token: activeVaultBinding.syncToken
+            provider: connection.provider,
+            serverUrl: connection.serverUrl,
+            vaultId: binding.remoteVaultId,
+            token: binding.syncToken
           },
           {
-            localPendingCount: activeVaultPendingSync.total,
+            localVaultId: isActiveVaultSync ? undefined : localVaultId,
+            localPendingCount: isActiveVaultSync ? activeVaultPendingSync.total : undefined,
             onStatusChange: (status) => {
-              updateSyncBindingState(activeLocalVaultId, {
+              updateSyncBindingState(localVaultId, {
                 syncStatus: status
               });
               refreshSyncRegistryState();
@@ -568,8 +638,8 @@ export default function App() {
         );
 
         const completedAt = Date.now();
-        lastRemoteRefreshAtRef.current[activeLocalVaultId] = completedAt;
-        updateSyncBindingState(activeLocalVaultId, {
+        lastRemoteRefreshAtRef.current[localVaultId] = completedAt;
+        updateSyncBindingState(localVaultId, {
           syncStatus: "idle",
           lastSyncAt: completedAt,
           syncCursor: result.revision,
@@ -588,7 +658,7 @@ export default function App() {
 
         return true;
       } catch (error) {
-        updateSyncBindingState(activeLocalVaultId, {
+        updateSyncBindingState(localVaultId, {
           syncStatus: "error",
           lastError: error instanceof Error ? error.message : "SYNC_FAILED"
         });
@@ -597,7 +667,7 @@ export default function App() {
         if (showFeedback) {
           setSyncFeedback({
             tone: "error",
-            text: translateSyncError(error, activeVaultConnection.provider)
+            text: translateSyncError(error, connection.provider)
           });
         }
 
@@ -605,23 +675,33 @@ export default function App() {
       } finally {
         syncInFlightRef.current = false;
 
-        if (syncRerunRequestedRef.current) {
+        if (isActiveVaultSync && syncRerunRequestedRef.current) {
           syncRerunRequestedRef.current = false;
           window.setTimeout(() => {
-            void runActiveVaultSync();
+            void runBoundVaultSync(localVaultId);
           }, 450);
         }
       }
     },
     [
       activeLocalVaultId,
-      activeVaultBinding,
-      activeVaultConnection,
+      activeVaultPendingSync.total,
       clearScheduledAutoSync,
       online,
+      syncBindingsByVaultId,
+      syncConnectionsById,
       t,
       translateSyncError
     ]
+  );
+
+  const runActiveVaultSync = useCallback(
+    async ({
+      showFeedback = false
+    }: {
+      showFeedback?: boolean;
+    } = {}) => runBoundVaultSync(activeLocalVaultId, { showFeedback }),
+    [activeLocalVaultId, runBoundVaultSync]
   );
 
   const requestAutoSync = useCallback(
@@ -1133,9 +1213,13 @@ export default function App() {
     resetUiForVaultSwitch();
   };
 
-  const handleCreateLocalVault = (name: string) => {
-    const createdVault = createLocalVaultProfile(name);
-    activateLocalVault(createdVault.id);
+  const handleCreateLocalVaultForSettings = (name: string) => {
+    const createdVault = createLocalVaultProfile(name, {
+      activate: false
+    });
+    setLocalVaults(listLocalVaultProfiles());
+    setSelectedSyncVaultId(createdVault.id);
+    return createdVault.id;
   };
 
   const handleRenameLocalVault = (localVaultId: string, name: string) => {
@@ -1143,7 +1227,30 @@ export default function App() {
     setLocalVaults(listLocalVaultProfiles());
   };
 
-  const handleDeleteLocalVault = async (localVaultId: string) => {
+  const clearLocalVaultBindingState = async (localVaultId: string) => {
+    const binding = syncBindingsByVaultId.get(localVaultId);
+
+    if (!binding) {
+      return false;
+    }
+
+    await resetLocalVaultSyncBinding(localVaultId);
+    clearSyncBinding(localVaultId);
+
+    if (localVaultId === activeLocalVaultId) {
+      clearScheduledAutoSync();
+    }
+
+    refreshSyncRegistryState();
+    return true;
+  };
+
+  const handleDeleteLocalVault = async (
+    localVaultId: string,
+    options?: {
+      skipConfirmation?: boolean;
+    }
+  ) => {
     const targetVault = localVaults.find((vault) => vault.id === localVaultId);
 
     if (!targetVault) {
@@ -1158,17 +1265,19 @@ export default function App() {
       return;
     }
 
-    const confirmed = await requestConfirmation({
-      title: t("sync.localVaultDelete"),
-      message: t("sync.localVaultDeleteConfirm", {
-        name: targetVault.name
-      }),
-      confirmLabel: t("sync.localVaultDelete"),
-      cancelLabel: t("dialog.cancel")
-    });
+    if (!(options?.skipConfirmation ?? false)) {
+      const confirmed = await requestConfirmation({
+        title: t("sync.localVaultDelete"),
+        message: t("sync.localVaultDeleteConfirm", {
+          name: targetVault.name
+        }),
+        confirmLabel: t("sync.localVaultDelete"),
+        cancelLabel: t("dialog.cancel")
+      });
 
-    if (!confirmed) {
-      return;
+      if (!confirmed) {
+        return;
+      }
     }
 
     if (localVaultId === activeLocalVaultId) {
@@ -1226,28 +1335,122 @@ export default function App() {
     refreshSyncRegistryState();
   };
 
-  const handleBindVaultToConnection = async (input: {
-    localVaultId: string;
+  const handleDeleteRemoteVault = async (input: {
     connectionId: string;
     remoteVaultId: string;
-    remoteVaultName?: string;
-    syncToken: string;
   }) => {
-    await resetLocalVaultSyncBinding(input.localVaultId);
+    const connection = syncConnectionsById.get(input.connectionId) ?? null;
+
+    if (!connection) {
+      throw new Error("SYNC_CONNECTION_NOT_FOUND");
+    }
+
+    if (connection.provider === "hosted") {
+      await deleteHostedVault(connection.serverUrl, connection.sessionToken, input.remoteVaultId);
+    } else {
+      await deletePersonalServerVault(
+        connection.serverUrl,
+        connection.managementToken,
+        input.remoteVaultId
+      );
+    }
+
+    const affectedBindings = syncBindings.filter(
+      (binding) =>
+        binding.connectionId === input.connectionId && binding.remoteVaultId === input.remoteVaultId
+    );
+
+    for (const binding of affectedBindings) {
+      await clearLocalVaultBindingState(binding.localVaultId);
+    }
+  };
+
+  const issueConnectionVaultToken = async (
+    connectionId: string,
+    remoteVaultId: string,
+    label: string
+  ) => {
+    const connection = syncConnectionsById.get(connectionId) ?? null;
+
+    if (!connection) {
+      throw new Error("SYNC_CONNECTION_NOT_FOUND");
+    }
+
+    if (connection.provider === "hosted") {
+      const response = await issueHostedVaultToken(
+        connection.serverUrl,
+        connection.sessionToken,
+        remoteVaultId,
+        label
+      );
+
+      return {
+        connection,
+        syncToken: response.token
+      };
+    }
+
+    const response = await issuePersonalServerVaultToken(
+      connection.serverUrl,
+      connection.managementToken,
+      remoteVaultId,
+      label
+    );
+
+    return {
+      connection,
+      syncToken: response.token
+    };
+  };
+
+  const applyVaultBinding = async (
+    input: {
+      localVaultId: string;
+      connectionId: string;
+      remoteVaultId: string;
+      remoteVaultName?: string;
+      syncToken: string;
+    },
+    options?: {
+      resetLocalSyncState?: boolean;
+      keepBindingMetadata?: boolean;
+      lastSyncAt?: number | null;
+      syncCursor?: string | null;
+      successMessage?: string | null;
+      scheduleSync?: boolean;
+    }
+  ) => {
+    if (options?.resetLocalSyncState ?? true) {
+      await resetLocalVaultSyncBinding(input.localVaultId);
+    }
+
+    updateLocalVaultProfile(input.localVaultId, {
+      vaultGuid: input.remoteVaultId
+    });
+
     upsertSyncBinding({
       ...input,
       syncStatus: "idle",
-      lastSyncAt: null,
-      syncCursor: null,
-      lastError: null
-    });
-    refreshSyncRegistryState();
-    setSyncFeedback({
-      tone: "success",
-      text: t("sync.bindingUpdated")
+      lastError: null,
+      ...(options?.keepBindingMetadata
+        ? {}
+        : {
+            lastSyncAt: options?.lastSyncAt ?? null,
+            syncCursor: options?.syncCursor ?? null
+          })
     });
 
-    if (input.localVaultId === activeLocalVaultId) {
+    setLocalVaults(listLocalVaultProfiles());
+    refreshSyncRegistryState();
+
+    if (options?.successMessage) {
+      setSyncFeedback({
+        tone: "success",
+        text: options.successMessage
+      });
+    }
+
+    if ((options?.scheduleSync ?? false) && input.localVaultId === activeLocalVaultId) {
       window.setTimeout(() => {
         requestAutoSync({
           delayMs: 700,
@@ -1257,6 +1460,117 @@ export default function App() {
     }
   };
 
+  const handleBindVaultToConnection = async (input: {
+    localVaultId: string;
+    connectionId: string;
+    remoteVaultId: string;
+    remoteVaultName?: string;
+    syncToken: string;
+  }) => {
+    await applyVaultBinding(input, {
+      resetLocalSyncState: true,
+      keepBindingMetadata: false,
+      lastSyncAt: null,
+      syncCursor: null,
+      successMessage: t("sync.bindingUpdated"),
+      scheduleSync: true
+    });
+  };
+
+  const handleImportRemoteVault = async (input: {
+    connectionId: string;
+    remoteVaultId: string;
+    remoteVaultName: string;
+    openAfterImport?: boolean;
+  }): Promise<RemoteVaultImportResult> => {
+    const remoteVaultId = input.remoteVaultId.trim();
+    const remoteVaultName = input.remoteVaultName.trim() || input.remoteVaultId;
+
+    if (!remoteVaultId) {
+      throw new Error("VAULT_NOT_FOUND");
+    }
+
+    const { connection, syncToken } = await issueConnectionVaultToken(
+      input.connectionId,
+      remoteVaultId,
+      `${remoteVaultName} · ${remoteVaultId}`
+    );
+
+    const existingLocalVault = getLocalVaultProfileByGuid(remoteVaultId);
+    let targetLocalVault = existingLocalVault;
+    let nameAdjusted = false;
+    let disposition: RemoteVaultImportResult["disposition"] = existingLocalVault
+      ? "linked"
+      : "imported";
+    let importedRevision: string | null | undefined;
+    let importedAt: number | null | undefined;
+
+    if (!targetLocalVault) {
+      const uniqueName = resolveUniqueLocalVaultName(remoteVaultName);
+      nameAdjusted = uniqueName !== remoteVaultName;
+      targetLocalVault = createLocalVaultProfile(uniqueName, {
+        activate: false,
+        vaultGuid: remoteVaultId
+      });
+
+      const imported = await importRemoteVaultIntoLocalVault({
+        localVaultId: targetLocalVault.id,
+        serverUrl: connection.serverUrl,
+        remoteVaultId,
+        syncToken,
+        language: settings?.language ?? "en"
+      });
+
+      importedRevision = imported.revision;
+      importedAt = Date.now();
+    }
+
+    await applyVaultBinding(
+      {
+        localVaultId: targetLocalVault.id,
+        connectionId: input.connectionId,
+        remoteVaultId,
+        remoteVaultName,
+        syncToken
+      },
+      {
+        resetLocalSyncState: false,
+        keepBindingMetadata: disposition === "linked",
+        lastSyncAt: disposition === "imported" ? importedAt ?? null : undefined,
+        syncCursor: disposition === "imported" ? importedRevision ?? null : undefined,
+        successMessage:
+          disposition === "imported"
+            ? nameAdjusted
+              ? t("settings.remoteImportAdjusted", {
+                  vault: targetLocalVault.name
+                })
+              : t("settings.remoteImportCreated", {
+                  vault: targetLocalVault.name
+                })
+            : t("settings.remoteImportLinked", {
+                vault: targetLocalVault.name
+              }),
+        scheduleSync:
+          input.openAfterImport === true || targetLocalVault.id === activeLocalVaultId
+      }
+    );
+
+    setSelectedSyncVaultId(targetLocalVault.id);
+
+    if (input.openAfterImport) {
+      activateLocalVault(targetLocalVault.id);
+    } else {
+      setLocalVaults(listLocalVaultProfiles());
+    }
+
+    return {
+      localVaultId: targetLocalVault.id,
+      localVaultName: targetLocalVault.name,
+      disposition,
+      nameAdjusted
+    };
+  };
+
   const handleClearVaultBinding = async (localVaultId: string) => {
     const binding = syncBindingsByVaultId.get(localVaultId);
 
@@ -1264,17 +1578,15 @@ export default function App() {
       return;
     }
 
-    await resetLocalVaultSyncBinding(localVaultId);
-    clearSyncBinding(localVaultId);
-    refreshSyncRegistryState();
+    await clearLocalVaultBindingState(localVaultId);
     setSyncFeedback({
       tone: "success",
       text: t("sync.bindingCleared")
     });
   };
 
-  const handleRunActiveBoundSync = async () => {
-    await runActiveVaultSync({
+  const handleRunVaultSync = async (localVaultId: string) => {
+    await runBoundVaultSync(localVaultId, {
       showFeedback: true
     });
   };
@@ -1358,7 +1670,6 @@ export default function App() {
         assets={assets}
         assetCount={assets.length}
         language={settings.language}
-        localVaultName={activeLocalVaultName ?? undefined}
         editorOpen={Boolean(orbitalEditorEntry)}
         editorTitle={
           orbitalEditorEntry?.title?.trim() ||
@@ -1497,26 +1808,31 @@ export default function App() {
             syncConnections={syncConnections}
             syncBindings={syncBindings}
             syncFeedback={syncFeedback}
-            syncBusy={activeVaultBinding?.syncStatus === "syncing"}
             onLanguageChange={(language) => void handleChangeLanguage(language)}
             onSelectLocalVault={(localVaultId) => setSelectedSyncVaultId(localVaultId)}
-            onOpenLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
-            onCreateLocalVault={(name) => handleCreateLocalVault(name)}
+            onCreateLocalVault={(name) => handleCreateLocalVaultForSettings(name)}
             onRenameLocalVault={(localVaultId, name) =>
               handleRenameLocalVault(localVaultId, name)
             }
-            onDeleteLocalVault={(localVaultId) => void handleDeleteLocalVault(localVaultId)}
+            onDeleteLocalVault={(localVaultId, options) =>
+              void handleDeleteLocalVault(localVaultId, options)
+            }
             onCreateConnection={handleCreateSyncConnection}
             onDeleteConnection={(connectionId) => void handleDeleteSyncConnection(connectionId)}
             onBindVault={(input) => void handleBindVaultToConnection(input)}
+            onImportRemoteVault={(input) => handleImportRemoteVault(input)}
+            onDeleteRemoteVault={(input) => handleDeleteRemoteVault(input)}
             onClearBinding={(localVaultId) => void handleClearVaultBinding(localVaultId)}
-            onRunActiveSync={() => void handleRunActiveBoundSync()}
+            onRunVaultSync={(localVaultId) => void handleRunVaultSync(localVaultId)}
           />
         }
         showClose={false}
         onClose={() => undefined}
         onCloseEditor={() => setOrbitalEditorNoteId(null)}
         syncStatusChip={activeVaultSyncChip}
+        activeLocalVaultId={activeLocalVaultId}
+        localVaultOptions={localVaultSwitcherItems}
+        onSelectLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
         onCreateProject={handleCreateProjectNode}
         onRenameProject={(projectId, name) => void handleRenameProject(projectId, name)}
         onUpdateProjectPosition={(projectId, x, y) =>

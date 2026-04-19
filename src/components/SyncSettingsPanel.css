@@ -91,6 +91,11 @@
   color: rgba(255, 203, 216, 0.96);
 }
 
+.sync-settings-icon-button:disabled {
+  opacity: 0.44;
+  cursor: default;
+}
+
 .sync-settings-link-handle {
   cursor: grab;
 }
@@ -327,6 +332,7 @@
   min-height: 0;
   max-height: min(56vh, 480px);
   overflow-y: auto;
+  overflow-x: hidden;
   align-content: start;
   grid-auto-rows: max-content;
   padding-right: 4px;
@@ -342,6 +348,7 @@
 .sync-settings-provider-card {
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding: 11px 12px;
   align-self: start;
   align-content: start;
@@ -402,6 +409,7 @@
 
 .sync-settings-connection-card {
   gap: 8px;
+  min-width: 0;
   padding: 10px 11px;
   border-color: color-mix(in srgb, var(--connection-accent, rgba(147, 173, 255, 0.08)) 14%, rgba(147, 173, 255, 0.08));
 }
@@ -523,6 +531,11 @@
 
 .sync-settings-mini-chip {
   min-height: 24px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-transform: none;
   letter-spacing: normal;
   font-size: 0.68rem;
@@ -590,6 +603,106 @@
 .sync-settings-preview-chips {
   gap: 5px;
   padding-top: 1px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sync-settings-remote-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 10px 8px;
+  border-radius: 16px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.008)),
+    rgba(255, 255, 255, 0.012);
+}
+
+.sync-settings-remote-head,
+.sync-settings-remote-toolbar,
+.sync-settings-remote-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sync-settings-remote-head,
+.sync-settings-remote-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.sync-settings-remote-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sync-settings-remote-copy strong,
+.sync-settings-remote-empty strong {
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: rgba(245, 247, 255, 0.94);
+}
+
+.sync-settings-remote-copy span,
+.sync-settings-remote-toolbar-copy,
+.sync-settings-remote-empty span {
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: rgba(182, 190, 224, 0.74);
+}
+
+.sync-settings-remote-toolbar {
+  padding-top: 2px;
+}
+
+.sync-settings-remote-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-height: 270px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.sync-settings-remote-card,
+.sync-settings-remote-empty {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.sync-settings-remote-card .sync-settings-card-copy {
+  gap: 2px;
+}
+
+.sync-settings-remote-card .sync-settings-card-titleline {
+  gap: 8px;
+}
+
+.sync-settings-remote-card .sync-settings-card-actions {
+  justify-content: flex-start;
+}
+
+.sync-settings-remote-card .sync-settings-inline-action {
+  min-height: 29px;
+  padding: 0 10px;
+  font-size: 0.68rem;
+}
+
+.sync-settings-remote-empty.is-error {
+  border-color: rgba(255, 144, 176, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 144, 176, 0.06), rgba(255, 255, 255, 0.016)),
+    rgba(255, 255, 255, 0.018);
 }
 
 .sync-settings-connection-card .sync-settings-mini-chip {
@@ -631,6 +744,12 @@
   color: rgba(255, 241, 197, 0.96);
 }
 
+.sync-settings-inline-action.is-danger:hover {
+  border-color: rgba(255, 149, 178, 0.18);
+  background: rgba(255, 149, 178, 0.06);
+  color: rgba(255, 221, 229, 0.96);
+}
+
 .sync-settings-primary-action {
   border-color: rgba(255, 224, 138, 0.18);
   background:
@@ -650,6 +769,24 @@
 .sync-settings-primary-action:disabled {
   opacity: 0.48;
   cursor: default;
+}
+
+.sync-settings-confirm-details {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.sync-settings-confirm-detail {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: rgba(207, 214, 242, 0.8);
 }
 
 .sync-settings-binding-hint,
@@ -734,7 +871,7 @@
 .sync-settings-modal-card {
   position: relative;
   z-index: 1;
-  width: min(520px, calc(100vw - 36px));
+  width: min(560px, calc(100vw - 36px));
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -910,6 +1047,7 @@
 
   .sync-settings-card-list {
     max-height: min(38vh, 300px);
+    overflow-x: hidden;
   }
 
   .sync-settings-modal-layer {

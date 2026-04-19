@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import EntryStaticPreview from "./EntryStaticPreview";
+import LocalVaultSwitcher, { type LocalVaultSwitcherItem } from "./LocalVaultSwitcher";
 import OrbitalInspectorContextMenu, {
   type OrbitalInspectorContextMenuAction
 } from "./OrbitalInspectorContextMenu";
@@ -40,7 +41,8 @@ interface OrbitalMapViewProps {
   assets: Asset[];
   assetCount: number;
   language: AppLanguage;
-  localVaultName?: string;
+  activeLocalVaultId: string;
+  localVaultOptions: LocalVaultSwitcherItem[];
   syncStatusChip?: {
     tone: "default" | "success" | "warning" | "error";
     text: string;
@@ -54,6 +56,7 @@ interface OrbitalMapViewProps {
   trashModalSlot?: ReactNode;
   showClose?: boolean;
   onClose: () => void;
+  onSelectLocalVault: (localVaultId: string) => void;
   onCloseEditor: () => void;
   onCreateProject: (x: number, y: number) => Promise<Project>;
   onRenameProject: (projectId: string, name: string) => Promise<void> | void;
@@ -1660,7 +1663,8 @@ export default function OrbitalMapView({
   assets,
   assetCount,
   language,
-  localVaultName,
+  activeLocalVaultId,
+  localVaultOptions,
   syncStatusChip,
   editorOpen,
   editorMode = null,
@@ -1670,6 +1674,7 @@ export default function OrbitalMapView({
   trashModalSlot,
   showClose = true,
   onClose,
+  onSelectLocalVault,
   onCloseEditor,
   onCreateProject,
   onRenameProject,
@@ -4622,11 +4627,13 @@ export default function OrbitalMapView({
             <h2 className="panel-title orbital-title">{labels.subtitle}</h2>
           </div>
           <div className="orbital-title-meta orbital-topbar-meta">
-            {localVaultName ? (
-              <span className="orbital-context-pill">
-                {labels.localVault}: {localVaultName}
-              </span>
-            ) : null}
+            <LocalVaultSwitcher
+              label={labels.localVault}
+              activeLabel={t("sync.localVaultActive")}
+              items={localVaultOptions}
+              activeVaultId={activeLocalVaultId}
+              onSelect={onSelectLocalVault}
+            />
             {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
             {syncStatusChip ? (
               <span
@@ -5755,7 +5762,7 @@ export default function OrbitalMapView({
             aria-label={labels.closeModal}
             onClick={() => setActiveModal(null)}
           />
-          <div className="orbital-modal-window">
+          <div className={`orbital-modal-window ${activeModal === "settings" ? "is-settings-mode" : ""}`}>
             <button className="toolbar-action danger orbital-modal-close" onClick={() => setActiveModal(null)}>
               {labels.closeModal}
             </button>

@@ -174,6 +174,13 @@ export interface SyncVaultBinding {
   updatedAt: number;
 }
 
+export interface RemoteVaultImportResult {
+  localVaultId: string;
+  localVaultName: string;
+  disposition: "imported" | "linked";
+  nameAdjusted: boolean;
+}
+
 export interface HostedAccountUser {
   id: string;
   name: string;
@@ -212,6 +219,14 @@ export interface SyncShadow {
   deleted: boolean;
   syncedAt: number;
   revision: string | null;
+}
+
+export interface SyncDirtyEntry {
+  key: string;
+  entityType: SyncEntityKind;
+  entityId: string;
+  updatedAt: number;
+  deleted: boolean;
 }
 
 export interface SyncTombstone {

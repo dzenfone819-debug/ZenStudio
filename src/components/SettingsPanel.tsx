@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { LocalVaultProfile } from "../lib/localVaults";
-import type { AppLanguage, AppSettings, SyncConnection, SyncVaultBinding } from "../types";
+import type {
+  AppLanguage,
+  AppSettings,
+  RemoteVaultImportResult,
+  SyncConnection,
+  SyncVaultBinding
+} from "../types";
 import SyncSettingsPanel from "./SyncSettingsPanel";
 import "./SettingsPanel.css";
 
@@ -20,13 +26,16 @@ interface SettingsPanelProps {
   syncConnections: SyncConnection[];
   syncBindings: SyncVaultBinding[];
   syncFeedback?: SyncFeedbackState;
-  syncBusy?: boolean;
   onLanguageChange: (language: AppLanguage) => void;
   onSelectLocalVault: (localVaultId: string) => void;
-  onOpenLocalVault: (localVaultId: string) => void;
-  onCreateLocalVault: (name: string) => void;
+  onCreateLocalVault: (name: string) => string | Promise<string>;
   onRenameLocalVault: (localVaultId: string, name: string) => void;
-  onDeleteLocalVault: (localVaultId: string) => void;
+  onDeleteLocalVault: (
+    localVaultId: string,
+    options?: {
+      skipConfirmation?: boolean;
+    }
+  ) => void | Promise<void>;
   onCreateConnection: (input: {
     provider: "selfHosted" | "hosted";
     serverUrl: string;
@@ -45,8 +54,18 @@ interface SettingsPanelProps {
     remoteVaultName?: string;
     syncToken: string;
   }) => void | Promise<void>;
+  onImportRemoteVault: (input: {
+    connectionId: string;
+    remoteVaultId: string;
+    remoteVaultName: string;
+    openAfterImport?: boolean;
+  }) => Promise<RemoteVaultImportResult>;
+  onDeleteRemoteVault: (input: {
+    connectionId: string;
+    remoteVaultId: string;
+  }) => Promise<void>;
   onClearBinding: (localVaultId: string) => void | Promise<void>;
-  onRunActiveSync: () => void;
+  onRunVaultSync: (localVaultId: string) => void | Promise<void>;
 }
 
 function SettingsGlyph() {
@@ -101,18 +120,18 @@ export default function SettingsPanel({
   syncConnections,
   syncBindings,
   syncFeedback = null,
-  syncBusy = false,
   onLanguageChange,
   onSelectLocalVault,
-  onOpenLocalVault,
   onCreateLocalVault,
   onRenameLocalVault,
   onDeleteLocalVault,
   onCreateConnection,
   onDeleteConnection,
   onBindVault,
+  onImportRemoteVault,
+  onDeleteRemoteVault,
   onClearBinding,
-  onRunActiveSync
+  onRunVaultSync
 }: SettingsPanelProps) {
   const { t } = useTranslation();
   const [view, setView] = useState<SettingsView>("root");
@@ -141,18 +160,18 @@ export default function SettingsPanel({
         syncConnections={syncConnections}
         syncBindings={syncBindings}
         syncFeedback={syncFeedback}
-        syncBusy={syncBusy}
         onBack={() => setView("root")}
         onSelectLocalVault={onSelectLocalVault}
-        onOpenLocalVault={onOpenLocalVault}
         onCreateLocalVault={onCreateLocalVault}
         onRenameLocalVault={onRenameLocalVault}
         onDeleteLocalVault={onDeleteLocalVault}
         onCreateConnection={onCreateConnection}
         onDeleteConnection={onDeleteConnection}
         onBindVault={onBindVault}
+        onImportRemoteVault={onImportRemoteVault}
+        onDeleteRemoteVault={onDeleteRemoteVault}
         onClearBinding={onClearBinding}
-        onRunActiveSync={onRunActiveSync}
+        onRunVaultSync={onRunVaultSync}
       />
     );
   }

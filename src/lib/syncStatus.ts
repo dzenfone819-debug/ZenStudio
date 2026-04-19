@@ -3,6 +3,7 @@ import type {
   Folder,
   Note,
   Project,
+  SyncDirtyEntry,
   SyncEntityKind,
   SyncShadow,
   SyncTombstone,
@@ -163,6 +164,34 @@ export function computePendingSyncSummary(input: {
     summary.total += 1;
     summary.deletions += 1;
     summary.lastPendingAt = Math.max(summary.lastPendingAt ?? 0, tombstone.deletedAt);
+  });
+
+  return summary;
+}
+
+export function computePendingSyncSummaryFromDirtyEntries(
+  dirtyEntries: readonly SyncDirtyEntry[]
+): SyncPendingSummary {
+  const summary: SyncPendingSummary = {
+    total: 0,
+    projects: 0,
+    folders: 0,
+    tags: 0,
+    notes: 0,
+    assets: 0,
+    deletions: 0,
+    lastPendingAt: null
+  };
+
+  dirtyEntries.forEach((entry) => {
+    if (entry.deleted) {
+      summary.total += 1;
+      summary.deletions += 1;
+      summary.lastPendingAt = Math.max(summary.lastPendingAt ?? 0, entry.updatedAt);
+      return;
+    }
+
+    addPendingEntity(summary, entry.entityType, entry.updatedAt);
   });
 
   return summary;

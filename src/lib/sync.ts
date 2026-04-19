@@ -12,8 +12,15 @@ import {
   normalizeCanvasContent,
   remapCanvasFileIds
 } from "./canvas";
-import { db, resetResolvedAssetCache } from "../data/db";
+import {
+  db,
+  resetResolvedAssetCache,
+  withLocalVaultDatabase,
+  writeImportedVaultSnapshot,
+  type ZenNotesDatabase
+} from "../data/db";
 import type {
+  AppLanguage,
   AppSettings,
   Asset,
   Folder,
@@ -385,6 +392,19 @@ function buildShadowEntries(
   });
 
   return shadows;
+}
+
+function collectChangeSetKeys(
+  source: Pick<SyncChangeSet, "projects" | "folders" | "tags" | "notes" | "assets" | "tombstones">
+) {
+  return [
+    ...source.projects.map((project) => getEntityKey("project", project.id)),
+    ...source.folders.map((folder) => getEntityKey("folder", folder.id)),
+    ...source.tags.map((tag) => getEntityKey("tag", tag.id)),
+    ...source.notes.map((note) => getEntityKey("note", note.id)),
+    ...source.assets.map((asset) => getEntityKey("asset", asset.id)),
+    ...source.tombstones.map((tombstone) => tombstone.key)
+  ];
 }
 
 function appendResolvedStateToChangeSet<T extends { id: string }>(
@@ -1003,6 +1023,16 @@ export async function createHostedVault(
   });
 }
 
+export async function deleteHostedVault(serverUrl: string, sessionToken: string, vaultId: string) {
+  return requestJson<{
+    ok: true;
+    vaultId: string;
+  }>(buildAccountUrl(serverUrl, `/v1/account/vaults/${encodeURIComponent(vaultId)}`), {
+    method: "DELETE",
+    headers: createBearerHeaders(sessionToken, false)
+  });
+}
+
 export async function issueHostedVaultToken(
   serverUrl: string,
   sessionToken: string,
@@ -1053,6 +1083,20 @@ export async function createPersonalServerVault(
   });
 }
 
+export async function deletePersonalServerVault(
+  serverUrl: string,
+  managementToken: string,
+  vaultId: string
+) {
+  return requestJson<{
+    ok: true;
+    vaultId: string;
+  }>(buildPersonalUrl(serverUrl, `/v1/personal/vaults/${encodeURIComponent(vaultId)}`), {
+    method: "DELETE",
+    headers: createBearerHeaders(managementToken, false)
+  });
+}
+
 export async function issuePersonalServerVaultToken(
   serverUrl: string,
   managementToken: string,
@@ -1082,6 +1126,32 @@ async function pullSelfHostedEnvelope(serverUrl: string, vaultId: string, token:
     method: "GET",
     headers: createBearerHeaders(token, false)
   });
+}
+
+export async function importRemoteVaultIntoLocalVault(input: {
+  localVaultId: string;
+  serverUrl: string;
+  remoteVaultId: string;
+  syncToken: string;
+  language?: AppLanguage;
+}) {
+  const envelope = await pullSelfHostedEnvelope(input.serverUrl, input.remoteVaultId, input.syncToken);
+
+  await writeImportedVaultSnapshot(input.localVaultId, {
+    snapshot: envelope.snapshot,
+    revision: envelope.revision,
+    language: input.language
+  });
+
+  return {
+    revision: envelope.revision,
+    importedBodies:
+      envelope.snapshot.projects.length +
+      envelope.snapshot.folders.length +
+      envelope.snapshot.tags.length +
+      envelope.snapshot.notes.length +
+      envelope.snapshot.assets.length
+  };
 }
 
 async function pullSelfHostedChanges(
@@ -1194,15 +1264,15 @@ async function pushSelfHostedEnvelope(
   };
 }
 
-export async function exportLocalSyncSnapshot(): Promise<SyncSnapshot> {
+export async function exportLocalSyncSnapshot(database: ZenNotesDatabase = db): Promise<SyncSnapshot> {
   const [projects, folders, tags, notes, assets, settings, tombstones] = await Promise.all([
-    db.projects.toArray(),
-    db.folders.toArray(),
-    db.tags.toArray(),
-    db.notes.toArray(),
-    db.assets.toArray(),
-    db.settings.get("app"),
-    db.syncTombstones.toArray()
+    database.projects.toArray(),
+    database.folders.toArray(),
+    database.tags.toArray(),
+    database.notes.toArray(),
+    database.assets.toArray(),
+    database.settings.get("app"),
+    database.syncTombstones.toArray()
   ]);
 
   if (!settings) {
@@ -1736,7 +1806,11 @@ function mergeSnapshots(
   };
 }
 
-async function replaceLocalDataFromSnapshot(snapshot: SyncSnapshot, settings: AppSettings) {
+async function replaceLocalDataFromSnapshot(
+  snapshot: SyncSnapshot,
+  settings: AppSettings,
+  database: ZenNotesDatabase = db
+) {
   const notes = sortById(snapshot.notes).map((note) => hydrateNote(note));
   const assets = sortById(snapshot.assets).map((asset) => hydrateAsset(asset));
   const nextOpenedNoteId =
@@ -1746,49 +1820,60 @@ async function replaceLocalDataFromSnapshot(snapshot: SyncSnapshot, settings: Ap
 
   resetResolvedAssetCache();
 
-  await db.transaction(
+  await database.transaction(
     "rw",
-    [db.projects, db.folders, db.tags, db.notes, db.assets, db.syncTombstones, db.settings],
+    [
+      database.projects,
+      database.folders,
+      database.tags,
+      database.notes,
+      database.assets,
+      database.syncTombstones,
+      database.settings
+    ],
     async () => {
-      await db.projects.clear();
-      await db.folders.clear();
-      await db.tags.clear();
-      await db.notes.clear();
-      await db.assets.clear();
-      await db.syncTombstones.clear();
+      await database.projects.clear();
+      await database.folders.clear();
+      await database.tags.clear();
+      await database.notes.clear();
+      await database.assets.clear();
+      await database.syncTombstones.clear();
 
       if (snapshot.projects.length > 0) {
-        await db.projects.bulkAdd(sortById(snapshot.projects));
+        await database.projects.bulkAdd(sortById(snapshot.projects));
       }
 
       if (snapshot.folders.length > 0) {
-        await db.folders.bulkAdd(sortById(snapshot.folders));
+        await database.folders.bulkAdd(sortById(snapshot.folders));
       }
 
       if (snapshot.tags.length > 0) {
-        await db.tags.bulkAdd(sortById(snapshot.tags));
+        await database.tags.bulkAdd(sortById(snapshot.tags));
       }
 
       if (notes.length > 0) {
-        await db.notes.bulkAdd(notes);
+        await database.notes.bulkAdd(notes);
       }
 
       if (assets.length > 0) {
-        await db.assets.bulkAdd(assets);
+        await database.assets.bulkAdd(assets);
       }
 
       if (snapshot.tombstones.length > 0) {
-        await db.syncTombstones.bulkAdd(sortTombstones(snapshot.tombstones));
+        await database.syncTombstones.bulkAdd(sortTombstones(snapshot.tombstones));
       }
 
-      await db.settings.update("app", {
+      await database.settings.update("app", {
         lastOpenedNoteId: nextOpenedNoteId
       });
     }
   );
 }
 
-async function applySyncChangeSetToLocalData(changeSet: SyncChangeSet) {
+async function applySyncChangeSetToLocalData(
+  changeSet: SyncChangeSet,
+  database: ZenNotesDatabase = db
+) {
   if (isChangeSetEmpty(changeSet)) {
     return;
   }
@@ -1819,71 +1904,80 @@ async function applySyncChangeSetToLocalData(changeSet: SyncChangeSet) {
   const hydratedAssets = sortById(changeSet.assets).map((asset) => hydrateAsset(asset));
   const needsAssetCacheReset = changeSet.assets.length > 0 || assetIdsToDelete.length > 0;
 
-  await db.transaction(
+  await database.transaction(
     "rw",
-    [db.projects, db.folders, db.tags, db.notes, db.assets, db.syncTombstones, db.settings],
+    [
+      database.projects,
+      database.folders,
+      database.tags,
+      database.notes,
+      database.assets,
+      database.syncTombstones,
+      database.settings
+    ],
     async () => {
       if (projectIdsToDelete.length > 0) {
-        await db.projects.bulkDelete(projectIdsToDelete);
+        await database.projects.bulkDelete(projectIdsToDelete);
       }
 
       if (folderIdsToDelete.length > 0) {
-        await db.folders.bulkDelete(folderIdsToDelete);
+        await database.folders.bulkDelete(folderIdsToDelete);
       }
 
       if (tagIdsToDelete.length > 0) {
-        await db.tags.bulkDelete(tagIdsToDelete);
+        await database.tags.bulkDelete(tagIdsToDelete);
       }
 
       if (noteIdsToDelete.length > 0) {
-        await db.notes.bulkDelete(noteIdsToDelete);
+        await database.notes.bulkDelete(noteIdsToDelete);
       }
 
       if (assetIdsToDelete.length > 0) {
-        await db.assets.bulkDelete(assetIdsToDelete);
+        await database.assets.bulkDelete(assetIdsToDelete);
       }
 
       if (changeSet.projects.length > 0) {
-        await db.projects.bulkPut(sortById(changeSet.projects));
+        await database.projects.bulkPut(sortById(changeSet.projects));
       }
 
       if (changeSet.folders.length > 0) {
-        await db.folders.bulkPut(sortById(changeSet.folders));
+        await database.folders.bulkPut(sortById(changeSet.folders));
       }
 
       if (changeSet.tags.length > 0) {
-        await db.tags.bulkPut(sortById(changeSet.tags));
+        await database.tags.bulkPut(sortById(changeSet.tags));
       }
 
       if (hydratedNotes.length > 0) {
-        await db.notes.bulkPut(hydratedNotes);
+        await database.notes.bulkPut(hydratedNotes);
       }
 
       if (hydratedAssets.length > 0) {
-        await db.assets.bulkPut(hydratedAssets);
+        await database.assets.bulkPut(hydratedAssets);
       }
 
       if (restoredTombstoneKeys.length > 0) {
-        await db.syncTombstones.bulkDelete(restoredTombstoneKeys);
+        await database.syncTombstones.bulkDelete(restoredTombstoneKeys);
       }
 
       if (changeSet.tombstones.length > 0) {
-        await db.syncTombstones.bulkPut(sortTombstones(changeSet.tombstones));
+        await database.syncTombstones.bulkPut(sortTombstones(changeSet.tombstones));
       }
 
-      const currentSettings = await db.settings.get("app");
+      const currentSettings = await database.settings.get("app");
 
       if (!currentSettings) {
         throw new Error("SETTINGS_MISSING");
       }
 
       const nextOpenedNoteId =
-        currentSettings.lastOpenedNoteId && (await db.notes.get(currentSettings.lastOpenedNoteId))
+        currentSettings.lastOpenedNoteId &&
+        (await database.notes.get(currentSettings.lastOpenedNoteId))
           ? currentSettings.lastOpenedNoteId
-          : ((await db.notes.orderBy("id").first())?.id ?? null);
+          : ((await database.notes.orderBy("id").first())?.id ?? null);
 
       if (nextOpenedNoteId !== currentSettings.lastOpenedNoteId) {
-        await db.settings.update("app", {
+        await database.settings.update("app", {
           lastOpenedNoteId: nextOpenedNoteId
         });
       }
@@ -1895,31 +1989,50 @@ async function applySyncChangeSetToLocalData(changeSet: SyncChangeSet) {
   }
 }
 
-async function persistSyncShadows(snapshot: SyncSnapshot, revision: string | null) {
+async function persistSyncShadows(
+  snapshot: SyncSnapshot,
+  revision: string | null,
+  database: ZenNotesDatabase = db
+) {
   const syncedAt = Date.now();
   const shadows = buildShadowEntries(snapshot, syncedAt, revision);
 
-  await db.transaction("rw", db.syncShadows, async () => {
-    await db.syncShadows.clear();
+  await database.transaction("rw", database.syncShadows, async () => {
+    await database.syncShadows.clear();
 
     if (shadows.length > 0) {
-      await db.syncShadows.bulkAdd(shadows);
+      await database.syncShadows.bulkAdd(shadows);
     }
   });
 }
 
-async function persistSyncShadowChanges(changeSet: SyncChangeSet, revision: string | null) {
+async function persistSyncShadowChanges(
+  changeSet: SyncChangeSet,
+  revision: string | null,
+  database: ZenNotesDatabase = db
+) {
   if (isChangeSetEmpty(changeSet)) {
     return;
   }
 
   const shadows = buildShadowEntries(changeSet, Date.now(), revision);
 
-  await db.transaction("rw", db.syncShadows, async () => {
+  await database.transaction("rw", database.syncShadows, async () => {
     if (shadows.length > 0) {
-      await db.syncShadows.bulkPut(shadows);
+      await database.syncShadows.bulkPut(shadows);
     }
   });
+}
+
+async function clearSyncDirtyEntriesByKeys(
+  keys: readonly string[],
+  database: ZenNotesDatabase = db
+) {
+  if (keys.length === 0) {
+    return;
+  }
+
+  await database.syncDirtyEntries.bulkDelete([...keys]);
 }
 
 function parseSyncError(error: unknown) {
@@ -1975,12 +2088,13 @@ async function runSnapshotSyncCycle(
   serverUrl: string,
   vaultId: string,
   token: string,
-  providedEnvelope?: SyncEnvelope | null
+  providedEnvelope?: SyncEnvelope | null,
+  database: ZenNotesDatabase = db
 ) {
   const [remoteEnvelope, localSnapshot, shadows] = await Promise.all([
     providedEnvelope ? Promise.resolve(providedEnvelope) : pullSelfHostedEnvelope(serverUrl, vaultId, token),
-    exportLocalSyncSnapshot(),
-    db.syncShadows.toArray()
+    exportLocalSyncSnapshot(database),
+    database.syncShadows.toArray()
   ]);
   const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
   const pushed = await pushSelfHostedEnvelope(
@@ -1995,15 +2109,16 @@ async function runSnapshotSyncCycle(
     return "retry" as const;
   }
 
-  const nextSettings = await db.settings.get("app");
+  const nextSettings = await database.settings.get("app");
 
   if (!nextSettings) {
     throw new Error("SETTINGS_MISSING");
   }
 
-  await replaceLocalDataFromSnapshot(merged.snapshot, nextSettings);
-  await persistSyncShadows(merged.snapshot, pushed.envelope.revision);
-  await db.settings.update("app", {
+  await replaceLocalDataFromSnapshot(merged.snapshot, nextSettings, database);
+  await persistSyncShadows(merged.snapshot, pushed.envelope.revision, database);
+  await database.syncDirtyEntries.clear();
+  await database.settings.update("app", {
     syncStatus: "idle",
     lastSyncAt: Date.now(),
     syncCursor: pushed.envelope.revision
@@ -2021,9 +2136,13 @@ async function runDeltaSyncCycle(
   token: string,
   options?: {
     localPendingCount?: number;
-  }
+  },
+  database: ZenNotesDatabase = db
 ) {
-  const [settings, shadows] = await Promise.all([db.settings.get("app"), db.syncShadows.toArray()]);
+  const [settings, shadows] = await Promise.all([
+    database.settings.get("app"),
+    database.syncShadows.toArray()
+  ]);
 
   if (!settings) {
     throw new Error("SETTINGS_MISSING");
@@ -2050,7 +2169,7 @@ async function runDeltaSyncCycle(
       return runSnapshotSyncCycle(serverUrl, vaultId, token, {
         revision: remoteFeed.revision,
         snapshot: remoteFeed.snapshot
-      });
+      }, database);
     }
 
     return null;
@@ -2064,11 +2183,12 @@ async function runDeltaSyncCycle(
     const finalRevision = remoteFeed.revision ?? settings.syncCursor;
 
     if (!isChangeSetEmpty(remoteChanges)) {
-      await applySyncChangeSetToLocalData(remoteChanges);
-      await persistSyncShadowChanges(remoteChanges, finalRevision);
+      await applySyncChangeSetToLocalData(remoteChanges, database);
+      await persistSyncShadowChanges(remoteChanges, finalRevision, database);
+      await clearSyncDirtyEntriesByKeys(collectChangeSetKeys(remoteChanges), database);
     }
 
-    await db.settings.update("app", {
+    await database.settings.update("app", {
       syncStatus: "idle",
       lastSyncAt: Date.now(),
       syncCursor: finalRevision
@@ -2084,7 +2204,7 @@ async function runDeltaSyncCycle(
     } satisfies SyncExecutionResult;
   }
 
-  const localSnapshot = await exportLocalSyncSnapshot();
+  const localSnapshot = await exportLocalSyncSnapshot(database);
   const localChanges = buildRecordChangeSetFromSnapshot(localSnapshot, shadows);
   const merged = mergeChangeSetsIntoSnapshot(localSnapshot, localChanges, remoteChanges, shadows);
   const localDeltaToApply = buildChangeSetBetweenSnapshots(localSnapshot, merged.snapshot);
@@ -2108,11 +2228,12 @@ async function runDeltaSyncCycle(
   }
 
   if (!isChangeSetEmpty(localDeltaToApply)) {
-    await applySyncChangeSetToLocalData(localDeltaToApply);
+    await applySyncChangeSetToLocalData(localDeltaToApply, database);
   }
 
-  await persistSyncShadowChanges(shadowChanges, finalRevision);
-  await db.settings.update("app", {
+  await persistSyncShadowChanges(shadowChanges, finalRevision, database);
+  await clearSyncDirtyEntriesByKeys(collectChangeSetKeys(shadowChanges), database);
+  await database.settings.update("app", {
     syncStatus: "idle",
     lastSyncAt: Date.now(),
     syncCursor: finalRevision
@@ -2124,12 +2245,13 @@ async function runDeltaSyncCycle(
   } satisfies SyncExecutionResult;
 }
 
-export async function runConfiguredSync(
+async function runConfiguredSyncInternal(
   remote: RemoteSyncConfig,
   options?: {
     onStatusChange?: (status: SyncStatus) => Promise<void> | void;
     localPendingCount?: number;
-  }
+  },
+  database: ZenNotesDatabase = db
 ): Promise<SyncExecutionResult> {
   const serverUrl = normalizeBaseUrl(remote.serverUrl);
   const vaultId = normalizeVaultId(remote.vaultId);
@@ -2155,7 +2277,7 @@ export async function runConfiguredSync(
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const deltaResult = await runDeltaSyncCycle(serverUrl, vaultId, token, {
         localPendingCount: options?.localPendingCount
-      });
+      }, database);
 
       if (deltaResult === "retry") {
         continue;
@@ -2166,7 +2288,7 @@ export async function runConfiguredSync(
         return deltaResult;
       }
 
-      const snapshotResult = await runSnapshotSyncCycle(serverUrl, vaultId, token);
+      const snapshotResult = await runSnapshotSyncCycle(serverUrl, vaultId, token, undefined, database);
 
       if (snapshotResult === "retry") {
         continue;
@@ -2178,10 +2300,27 @@ export async function runConfiguredSync(
 
     throw new Error("SYNC_REVISION_CONFLICT");
   } catch (error) {
-    await db.settings.update("app", {
+    await database.settings.update("app", {
       syncStatus: "error"
     });
     await options?.onStatusChange?.("error");
     throw new Error(parseSyncError(error));
   }
+}
+
+export async function runConfiguredSync(
+  remote: RemoteSyncConfig,
+  options?: {
+    onStatusChange?: (status: SyncStatus) => Promise<void> | void;
+    localPendingCount?: number;
+    localVaultId?: string;
+  }
+): Promise<SyncExecutionResult> {
+  if (options?.localVaultId) {
+    return withLocalVaultDatabase(options.localVaultId, async (database) =>
+      runConfiguredSyncInternal(remote, options, database)
+    );
+  }
+
+  return runConfiguredSyncInternal(remote, options, db);
 }

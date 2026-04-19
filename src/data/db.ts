@@ -35,10 +35,14 @@ import type {
   Note,
   NoteContent,
   Project,
+  SyncDirtyEntry,
   SyncEntityKind,
   SyncShadow,
+  SyncSnapshot,
   SyncTombstone,
   SyncProvider,
+  SyncedAssetRecord,
+  SyncedNoteRecord,
   Tag
 } from "../types";
 import type { BinaryFileData, BinaryFiles } from "@excalidraw/excalidraw/types";
@@ -56,6 +60,7 @@ async function putSyncTombstone(entityType: SyncEntityKind, entityId: string, de
     entityId,
     deletedAt
   });
+  await putSyncDirtyEntry(entityType, entityId, deletedAt, true);
 }
 
 async function deleteSyncTombstone(entityType: SyncEntityKind, entityId: string) {
@@ -98,13 +103,280 @@ function getCanvasAssetName(fileId: string, mimeType: string) {
   return `canvas-${fileId.slice(0, 8)}.${subtype.replace(/[^a-z0-9]/gi, "") || "bin"}`;
 }
 
-class ZenNotesDatabase extends Dexie {
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortObjectKeys(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .reduce<Record<string, unknown>>((result, key) => {
+      result[key] = sortObjectKeys((value as Record<string, unknown>)[key]);
+      return result;
+    }, {});
+}
+
+function stableStringify(value: unknown) {
+  return JSON.stringify(sortObjectKeys(value));
+}
+
+function hashStableValue(value: unknown) {
+  const text = stableStringify(value);
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return `h${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function createTombstoneHash(tombstone: SyncTombstone) {
+  return hashStableValue({
+    deleted: true,
+    deletedAt: tombstone.deletedAt
+  });
+}
+
+function createSyncShadowRecord<T extends { id: string }>(
+  entityType: SyncEntityKind,
+  record: T,
+  syncedAt: number,
+  revision: string | null
+) {
+  return {
+    key: getSyncEntityKey(entityType, record.id),
+    entityType,
+    entityId: record.id,
+    hash: hashStableValue(record),
+    deleted: false,
+    syncedAt,
+    revision
+  } satisfies SyncShadow;
+}
+
+function createSyncTombstoneShadow(tombstone: SyncTombstone, syncedAt: number, revision: string | null) {
+  return {
+    key: tombstone.key,
+    entityType: tombstone.entityType,
+    entityId: tombstone.entityId,
+    hash: createTombstoneHash(tombstone),
+    deleted: true,
+    syncedAt,
+    revision
+  } satisfies SyncShadow;
+}
+
+function buildSyncShadowEntries(snapshot: SyncSnapshot, revision: string | null) {
+  const syncedAt = now();
+  const shadows: SyncShadow[] = [];
+
+  snapshot.projects.forEach((project) => {
+    shadows.push(createSyncShadowRecord("project", project, syncedAt, revision));
+  });
+
+  snapshot.folders.forEach((folder) => {
+    shadows.push(createSyncShadowRecord("folder", folder, syncedAt, revision));
+  });
+
+  snapshot.tags.forEach((tag) => {
+    shadows.push(createSyncShadowRecord("tag", tag, syncedAt, revision));
+  });
+
+  snapshot.notes.forEach((note) => {
+    shadows.push(createSyncShadowRecord("note", note, syncedAt, revision));
+  });
+
+  snapshot.assets.forEach((asset) => {
+    shadows.push(createSyncShadowRecord("asset", asset, syncedAt, revision));
+  });
+
+  snapshot.tombstones.forEach((tombstone) => {
+    shadows.push(createSyncTombstoneShadow(tombstone, syncedAt, revision));
+  });
+
+  return shadows;
+}
+
+function base64ToBlob(base64: string, mimeType: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: mimeType });
+}
+
+function hydrateImportedAsset(record: SyncedAssetRecord): Asset {
+  return {
+    id: record.id,
+    noteId: record.noteId,
+    name: record.name,
+    mimeType: record.mimeType,
+    size: record.size,
+    kind: record.kind,
+    blob: base64ToBlob(record.data, record.mimeType),
+    version: record.version,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+function hydrateImportedNote(record: SyncedNoteRecord): Note {
+  const normalizedContent = normalizeNoteContent(record.content);
+  const normalizedCanvas = record.canvasContent ? normalizeCanvasContent(record.canvasContent) : null;
+  const excerpt =
+    record.contentType === "canvas"
+      ? buildCanvasExcerpt(normalizedCanvas)
+      : buildExcerpt(normalizedContent);
+  const plainText =
+    record.contentType === "canvas"
+      ? extractCanvasPlainText(normalizedCanvas)
+      : extractPlainText(normalizedContent);
+
+  return {
+    ...record,
+    tagIds: [...record.tagIds],
+    content: normalizedContent,
+    canvasContent: normalizedCanvas,
+    excerpt,
+    plainText,
+    syncState: record.conflictOriginId ? "conflict" : "synced"
+  };
+}
+
+function buildDefaultAppSettings(language: AppLanguage, lastOpenedNoteId: string | null): AppSettings {
+  return {
+    id: "app",
+    language,
+    syncEnabled: false,
+    syncStatus: "idle",
+    syncProvider: "none",
+    selfHostedUrl: "",
+    selfHostedVaultId: "default",
+    selfHostedToken: "",
+    hostedUrl: "",
+    hostedSessionToken: "",
+    hostedUserId: null,
+    hostedUserName: "",
+    hostedUserEmail: "",
+    hostedVaultId: "",
+    hostedSyncToken: "",
+    conflictStrategy: "duplicate",
+    encryptionEnabled: false,
+    lastSyncAt: null,
+    syncCursor: null,
+    localDeviceId: createDeviceId(),
+    lastOpenedNoteId
+  };
+}
+
+function createSyncDirtyEntry(
+  entityType: SyncEntityKind,
+  entityId: string,
+  updatedAt = now(),
+  deleted = false
+) {
+  return {
+    key: getSyncEntityKey(entityType, entityId),
+    entityType,
+    entityId,
+    updatedAt,
+    deleted
+  } satisfies SyncDirtyEntry;
+}
+
+async function putSyncDirtyEntry(
+  entityType: SyncEntityKind,
+  entityId: string,
+  updatedAt = now(),
+  deleted = false
+) {
+  await db.syncDirtyEntries.put(createSyncDirtyEntry(entityType, entityId, updatedAt, deleted));
+}
+
+async function putSyncDirtyEntries(entries: readonly SyncDirtyEntry[]) {
+  if (entries.length === 0) {
+    return;
+  }
+
+  await db.syncDirtyEntries.bulkPut([...entries]);
+}
+
+function isEntityPending(updatedAt: number, shadow: SyncShadow | undefined) {
+  return !shadow || shadow.deleted || updatedAt > shadow.syncedAt;
+}
+
+function isTombstonePending(tombstone: SyncTombstone, shadow: SyncShadow | undefined) {
+  return !shadow || !shadow.deleted || tombstone.deletedAt > shadow.syncedAt;
+}
+
+function buildSyncDirtyEntriesFromState(input: {
+  projects: Project[];
+  folders: Folder[];
+  tags: Tag[];
+  notes: Note[];
+  assets: Asset[];
+  shadows: SyncShadow[];
+  tombstones: SyncTombstone[];
+}) {
+  const shadowsByKey = new Map(input.shadows.map((shadow) => [shadow.key, shadow]));
+  const entries: SyncDirtyEntry[] = [];
+
+  input.projects.forEach((project) => {
+    if (isEntityPending(project.updatedAt, shadowsByKey.get(getSyncEntityKey("project", project.id)))) {
+      entries.push(createSyncDirtyEntry("project", project.id, project.updatedAt));
+    }
+  });
+
+  input.folders.forEach((folder) => {
+    if (isEntityPending(folder.updatedAt, shadowsByKey.get(getSyncEntityKey("folder", folder.id)))) {
+      entries.push(createSyncDirtyEntry("folder", folder.id, folder.updatedAt));
+    }
+  });
+
+  input.tags.forEach((tag) => {
+    if (isEntityPending(tag.updatedAt, shadowsByKey.get(getSyncEntityKey("tag", tag.id)))) {
+      entries.push(createSyncDirtyEntry("tag", tag.id, tag.updatedAt));
+    }
+  });
+
+  input.notes.forEach((note) => {
+    if (isEntityPending(note.updatedAt, shadowsByKey.get(getSyncEntityKey("note", note.id)))) {
+      entries.push(createSyncDirtyEntry("note", note.id, note.updatedAt));
+    }
+  });
+
+  input.assets.forEach((asset) => {
+    if (isEntityPending(asset.updatedAt, shadowsByKey.get(getSyncEntityKey("asset", asset.id)))) {
+      entries.push(createSyncDirtyEntry("asset", asset.id, asset.updatedAt));
+    }
+  });
+
+  input.tombstones.forEach((tombstone) => {
+    if (isTombstonePending(tombstone, shadowsByKey.get(tombstone.key))) {
+      entries.push(createSyncDirtyEntry(tombstone.entityType, tombstone.entityId, tombstone.deletedAt, true));
+    }
+  });
+
+  return entries.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+export class ZenNotesDatabase extends Dexie {
   projects!: EntityTable<Project, "id">;
   folders!: EntityTable<Folder, "id">;
   tags!: EntityTable<Tag, "id">;
   notes!: EntityTable<Note, "id">;
   assets!: EntityTable<Asset, "id">;
   settings!: EntityTable<AppSettings, "id">;
+  syncDirtyEntries!: EntityTable<SyncDirtyEntry, "key">;
   syncShadows!: EntityTable<SyncShadow, "key">;
   syncTombstones!: EntityTable<SyncTombstone, "key">;
 
@@ -360,6 +632,45 @@ class ZenNotesDatabase extends Dexie {
             settings.hostedSyncToken ??= "";
           });
       });
+
+    this.version(11)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings:
+          "id,syncProvider,syncStatus,syncCursor,selfHostedVaultId,hostedVaultId,hostedUserId",
+        syncDirtyEntries: "key,entityType,entityId,updatedAt,deleted",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        const [projects, folders, tags, notes, assets, shadows, tombstones] = await Promise.all([
+          transaction.table("projects").toArray(),
+          transaction.table("folders").toArray(),
+          transaction.table("tags").toArray(),
+          transaction.table("notes").toArray(),
+          transaction.table("assets").toArray(),
+          transaction.table("syncShadows").toArray(),
+          transaction.table("syncTombstones").toArray()
+        ]);
+        const dirtyEntries = buildSyncDirtyEntriesFromState({
+          projects,
+          folders,
+          tags,
+          notes,
+          assets,
+          shadows,
+          tombstones
+        });
+
+        if (dirtyEntries.length > 0) {
+          await transaction.table("syncDirtyEntries").bulkPut(dirtyEntries);
+        }
+      });
   }
 }
 
@@ -374,7 +685,7 @@ export function switchActiveLocalVaultDatabase(localVaultId: string) {
   db = createDatabaseForLocalVault(localVaultId);
 }
 
-async function withLocalVaultDatabase<T>(
+export async function withLocalVaultDatabase<T>(
   localVaultId: string,
   callback: (database: ZenNotesDatabase) => Promise<T>
 ) {
@@ -487,35 +798,26 @@ export async function ensureSeedData() {
     conflictOriginId: null
   };
 
-  await db.transaction("rw", [db.projects, db.folders, db.tags, db.notes, db.settings], async () => {
+  await db.transaction(
+    "rw",
+    [db.projects, db.folders, db.tags, db.notes, db.settings, db.syncDirtyEntries],
+    async () => {
     await db.projects.add(project);
     await db.folders.bulkAdd(folders);
     await db.tags.bulkAdd(tags);
     await db.notes.add(note);
+      await putSyncDirtyEntries([
+        createSyncDirtyEntry("project", project.id, project.updatedAt),
+        ...folders.map((folder) => createSyncDirtyEntry("folder", folder.id, folder.updatedAt)),
+        ...tags.map((tag) => createSyncDirtyEntry("tag", tag.id, tag.updatedAt)),
+        createSyncDirtyEntry("note", note.id, note.updatedAt)
+      ]);
     await db.settings.add({
-      id: "app",
-      language,
-      syncEnabled: false,
-      syncStatus: "disabled",
-      syncProvider: "none",
-      selfHostedUrl: "",
-      selfHostedVaultId: "default",
-      selfHostedToken: "",
-      hostedUrl: "",
-      hostedSessionToken: "",
-      hostedUserId: null,
-      hostedUserName: "",
-      hostedUserEmail: "",
-      hostedVaultId: "",
-      hostedSyncToken: "",
-      conflictStrategy: "duplicate",
-      encryptionEnabled: false,
-      lastSyncAt: null,
-      syncCursor: null,
-      localDeviceId: createDeviceId(),
-      lastOpenedNoteId: note.id
+      ...buildDefaultAppSettings(language, note.id),
+      syncStatus: "disabled"
     });
-  });
+    }
+  );
 }
 
 export async function patchSettings(patch: Partial<Omit<AppSettings, "id">>) {
@@ -551,6 +853,95 @@ export async function patchLocalVaultSettings(
 ) {
   return withLocalVaultDatabase(localVaultId, async (database) => {
     await database.settings.update("app", patch);
+  });
+}
+
+export async function writeImportedVaultSnapshot(
+  localVaultId: string,
+  input: {
+    snapshot: SyncSnapshot;
+    revision: string | null;
+    language?: AppLanguage;
+  }
+) {
+  return withLocalVaultDatabase(localVaultId, async (database) => {
+    const existingSettings = await database.settings.get("app");
+    const language = input.language ?? existingSettings?.language ?? detectLanguage();
+    const notes = input.snapshot.notes.map((note) => hydrateImportedNote(note));
+    const assets = input.snapshot.assets.map((asset) => hydrateImportedAsset(asset));
+    const shadows = buildSyncShadowEntries(input.snapshot, input.revision);
+    const nextOpenedNoteId =
+      existingSettings?.lastOpenedNoteId && notes.some((note) => note.id === existingSettings.lastOpenedNoteId)
+        ? existingSettings.lastOpenedNoteId
+        : notes[0]?.id ?? null;
+
+    await database.transaction(
+      "rw",
+      [
+        database.projects,
+        database.folders,
+        database.tags,
+        database.notes,
+        database.assets,
+        database.settings,
+        database.syncDirtyEntries,
+        database.syncShadows,
+        database.syncTombstones
+      ],
+      async () => {
+        await database.projects.clear();
+        await database.folders.clear();
+        await database.tags.clear();
+        await database.notes.clear();
+        await database.assets.clear();
+        await database.syncDirtyEntries.clear();
+        await database.syncShadows.clear();
+        await database.syncTombstones.clear();
+
+        if (input.snapshot.projects.length > 0) {
+          await database.projects.bulkAdd(input.snapshot.projects);
+        }
+
+        if (input.snapshot.folders.length > 0) {
+          await database.folders.bulkAdd(input.snapshot.folders);
+        }
+
+        if (input.snapshot.tags.length > 0) {
+          await database.tags.bulkAdd(input.snapshot.tags);
+        }
+
+        if (notes.length > 0) {
+          await database.notes.bulkAdd(notes);
+        }
+
+        if (assets.length > 0) {
+          await database.assets.bulkAdd(assets);
+        }
+
+        if (input.snapshot.tombstones.length > 0) {
+          await database.syncTombstones.bulkAdd(input.snapshot.tombstones);
+        }
+
+        if (shadows.length > 0) {
+          await database.syncShadows.bulkAdd(shadows);
+        }
+
+        const nextSettings = {
+          ...(existingSettings ?? buildDefaultAppSettings(language, nextOpenedNoteId)),
+          language,
+          syncStatus: "idle" as const,
+          lastSyncAt: now(),
+          syncCursor: input.revision,
+          lastOpenedNoteId: nextOpenedNoteId
+        };
+
+        if (existingSettings) {
+          await database.settings.put(nextSettings);
+        } else {
+          await database.settings.add(nextSettings);
+        }
+      }
+    );
   });
 }
 
@@ -593,29 +984,44 @@ export async function createProject(name: string, x: number, y: number, color?: 
     updatedAt: timestamp
   };
 
-  await db.projects.add(project);
+  await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
+    await db.projects.add(project);
+    await putSyncDirtyEntry("project", project.id, timestamp);
+  });
   return project;
 }
 
 export async function updateProjectPosition(projectId: string, x: number, y: number) {
-  await db.projects.update(projectId, {
-    x,
-    y,
-    updatedAt: now()
+  const timestamp = now();
+  await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
+    await db.projects.update(projectId, {
+      x,
+      y,
+      updatedAt: timestamp
+    });
+    await putSyncDirtyEntry("project", projectId, timestamp);
   });
 }
 
 export async function updateProjectColor(projectId: string, color: string) {
-  await db.projects.update(projectId, {
-    color,
-    updatedAt: now()
+  const timestamp = now();
+  await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
+    await db.projects.update(projectId, {
+      color,
+      updatedAt: timestamp
+    });
+    await putSyncDirtyEntry("project", projectId, timestamp);
   });
 }
 
 export async function renameProject(projectId: string, name: string) {
-  await db.projects.update(projectId, {
-    name,
-    updatedAt: now()
+  const timestamp = now();
+  await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
+    await db.projects.update(projectId, {
+      name,
+      updatedAt: timestamp
+    });
+    await putSyncDirtyEntry("project", projectId, timestamp);
   });
 }
 
@@ -631,7 +1037,10 @@ export async function removeProject(projectId: string) {
     .filter((asset) => noteIds.has(asset.noteId))
     .map((asset) => asset.id);
 
-  await db.transaction("rw", [db.projects, db.folders, db.notes, db.assets, db.syncTombstones], async () => {
+  await db.transaction(
+    "rw",
+    [db.projects, db.folders, db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries],
+    async () => {
     await db.projects.delete(projectId);
     await putSyncTombstone("project", projectId, timestamp);
 
@@ -666,7 +1075,8 @@ export async function removeProject(projectId: string) {
         projectAssetIds.map((assetId) => putSyncTombstone("asset", assetId, timestamp))
       );
     }
-  });
+    }
+  );
 }
 
 export async function createFolder(
@@ -703,21 +1113,32 @@ export async function createFolder(
     updatedAt: timestamp
   };
 
-  await db.folders.add(folder);
+  await db.transaction("rw", [db.folders, db.syncDirtyEntries], async () => {
+    await db.folders.add(folder);
+    await putSyncDirtyEntry("folder", folder.id, timestamp);
+  });
   return folder;
 }
 
 export async function renameFolder(folderId: string, name: string) {
-  await db.folders.update(folderId, {
-    name,
-    updatedAt: now()
+  const timestamp = now();
+  await db.transaction("rw", [db.folders, db.syncDirtyEntries], async () => {
+    await db.folders.update(folderId, {
+      name,
+      updatedAt: timestamp
+    });
+    await putSyncDirtyEntry("folder", folderId, timestamp);
   });
 }
 
 export async function updateFolderColor(folderId: string, color: string) {
-  await db.folders.update(folderId, {
-    color,
-    updatedAt: now()
+  const timestamp = now();
+  await db.transaction("rw", [db.folders, db.syncDirtyEntries], async () => {
+    await db.folders.update(folderId, {
+      color,
+      updatedAt: timestamp
+    });
+    await putSyncDirtyEntry("folder", folderId, timestamp);
   });
 }
 
@@ -727,7 +1148,7 @@ export async function removeFolder(folderId: string) {
   const cascade = getFolderCascade(folderId, folders, notes);
   const timestamp = now();
 
-  await db.transaction("rw", db.folders, db.notes, db.syncTombstones, async () => {
+  await db.transaction("rw", db.folders, db.notes, db.syncTombstones, db.syncDirtyEntries, async () => {
     await db.folders.bulkDelete(cascade.folderIds);
     await Promise.all(cascade.folderIds.map((currentFolderId) => putSyncTombstone("folder", currentFolderId, timestamp)));
 
@@ -741,6 +1162,10 @@ export async function removeFolder(folderId: string) {
           syncState: "dirty"
         })
       )
+    );
+
+    await putSyncDirtyEntries(
+      cascade.noteIds.map((noteId) => createSyncDirtyEntry("note", noteId, timestamp))
     );
   });
 }
@@ -778,7 +1203,10 @@ export async function createTag(name: string) {
     updatedAt: timestamp
   };
 
-  await db.tags.add(tag);
+  await db.transaction("rw", [db.tags, db.syncDirtyEntries], async () => {
+    await db.tags.add(tag);
+    await putSyncDirtyEntry("tag", tag.id, timestamp);
+  });
   return tag;
 }
 
@@ -789,7 +1217,7 @@ export async function renameTag(tagId: string, name: string) {
     throw new Error("TAG_NAME_REQUIRED");
   }
 
-  await db.transaction("rw", db.tags, db.notes, async () => {
+  await db.transaction("rw", db.tags, db.notes, db.syncTombstones, db.syncDirtyEntries, async () => {
     const existingTag = await db.tags.get(tagId);
 
     if (!existingTag) {
@@ -799,6 +1227,7 @@ export async function renameTag(tagId: string, name: string) {
     const duplicateTag = await db.tags.where("name").equalsIgnoreCase(normalizedName).first();
 
     if (duplicateTag && duplicateTag.id !== tagId) {
+      const timestamp = now();
       const impactedNotes = await db.notes.where("tagIds").equals(tagId).toArray();
 
       await Promise.all(
@@ -813,51 +1242,65 @@ export async function renameTag(tagId: string, name: string) {
 
           return db.notes.update(note.id, {
             tagIds: nextTagIds,
-            updatedAt: now(),
+            updatedAt: timestamp,
             syncState: nextSyncState(note.syncState)
           });
         })
       );
 
       await db.tags.update(duplicateTag.id, {
-        updatedAt: now()
+        updatedAt: timestamp
       });
+      await putSyncDirtyEntry("tag", duplicateTag.id, timestamp);
+      await putSyncDirtyEntries(
+        impactedNotes.map((note) => createSyncDirtyEntry("note", note.id, timestamp))
+      );
       await db.tags.delete(tagId);
+      await putSyncTombstone("tag", tagId, timestamp);
       return;
     }
 
     if (normalizeTagLookup(existingTag.name) === normalizeTagLookup(normalizedName)) {
       if (existingTag.name !== normalizedName) {
+        const timestamp = now();
         await db.tags.update(tagId, {
           name: normalizedName,
-          updatedAt: now()
+          updatedAt: timestamp
         });
+        await putSyncDirtyEntry("tag", tagId, timestamp);
       }
       return;
     }
 
+    const timestamp = now();
     await db.tags.update(tagId, {
       name: normalizedName,
-      updatedAt: now()
+      updatedAt: timestamp
     });
+    await putSyncDirtyEntry("tag", tagId, timestamp);
   });
 }
 
 export async function removeTag(tagId: string) {
-  await db.transaction("rw", db.tags, db.notes, db.syncTombstones, async () => {
+  await db.transaction("rw", db.tags, db.notes, db.syncTombstones, db.syncDirtyEntries, async () => {
     await db.tags.delete(tagId);
     await putSyncTombstone("tag", tagId);
 
     const impactedNotes = await db.notes.where("tagIds").equals(tagId).toArray();
+    const timestamp = now();
 
     await Promise.all(
       impactedNotes.map((note) =>
         db.notes.update(note.id, {
           tagIds: note.tagIds.filter((currentTagId) => currentTagId !== tagId),
-          updatedAt: now(),
+          updatedAt: timestamp,
           syncState: nextSyncState(note.syncState)
         })
       )
+    );
+
+    await putSyncDirtyEntries(
+      impactedNotes.map((note) => createSyncDirtyEntry("note", note.id, timestamp))
     );
   });
 }
@@ -899,8 +1342,9 @@ export async function createNote(
     conflictOriginId: null
   };
 
-  await db.transaction("rw", db.notes, db.settings, async () => {
+  await db.transaction("rw", db.notes, db.settings, db.syncDirtyEntries, async () => {
     await db.notes.add(note);
+    await putSyncDirtyEntry("note", note.id, timestamp);
     await db.settings.update("app", {
       lastOpenedNoteId: note.id
     });
@@ -946,8 +1390,9 @@ export async function createCanvas(
     conflictOriginId: null
   };
 
-  await db.transaction("rw", db.notes, db.settings, async () => {
+  await db.transaction("rw", db.notes, db.settings, db.syncDirtyEntries, async () => {
     await db.notes.add(note);
+    await putSyncDirtyEntry("note", note.id, timestamp);
     await db.settings.update("app", {
       lastOpenedNoteId: note.id
     });
@@ -980,11 +1425,15 @@ export async function updateNoteMeta(
       ? nextFolder?.projectId ?? patch.projectId ?? existingNote?.projectId
       : patch.projectId ?? existingNote?.projectId;
 
-  await db.notes.update(noteId, {
-    ...patch,
-    projectId: nextProjectId,
-    updatedAt: now(),
-    syncState: nextSyncState(existingNote?.syncState)
+  const timestamp = now();
+  await db.transaction("rw", db.notes, db.syncDirtyEntries, async () => {
+    await db.notes.update(noteId, {
+      ...patch,
+      projectId: nextProjectId,
+      updatedAt: timestamp,
+      syncState: nextSyncState(existingNote?.syncState)
+    });
+    await putSyncDirtyEntry("note", noteId, timestamp);
   });
 }
 
@@ -994,7 +1443,8 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
   const excerpt = buildExcerpt(normalizedContent);
   const activeAssetIds = new Set(extractReferencedAssetIds(normalizedContent));
 
-  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
+  const timestamp = now();
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const staleAssets = noteAssets.filter((asset) => !activeAssetIds.has(asset.id));
 
@@ -1016,9 +1466,10 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
       content: normalizedContent,
       plainText,
       excerpt,
-      updatedAt: now(),
+      updatedAt: timestamp,
       syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
     });
+    await putSyncDirtyEntry("note", noteId, timestamp);
   });
 }
 
@@ -1074,7 +1525,8 @@ export async function saveCanvasContent(
   const excerpt = buildCanvasExcerpt(normalizedContent);
   const activeFileIds = new Set(extractCanvasReferencedFileIds(normalizedContent));
 
-  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
+  const timestamp = now();
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const assetsById = new Map(noteAssets.map((asset) => [asset.id, asset]));
     const staleAssets = noteAssets.filter((asset) => !activeFileIds.has(asset.id));
@@ -1108,7 +1560,6 @@ export async function saveCanvasContent(
       }
 
       const blob = await dataUrlToBlob(file.dataURL);
-      const timestamp = now();
       const nextAsset: Asset = {
         id: fileId,
         noteId,
@@ -1126,15 +1577,17 @@ export async function saveCanvasContent(
       };
 
       await db.assets.put(nextAsset);
+      await putSyncDirtyEntry("asset", nextAsset.id, timestamp);
     }
 
     await db.notes.update(noteId, {
       canvasContent: normalizedContent,
       plainText,
       excerpt,
-      updatedAt: now(),
+      updatedAt: timestamp,
       syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
     });
+    await putSyncDirtyEntry("note", noteId, timestamp);
   });
 }
 
@@ -1152,7 +1605,7 @@ export async function restoreNoteFromTrash(noteId: string) {
 }
 
 export async function removeNote(noteId: string) {
-  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, async () => {
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
     await db.notes.delete(noteId);
     await putSyncTombstone("note", noteId);
     const assetIds = await db.assets.where("noteId").equals(noteId).primaryKeys();
@@ -1203,7 +1656,10 @@ export async function storeAsset(noteId: string, file: File) {
     updatedAt: timestamp
   };
 
-  await db.assets.add(asset);
+  await db.transaction("rw", db.assets, db.syncDirtyEntries, async () => {
+    await db.assets.add(asset);
+    await putSyncDirtyEntry("asset", asset.id, timestamp);
+  });
   return `asset://${asset.id}`;
 }
 

@@ -3481,6 +3481,10 @@ button {
   overflow: hidden;
 }
 
+.orbital-modal-window.is-settings-mode {
+  width: min(1120px, calc(100vw - 40px));
+}
+
 .orbital-modal-layer.orbital-editor-modal-layer {
   z-index: 68;
   padding: 16px;
@@ -3735,6 +3739,10 @@ button {
 
   .orbital-modal-window {
     width: min(720px, calc(100vw - 44px));
+  }
+
+  .orbital-modal-window.is-settings-mode {
+    width: min(980px, calc(100vw - 32px));
   }
 }
 

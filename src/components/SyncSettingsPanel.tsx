@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -21,7 +22,13 @@ import {
   probeSyncConnectionAvailability,
   registerHostedAccount
 } from "../lib/sync";
-import type { AppSettings, SyncConnection, SyncVaultBinding } from "../types";
+import type {
+  AppSettings,
+  RemoteVaultImportResult,
+  SyncConnection,
+  SyncRemoteVault,
+  SyncVaultBinding
+} from "../types";
 import "./SyncSettingsPanel.css";
 
 type SyncFeedbackState = {
@@ -38,13 +45,16 @@ interface SyncSettingsPanelProps {
   syncConnections: SyncConnection[];
   syncBindings: SyncVaultBinding[];
   syncFeedback?: SyncFeedbackState;
-  syncBusy?: boolean;
   onBack: () => void;
   onSelectLocalVault: (localVaultId: string) => void;
-  onOpenLocalVault: (localVaultId: string) => void;
-  onCreateLocalVault: (name: string) => void;
+  onCreateLocalVault: (name: string) => string | Promise<string>;
   onRenameLocalVault: (localVaultId: string, name: string) => void;
-  onDeleteLocalVault: (localVaultId: string) => void;
+  onDeleteLocalVault: (
+    localVaultId: string,
+    options?: {
+      skipConfirmation?: boolean;
+    }
+  ) => void | Promise<void>;
   onCreateConnection: (input: {
     provider: "selfHosted" | "hosted";
     serverUrl: string;
@@ -63,8 +73,18 @@ interface SyncSettingsPanelProps {
     remoteVaultName?: string;
     syncToken: string;
   }) => void | Promise<void>;
+  onImportRemoteVault: (input: {
+    connectionId: string;
+    remoteVaultId: string;
+    remoteVaultName: string;
+    openAfterImport?: boolean;
+  }) => Promise<RemoteVaultImportResult>;
+  onDeleteRemoteVault: (input: {
+    connectionId: string;
+    remoteVaultId: string;
+  }) => Promise<void>;
   onClearBinding: (localVaultId: string) => void | Promise<void>;
-  onRunActiveSync: () => void;
+  onRunVaultSync: (localVaultId: string) => void | Promise<void>;
 }
 
 type PanelModal =
@@ -78,9 +98,13 @@ type PanelModal =
 type ConfirmState = {
   title: string;
   description: string;
+  details?: string[];
   confirmLabel: string;
   tone?: "default" | "danger";
   action: () => Promise<void> | void;
+  secondaryLabel?: string;
+  secondaryTone?: "default" | "danger";
+  secondaryAction?: () => Promise<void> | void;
 } | null;
 
 type HostedMode = "login" | "register";
@@ -104,6 +128,8 @@ type ConnectionAvailabilityState =
   | "available"
   | "unavailable"
   | "authError";
+
+type RemoteVaultCatalogEntry = SyncRemoteVault;
 
 function ChevronLeftGlyph() {
   return (
@@ -137,16 +163,6 @@ function TrashGlyph() {
       <path d="M7.4 6.2v8.2c0 1 .6 1.6 1.6 1.6h2c1 0 1.6-.6 1.6-1.6V6.2" />
       <path d="M8.4 4.6h3.2" />
       <path d="M8.4 8.4v4.7M11.6 8.4v4.7" className="sync-settings-icon-accent" />
-    </svg>
-  );
-}
-
-function OpenGlyph() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-      <path d="M7 6.2h6.8v6.8" />
-      <path d="M6.2 13.8 13.8 6.2" className="sync-settings-icon-accent" />
-      <path d="M14.1 10.5v4.1H5.9V5.4H10" />
     </svg>
   );
 }
@@ -219,6 +235,28 @@ function CloseGlyph() {
   );
 }
 
+function RefreshGlyph() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M15.6 7.7A6.1 6.1 0 0 0 5.4 5.6" />
+      <path d="M5.4 5.6h3.4v3.2" className="sync-settings-icon-accent" />
+      <path d="M4.4 12.3a6.1 6.1 0 0 0 10.2 2.1" />
+      <path d="M14.6 14.4h-3.4v-3.2" className="sync-settings-icon-accent" />
+    </svg>
+  );
+}
+
+function ChevronToggleGlyph({ expanded = false }: { expanded?: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path
+        d={expanded ? "M5.5 7.6 10 12.1l4.5-4.5" : "M7.6 5.5 12.1 10l-4.5 4.5"}
+        className="sync-settings-icon-accent"
+      />
+    </svg>
+  );
+}
+
 function providerAccent(provider: SyncConnection["provider"]) {
   if (provider === "hosted") {
     return "#73f7ff";
@@ -229,15 +267,6 @@ function providerAccent(provider: SyncConnection["provider"]) {
   }
 
   return "#ffd27d";
-}
-
-function deriveRemoteVaultId(name: string) {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
 }
 
 function buildLinkPath(x1: number, y1: number, x2: number, y2: number) {
@@ -295,6 +324,8 @@ function translateSyncManagerError(message: string, t: ReturnType<typeof useTran
       return t("sync.hostedPasswordTooShort");
     case "VAULT_NOT_FOUND":
       return t("sync.vaultNotFound");
+    case "LAST_VAULT_REQUIRED":
+      return t("sync.lastRemoteVaultRequired");
     case "NOT_FOUND":
       return t("sync.serverNotFound");
     default:
@@ -327,18 +358,18 @@ export default function SyncSettingsPanel({
   syncConnections,
   syncBindings,
   syncFeedback = null,
-  syncBusy = false,
   onBack,
   onSelectLocalVault,
-  onOpenLocalVault,
   onCreateLocalVault,
   onRenameLocalVault,
   onDeleteLocalVault,
   onCreateConnection,
   onDeleteConnection,
   onBindVault,
+  onImportRemoteVault,
+  onDeleteRemoteVault,
   onClearBinding,
-  onRunActiveSync
+  onRunVaultSync
 }: SyncSettingsPanelProps) {
   const { t, i18n } = useTranslation();
   const sortedVaults = useMemo(
@@ -353,14 +384,13 @@ export default function SyncSettingsPanel({
     () => new Map(syncConnections.map((connection) => [connection.id, connection])),
     [syncConnections]
   );
-  const activeVault = sortedVaults.find((vault) => vault.id === activeLocalVaultId) ?? null;
   const selectedVault =
     sortedVaults.find((vault) => vault.id === selectedLocalVaultId) ??
     sortedVaults.find((vault) => vault.id === activeLocalVaultId) ??
     null;
-  const activeVaultBinding = activeVault ? bindingsByVaultId.get(activeVault.id) ?? null : null;
-  const activeVaultConnection = activeVaultBinding
-    ? connectionsById.get(activeVaultBinding.connectionId) ?? null
+  const selectedVaultBinding = selectedVault ? bindingsByVaultId.get(selectedVault.id) ?? null : null;
+  const selectedVaultConnection = selectedVaultBinding
+    ? connectionsById.get(selectedVaultBinding.connectionId) ?? null
     : null;
   const hostedConnectionExists = syncConnections.some((connection) => connection.provider === "hosted");
   const [panelModal, setPanelModal] = useState<PanelModal>(null);
@@ -381,6 +411,12 @@ export default function SyncSettingsPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [linkMetrics, setLinkMetrics] = useState<LinkMetric[]>([]);
   const [connectionAvailability, setConnectionAvailability] = useState<Record<string, ConnectionAvailabilityState>>({});
+  const [remoteVaultsByConnectionId, setRemoteVaultsByConnectionId] = useState<
+    Record<string, RemoteVaultCatalogEntry[]>
+  >({});
+  const [remoteVaultErrors, setRemoteVaultErrors] = useState<Record<string, string | null>>({});
+  const [remoteVaultLoading, setRemoteVaultLoading] = useState<Record<string, boolean>>({});
+  const [expandedRemoteConnectionIds, setExpandedRemoteConnectionIds] = useState<Record<string, boolean>>({});
   const stageRef = useRef<HTMLDivElement | null>(null);
   const vaultListRef = useRef<HTMLDivElement | null>(null);
   const connectionListRef = useRef<HTMLDivElement | null>(null);
@@ -394,6 +430,108 @@ export default function SyncSettingsPanel({
         .map((connection) => `${connection.id}:${connection.updatedAt}:${connection.serverUrl}`)
         .join("|"),
     [syncConnections]
+  );
+  const localVaultByGuid = useMemo(
+    () => new Map(sortedVaults.map((vault) => [vault.vaultGuid, vault])),
+    [sortedVaults]
+  );
+  const localVaultNameSet = useMemo(
+    () => new Set(sortedVaults.map((vault) => vault.name.trim().toLowerCase())),
+    [sortedVaults]
+  );
+
+  const normalizeRemoteVaultEntries = useCallback(
+    (
+      entries: Array<{
+        id: string;
+        name: string;
+        createdAt: number;
+        updatedAt: number;
+        lastRevision: string | null;
+        lastSyncAt: number | null;
+        tokenCount?: number;
+      }>
+    ) =>
+      [...entries]
+        .map(
+          (entry) =>
+            ({
+              id: entry.id,
+              name: entry.name,
+              createdAt: entry.createdAt,
+              updatedAt: entry.updatedAt,
+              lastRevision: entry.lastRevision ?? null,
+              lastSyncAt: entry.lastSyncAt ?? null,
+              tokenCount: entry.tokenCount
+            }) satisfies RemoteVaultCatalogEntry
+        )
+        .sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name)),
+    []
+  );
+
+  const loadRemoteVaultCatalog = useCallback(
+    async (
+      connection: SyncConnection,
+      options?: {
+        silent?: boolean;
+      }
+    ) => {
+      if (!options?.silent) {
+        setRemoteVaultLoading((current) => ({
+          ...current,
+          [connection.id]: true
+        }));
+      }
+
+      setRemoteVaultErrors((current) => ({
+        ...current,
+        [connection.id]: null
+      }));
+
+      try {
+        const remoteVaults =
+          connection.provider === "hosted"
+            ? normalizeRemoteVaultEntries((await loadHostedAccountOverview(connection.serverUrl, connection.sessionToken)).vaults)
+            : normalizeRemoteVaultEntries((await loadPersonalServerVaults(connection.serverUrl, connection.managementToken)).vaults);
+
+        setRemoteVaultsByConnectionId((current) => ({
+          ...current,
+          [connection.id]: remoteVaults
+        }));
+
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]: "available"
+        }));
+
+        return remoteVaults;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "SYNC_FAILED";
+
+        setRemoteVaultErrors((current) => ({
+          ...current,
+          [connection.id]: translateSyncManagerError(message, t)
+        }));
+
+        setConnectionAvailability((current) => ({
+          ...current,
+          [connection.id]:
+            message === "UNAUTHORIZED" || message === "INVALID_CREDENTIALS"
+              ? "authError"
+              : message === "SERVER_UNAVAILABLE" || message === "HTTP_404"
+                ? "unavailable"
+                : current[connection.id] ?? "checking"
+        }));
+
+        throw error;
+      } finally {
+        setRemoteVaultLoading((current) => ({
+          ...current,
+          [connection.id]: false
+        }));
+      }
+    },
+    [normalizeRemoteVaultEntries, t]
   );
 
   const registerVaultRef = (vaultId: string, node: HTMLElement | null) => {
@@ -586,6 +724,26 @@ export default function SyncSettingsPanel({
   }, [draftLink]);
 
   useEffect(() => {
+    setExpandedRemoteConnectionIds((current) => {
+      const next: Record<string, boolean> = {};
+      let changed = false;
+
+      syncConnections.forEach((connection) => {
+        next[connection.id] = current[connection.id] ?? true;
+        if (next[connection.id] !== current[connection.id]) {
+          changed = true;
+        }
+      });
+
+      if (Object.keys(current).length !== Object.keys(next).length) {
+        changed = true;
+      }
+
+      return changed ? next : current;
+    });
+  }, [syncConnections]);
+
+  useEffect(() => {
     if (syncConnections.length === 0) {
       setConnectionAvailability({});
       return;
@@ -627,6 +785,48 @@ export default function SyncSettingsPanel({
     };
   }, [availabilitySignature, online, syncConnections]);
 
+  useEffect(() => {
+    if (syncConnections.length === 0) {
+      setRemoteVaultsByConnectionId({});
+      setRemoteVaultErrors({});
+      setRemoteVaultLoading({});
+      return;
+    }
+
+    if (!online) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all(
+      syncConnections.map(async (connection) => {
+        try {
+          const remoteVaults = await loadRemoteVaultCatalog(connection, {
+            silent: false
+          });
+
+          if (cancelled) {
+            return;
+          }
+
+          setRemoteVaultsByConnectionId((current) => ({
+            ...current,
+            [connection.id]: remoteVaults
+          }));
+        } catch {
+          if (cancelled) {
+            return;
+          }
+        }
+      })
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availabilitySignature, loadRemoteVaultCatalog, online, syncConnections]);
+
   const boundVaultCountByConnectionId = useMemo(() => {
     const counts = new Map<string, number>();
 
@@ -660,14 +860,17 @@ export default function SyncSettingsPanel({
     setHostedPasswordDraft("");
   };
 
-  const handleCreateVault = () => {
+  const handleCreateVault = async () => {
     const normalizedName = vaultNameDraft.trim();
 
     if (!normalizedName) {
       return;
     }
 
-    onCreateLocalVault(normalizedName);
+    const nextVaultId = await Promise.resolve(onCreateLocalVault(normalizedName));
+    if (nextVaultId) {
+      onSelectLocalVault(nextVaultId);
+    }
     setVaultNameDraft("");
     closeModal();
   };
@@ -751,65 +954,54 @@ export default function SyncSettingsPanel({
     }
   };
 
-  const performVaultBinding = async (vault: LocalVaultProfile, connection: SyncConnection) => {
-    if (connection.provider === "selfHosted") {
-      const payload = await loadPersonalServerVaults(connection.serverUrl, connection.managementToken);
-      const derivedVaultId = deriveRemoteVaultId(vault.name);
-
-      let remoteVault =
-        payload.vaults.find((entry) => entry.name === vault.name) ??
-        payload.vaults.find((entry) => entry.id === derivedVaultId) ??
-        null;
-
-      if (!remoteVault) {
-        remoteVault = (
-          await createPersonalServerVault(connection.serverUrl, connection.managementToken, {
-            name: vault.name,
-            id: derivedVaultId || undefined
-          })
-        ).vault;
-      }
-
-      const token = await issuePersonalServerVaultToken(
-        connection.serverUrl,
-        connection.managementToken,
-        remoteVault.id,
-        `${vault.name} · ${connection.label}`
-      );
-
-      await onBindVault({
-        localVaultId: vault.id,
-        connectionId: connection.id,
-        remoteVaultId: remoteVault.id,
-        remoteVaultName: remoteVault.name,
-        syncToken: token.token
-      });
-      return;
+  const performVaultBinding = async (
+    vault: LocalVaultProfile,
+    connection: SyncConnection,
+    options?: {
+      refreshCatalog?: boolean;
     }
-
-    const overview = await loadHostedAccountOverview(connection.serverUrl, connection.sessionToken);
-    const derivedVaultId = deriveRemoteVaultId(vault.name);
+  ) => {
+    const canonicalRemoteVaultId = vault.vaultGuid;
+    const existingRemoteVaults =
+      remoteVaultsByConnectionId[connection.id] ??
+      (await loadRemoteVaultCatalog(connection, {
+        silent: true
+      }));
 
     let remoteVault =
-      overview.vaults.find((entry) => entry.name === vault.name) ??
-      overview.vaults.find((entry) => entry.id === derivedVaultId) ??
-      null;
+      existingRemoteVaults.find((entry) => entry.id === canonicalRemoteVaultId) ?? null;
 
     if (!remoteVault) {
-      remoteVault = (
-        await createHostedVault(connection.serverUrl, connection.sessionToken, {
-          name: vault.name,
-          id: derivedVaultId || undefined
-        })
-      ).vault;
+      remoteVault =
+        connection.provider === "selfHosted"
+          ? (
+              await createPersonalServerVault(connection.serverUrl, connection.managementToken, {
+                name: vault.name,
+                id: canonicalRemoteVaultId || undefined
+              })
+            ).vault
+          : (
+              await createHostedVault(connection.serverUrl, connection.sessionToken, {
+                name: vault.name,
+                id: canonicalRemoteVaultId || undefined
+              })
+            ).vault;
     }
 
-    const token = await issueHostedVaultToken(
-      connection.serverUrl,
-      connection.sessionToken,
-      remoteVault.id,
-      `${vault.name} · ${connection.label}`
-    );
+    const token =
+      connection.provider === "selfHosted"
+        ? await issuePersonalServerVaultToken(
+            connection.serverUrl,
+            connection.managementToken,
+            remoteVault.id,
+            `${vault.name} · ${connection.label}`
+          )
+        : await issueHostedVaultToken(
+            connection.serverUrl,
+            connection.sessionToken,
+            remoteVault.id,
+            `${vault.name} · ${connection.label}`
+          );
 
     await onBindVault({
       localVaultId: vault.id,
@@ -817,6 +1009,342 @@ export default function SyncSettingsPanel({
       remoteVaultId: remoteVault.id,
       remoteVaultName: remoteVault.name,
       syncToken: token.token
+    });
+
+    if (options?.refreshCatalog ?? true) {
+      await loadRemoteVaultCatalog(connection, {
+        silent: true
+      });
+    }
+  };
+
+  const requestRemoteVaultImport = async (
+    connection: SyncConnection,
+    remoteVault: RemoteVaultCatalogEntry,
+    options?: {
+      openAfterImport?: boolean;
+    }
+  ) => {
+    const localVault = localVaultByGuid.get(remoteVault.id) ?? null;
+    const existingBinding = localVault ? bindingsByVaultId.get(localVault.id) ?? null : null;
+
+    const runImport = async () => {
+      setBusyKey(`import:${connection.id}:${remoteVault.id}`);
+
+      try {
+        const result = await onImportRemoteVault({
+          connectionId: connection.id,
+          remoteVaultId: remoteVault.id,
+          remoteVaultName: remoteVault.name,
+          openAfterImport: options?.openAfterImport
+        });
+
+        onSelectLocalVault(result.localVaultId);
+        await loadRemoteVaultCatalog(connection, {
+          silent: true
+        });
+
+        showFeedback(
+          "success",
+          result.disposition === "imported"
+            ? result.nameAdjusted
+              ? t("settings.remoteImportAdjusted", {
+                  vault: result.localVaultName
+                })
+              : t("settings.remoteImportCreated", {
+                  vault: result.localVaultName
+                })
+            : t("settings.remoteImportLinked", {
+                vault: result.localVaultName
+              })
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "SYNC_FAILED";
+        showFeedback("error", translateSyncManagerError(message, t));
+      } finally {
+        setBusyKey(null);
+      }
+    };
+
+    if (existingBinding && existingBinding.connectionId !== connection.id) {
+      setConfirmState({
+        title: t("settings.remoteReconnectTitle"),
+        description: t("settings.remoteReconnectDescription", {
+          vault: localVault?.name ?? remoteVault.name,
+          connection: connection.label
+        }),
+        confirmLabel: t("settings.remoteReconnectConfirm"),
+        tone: "danger",
+        action: async () => {
+          closeModal();
+          await runImport();
+        }
+      });
+      return;
+    }
+
+    await runImport();
+  };
+
+  const requestImportAllRemoteVaults = async (connection: SyncConnection) => {
+    let remoteVaults: RemoteVaultCatalogEntry[];
+
+    try {
+      remoteVaults =
+        remoteVaultsByConnectionId[connection.id] ??
+        (await loadRemoteVaultCatalog(connection, {
+          silent: false
+        }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "SYNC_FAILED";
+      showFeedback("error", translateSyncManagerError(message, t));
+      return;
+    }
+
+    const candidates = remoteVaults.filter((remoteVault) => {
+      const localVault = localVaultByGuid.get(remoteVault.id) ?? null;
+      const binding = localVault ? bindingsByVaultId.get(localVault.id) ?? null : null;
+
+      return !binding || binding.connectionId !== connection.id || binding.remoteVaultId !== remoteVault.id;
+    });
+
+    if (candidates.length === 0) {
+      showFeedback("success", t("settings.remoteImportAllNothing"));
+      return;
+    }
+
+    const reconnectCount = candidates.filter((remoteVault) => {
+      const localVault = localVaultByGuid.get(remoteVault.id) ?? null;
+      const binding = localVault ? bindingsByVaultId.get(localVault.id) ?? null : null;
+      return Boolean(binding && binding.connectionId !== connection.id);
+    }).length;
+    const safeCandidates = candidates.filter((remoteVault) => {
+      const localVault = localVaultByGuid.get(remoteVault.id) ?? null;
+      const binding = localVault ? bindingsByVaultId.get(localVault.id) ?? null : null;
+      return !binding || binding.connectionId === connection.id;
+    });
+
+    const runImportAll = async (
+      targetVaults: RemoteVaultCatalogEntry[],
+      options?: {
+        skippedCount?: number;
+      }
+    ) => {
+      setBusyKey(`import-all:${connection.id}`);
+
+      try {
+        let importedCount = 0;
+        let linkedCount = 0;
+
+        for (const remoteVault of targetVaults) {
+          const result = await onImportRemoteVault({
+            connectionId: connection.id,
+            remoteVaultId: remoteVault.id,
+            remoteVaultName: remoteVault.name,
+            openAfterImport: false
+          });
+
+          if (result.disposition === "imported") {
+            importedCount += 1;
+          } else {
+            linkedCount += 1;
+          }
+        }
+
+        await loadRemoteVaultCatalog(connection, {
+          silent: true
+        });
+        showFeedback(
+          "success",
+          options?.skippedCount
+            ? t("settings.remoteImportSafeCompleted", {
+                imported: importedCount + linkedCount,
+                skipped: options.skippedCount
+              })
+            : t("settings.remoteImportAllCompleted", {
+                imported: importedCount,
+                linked: linkedCount
+              })
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "SYNC_FAILED";
+        showFeedback("error", translateSyncManagerError(message, t));
+      } finally {
+        setBusyKey(null);
+      }
+    };
+
+    if (reconnectCount > 0) {
+      setConfirmState({
+        title: t("settings.remoteImportAllConfirmTitle"),
+        description: t("settings.remoteImportAllConfirmDescription", {
+          connection: connection.label
+        }),
+        details: [
+          t("settings.remoteImportAllDetailTotal", {
+            count: candidates.length
+          }),
+          t("settings.remoteImportAllDetailReconnect", {
+            count: reconnectCount
+          }),
+          t("settings.remoteImportAllDetailSafe", {
+            count: safeCandidates.length
+          })
+        ],
+        secondaryLabel:
+          safeCandidates.length > 0 ? t("settings.remoteImportSafeOnly") : undefined,
+        secondaryAction:
+          safeCandidates.length > 0
+            ? async () => {
+                closeModal();
+                await runImportAll(safeCandidates, {
+                  skippedCount: reconnectCount
+                });
+              }
+            : undefined,
+        confirmLabel: t("settings.remoteImportAll"),
+        tone: "danger",
+        action: async () => {
+          closeModal();
+          await runImportAll(candidates);
+        }
+      });
+      return;
+    }
+
+    await runImportAll(candidates);
+  };
+
+  const executeRemoteVaultDeletion = async (
+    connection: SyncConnection,
+    remoteVault: RemoteVaultCatalogEntry,
+    options?: {
+      deleteLocalVaultId?: string | null;
+    }
+  ) => {
+    const actionKey = `delete-remote:${connection.id}:${remoteVault.id}`;
+    setBusyKey(actionKey);
+
+    try {
+      await onDeleteRemoteVault({
+        connectionId: connection.id,
+        remoteVaultId: remoteVault.id
+      });
+
+      if (options?.deleteLocalVaultId) {
+        await onDeleteLocalVault(options.deleteLocalVaultId, {
+          skipConfirmation: true
+        });
+      }
+
+      await loadRemoteVaultCatalog(connection, {
+        silent: true
+      });
+
+      showFeedback(
+        "success",
+        options?.deleteLocalVaultId
+          ? t("settings.remoteDeleteWithLocalCompleted", {
+              vault: remoteVault.name
+            })
+          : t("settings.remoteDeleteCompleted", {
+              vault: remoteVault.name
+            })
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "SYNC_FAILED";
+      showFeedback("error", translateSyncManagerError(message, t));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const requestDeleteRemoteVault = (
+    connection: SyncConnection,
+    remoteVault: RemoteVaultCatalogEntry
+  ) => {
+    const matchingLocalVault = localVaultByGuid.get(remoteVault.id) ?? null;
+    const matchingBinding = matchingLocalVault
+      ? bindingsByVaultId.get(matchingLocalVault.id) ?? null
+      : null;
+    const linkedHere =
+      matchingBinding?.connectionId === connection.id && matchingBinding.remoteVaultId === remoteVault.id;
+
+    setConfirmState({
+      title: t("settings.remoteDeleteTitle"),
+      description: linkedHere
+        ? t("settings.remoteDeleteDescriptionLinked", {
+            vault: remoteVault.name
+          })
+        : t("settings.remoteDeleteDescription", {
+            vault: remoteVault.name
+          }),
+      details: [
+        t("settings.remoteDeleteDetailServer"),
+        t("settings.remoteDeleteDetailLocal"),
+        t("settings.remoteDeleteDetailDisconnect")
+      ],
+      confirmLabel: t("settings.remoteDeleteAction"),
+      tone: "danger",
+      action: async () => {
+        closeModal();
+        await executeRemoteVaultDeletion(connection, remoteVault);
+      }
+    });
+  };
+
+  const requestDeleteLocalVault = (vault: LocalVaultProfile) => {
+    const binding = bindingsByVaultId.get(vault.id) ?? null;
+    const connection = binding ? connectionsById.get(binding.connectionId) ?? null : null;
+
+    if (!binding || !connection || localVaults.length <= 1) {
+      void onDeleteLocalVault(vault.id);
+      return;
+    }
+
+    setConfirmState({
+      title: t("settings.localDeleteChoiceTitle"),
+      description: t("settings.localDeleteChoiceDescription", {
+        vault: vault.name,
+        connection: connection.label
+      }),
+      details: [
+        t("settings.localDeleteOnlyDetailLocal"),
+        t("settings.localDeleteOnlyDetailRemote", {
+          connection: connection.label
+        }),
+        t("settings.localDeleteRemoteDetailLocal"),
+        t("settings.localDeleteRemoteDetailRemote", {
+          connection: connection.label
+        })
+      ],
+      secondaryLabel: t("settings.localDeleteOnlyAction"),
+      secondaryAction: async () => {
+        closeModal();
+        await onDeleteLocalVault(vault.id, {
+          skipConfirmation: true
+        });
+      },
+      confirmLabel: t("settings.localDeleteRemoteAction"),
+      tone: "danger",
+      action: async () => {
+        closeModal();
+        await executeRemoteVaultDeletion(
+          connection,
+          {
+            id: binding.remoteVaultId,
+            name: binding.remoteVaultName,
+            createdAt: 0,
+            updatedAt: 0,
+            lastRevision: binding.syncCursor,
+            lastSyncAt: binding.lastSyncAt,
+            tokenCount: 0
+          },
+          {
+            deleteLocalVaultId: vault.id
+          }
+        );
+      }
     });
   };
 
@@ -834,7 +1362,9 @@ export default function SyncSettingsPanel({
       setBusyKey(`bind:${vault.id}:${connection.id}`);
 
       try {
-        await performVaultBinding(vault, connection);
+        await performVaultBinding(vault, connection, {
+          refreshCatalog: true
+        });
         setPendingBindVaultId(null);
         setConnectionAvailability((current) => ({
           ...current,
@@ -889,9 +1419,14 @@ export default function SyncSettingsPanel({
 
       try {
         for (const vault of sortedVaults) {
-          await performVaultBinding(vault, connection);
+          await performVaultBinding(vault, connection, {
+            refreshCatalog: false
+          });
         }
 
+        await loadRemoteVaultCatalog(connection, {
+          silent: true
+        });
         setPendingBindVaultId(null);
         setConnectionAvailability((current) => ({
           ...current,
@@ -1152,19 +1687,6 @@ export default function SyncSettingsPanel({
                           <UnlinkGlyph />
                         </button>
                       ) : null}
-                      {!isActive ? (
-                        <button
-                          type="button"
-                          className="sync-settings-icon-button"
-                          title={t("sync.localVaultOpen")}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpenLocalVault(vault.id);
-                          }}
-                        >
-                          <OpenGlyph />
-                        </button>
-                      ) : null}
                       <button
                         type="button"
                         className="sync-settings-icon-button"
@@ -1182,7 +1704,7 @@ export default function SyncSettingsPanel({
                         title={t("sync.localVaultDelete")}
                         onClick={(event) => {
                           event.stopPropagation();
-                          onDeleteLocalVault(vault.id);
+                          requestDeleteLocalVault(vault);
                         }}
                       >
                         <TrashGlyph />
@@ -1220,6 +1742,11 @@ export default function SyncSettingsPanel({
                 syncConnections.map((connection) => {
                   const previewNames = connectionPreviewNames(connection.id);
                   const boundCount = boundVaultCountByConnectionId.get(connection.id) ?? 0;
+                  const remoteVaults = remoteVaultsByConnectionId[connection.id] ?? [];
+                  const remoteCount = remoteVaults.length;
+                  const remoteError = remoteVaultErrors[connection.id] ?? null;
+                  const isRemoteLoading = remoteVaultLoading[connection.id] ?? false;
+                  const remoteSectionExpanded = expandedRemoteConnectionIds[connection.id] ?? true;
                   const canBindSelected = pendingBindVaultId !== null;
                   const availability = online
                     ? connectionAvailability[connection.id] ?? "checking"
@@ -1265,7 +1792,10 @@ export default function SyncSettingsPanel({
                               {connection.provider === "hosted" ? t("sync.hosted") : t("sync.selfHosted")}
                             </span>
                             <span className="sync-settings-chip is-count">
-                              {t("settings.boundVaultCount", { count: boundCount })}
+                              {t("settings.linkedVaultCount", { count: boundCount })}
+                            </span>
+                            <span className="sync-settings-chip is-neutral">
+                              {t("settings.remoteVaultCount", { count: remoteCount })}
                             </span>
                             <span className={`sync-settings-chip ${availabilityChipClass}`}>{availabilityLabel}</span>
                           </div>
@@ -1300,6 +1830,190 @@ export default function SyncSettingsPanel({
                           ) : null}
                         </div>
                       ) : null}
+
+                      <div className="sync-settings-remote-section" onClick={(event) => event.stopPropagation()}>
+                        <div className="sync-settings-remote-head">
+                          <div className="sync-settings-remote-copy">
+                            <strong>{t("settings.remoteVaultsTitle")}</strong>
+                            <span>{t("settings.remoteVaultsDescription")}</span>
+                          </div>
+                          <div className="sync-settings-remote-actions">
+                            <button
+                              type="button"
+                              className="sync-settings-icon-button"
+                              title={t("settings.remoteVaultRefresh")}
+                              disabled={isRemoteLoading || busyKey !== null}
+                              onClick={() => {
+                                void loadRemoteVaultCatalog(connection, {
+                                  silent: false
+                                });
+                              }}
+                            >
+                              <RefreshGlyph />
+                            </button>
+                            <button
+                              type="button"
+                              className="sync-settings-icon-button"
+                              title={t("settings.remoteVaultExpand")}
+                              onClick={() =>
+                                setExpandedRemoteConnectionIds((current) => ({
+                                  ...current,
+                                  [connection.id]: !remoteSectionExpanded
+                                }))
+                              }
+                            >
+                              <ChevronToggleGlyph expanded={remoteSectionExpanded} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {remoteSectionExpanded ? (
+                          <>
+                            <div className="sync-settings-remote-toolbar">
+                              <span className="sync-settings-remote-toolbar-copy">
+                                {isRemoteLoading
+                                  ? t("settings.remoteVaultLoading")
+                                  : t("settings.remoteVaultAvailableCount", {
+                                      count: remoteCount
+                                    })}
+                              </span>
+                              <button
+                                type="button"
+                                className="sync-settings-inline-action"
+                                disabled={busyKey !== null || isRemoteLoading || remoteCount === 0}
+                                onClick={() => {
+                                  void requestImportAllRemoteVaults(connection);
+                                }}
+                              >
+                                {t("settings.remoteImportAll")}
+                              </button>
+                            </div>
+
+                            {remoteError ? (
+                              <div className="sync-settings-remote-empty is-error">
+                                <strong>{t("settings.remoteVaultLoadFailed")}</strong>
+                                <span>{remoteError}</span>
+                              </div>
+                            ) : null}
+
+                            {!remoteError && remoteCount === 0 && !isRemoteLoading ? (
+                              <div className="sync-settings-remote-empty">
+                                <strong>{t("sync.remoteVaults")}</strong>
+                                <span>{t("sync.remoteVaultEmpty")}</span>
+                              </div>
+                            ) : null}
+
+                            {remoteCount > 0 ? (
+                              <div className="sync-settings-remote-list">
+                                {remoteVaults.map((remoteVault) => {
+                                  const matchingLocalVault = localVaultByGuid.get(remoteVault.id) ?? null;
+                                  const matchingBinding = matchingLocalVault
+                                    ? bindingsByVaultId.get(matchingLocalVault.id) ?? null
+                                    : null;
+                                  const isLinkedHere =
+                                    matchingBinding?.connectionId === connection.id &&
+                                    matchingBinding.remoteVaultId === remoteVault.id;
+                                  const hasNameCollision =
+                                    !matchingLocalVault &&
+                                    localVaultNameSet.has(remoteVault.name.trim().toLowerCase());
+                                  const actionKey = `import:${connection.id}:${remoteVault.id}`;
+                                  const isActionBusy = busyKey === actionKey;
+
+                                  return (
+                                    <article key={remoteVault.id} className="sync-settings-remote-card">
+                                      <div className="sync-settings-remote-card-copy">
+                                        <div className="sync-settings-chip-row sync-settings-chip-row-card">
+                                          {isLinkedHere ? (
+                                            <span className="sync-settings-chip is-ready">
+                                              {t("settings.remoteVaultLinkedHere")}
+                                            </span>
+                                          ) : null}
+                                          {matchingLocalVault && !isLinkedHere ? (
+                                            <span className="sync-settings-chip is-info">
+                                              {t("settings.remoteVaultOnDevice")}
+                                            </span>
+                                          ) : null}
+                                          {hasNameCollision ? (
+                                            <span className="sync-settings-chip is-count">
+                                              {t("settings.remoteVaultNameCollision")}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <div className="sync-settings-card-titleline">
+                                          <span
+                                            className="sync-settings-card-icon"
+                                            style={{ "--item-color": providerAccent(connection.provider) } as CSSProperties}
+                                          >
+                                            <VaultGlyph />
+                                          </span>
+                                          <strong>{remoteVault.name}</strong>
+                                        </div>
+                                        <span className="sync-settings-card-meta">
+                                          {t("settings.remoteVaultIdLabel", {
+                                            id: remoteVault.id
+                                          })}
+                                        </span>
+                                        <span className="sync-settings-card-submeta">
+                                          {t("settings.remoteVaultUpdatedAt", {
+                                            time: formatTime(remoteVault.lastSyncAt ?? remoteVault.updatedAt, i18n.language)
+                                          })}
+                                        </span>
+                                        {matchingLocalVault ? (
+                                          <span className="sync-settings-card-submeta">
+                                            {t("settings.remoteVaultLocalMatch", {
+                                              vault: matchingLocalVault.name
+                                            })}
+                                          </span>
+                                        ) : hasNameCollision ? (
+                                          <span className="sync-settings-card-submeta">
+                                            {t("settings.remoteVaultWillAlias")}
+                                          </span>
+                                        ) : null}
+                                      </div>
+
+                                      <div className="sync-settings-card-actions">
+                                        {isLinkedHere && matchingLocalVault ? (
+                                          <button
+                                            type="button"
+                                            className="sync-settings-inline-action"
+                                            onClick={() => onSelectLocalVault(matchingLocalVault.id)}
+                                          >
+                                            {t("settings.selectLocalVault")}
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="sync-settings-inline-action"
+                                            disabled={isActionBusy || busyKey !== null}
+                                            onClick={() => {
+                                              void requestRemoteVaultImport(connection, remoteVault);
+                                            }}
+                                          >
+                                            {matchingLocalVault
+                                              ? t("settings.remoteImportLinkLocal")
+                                              : t("settings.remoteImportAction")}
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="sync-settings-icon-button is-danger"
+                                          title={t("settings.remoteDeleteAction")}
+                                          disabled={busyKey !== null}
+                                          onClick={() => {
+                                            requestDeleteRemoteVault(connection, remoteVault);
+                                          }}
+                                        >
+                                          <TrashGlyph />
+                                        </button>
+                                      </div>
+                                    </article>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
 
                       <div className="sync-settings-card-actions sync-settings-card-actions-wide">
                         <button
@@ -1361,26 +2075,27 @@ export default function SyncSettingsPanel({
 
       <div className="sync-settings-footer">
         <div className="sync-settings-footer-copy">
-          <strong>{activeVault?.name ?? t("sync.localVault")}</strong>
+          <strong>{selectedVault?.name ?? t("sync.localVault")}</strong>
           <span>
-            {activeVaultConnection && activeVaultBinding
-              ? `${activeVaultConnection.label} · ${formatTime(activeVaultBinding.lastSyncAt, i18n.language)}`
-              : t("sync.bindingMissing")}
+            {selectedVaultConnection && selectedVaultBinding
+              ? `${selectedVaultConnection.label} · ${formatTime(selectedVaultBinding.lastSyncAt, i18n.language)}`
+              : t("settings.statusUnbound")}
           </span>
         </div>
         <div className="sync-settings-footer-actions">
-          {selectedVault && selectedVault.id !== activeLocalVaultId ? (
-            <button type="button" className="sync-settings-inline-action" onClick={() => onOpenLocalVault(selectedVault.id)}>
-              {t("settings.openSelectedVault")}
-            </button>
-          ) : null}
           <button
             type="button"
             className="sync-settings-primary-action"
-            onClick={onRunActiveSync}
-            disabled={syncBusy || !activeVaultBinding}
+            onClick={() => {
+              if (!selectedVault) {
+                return;
+              }
+
+              void onRunVaultSync(selectedVault.id);
+            }}
+            disabled={!selectedVaultBinding || selectedVaultBinding.syncStatus === "syncing"}
           >
-            {syncBusy ? t("sync.syncing") : t("sync.syncNow")}
+            {selectedVaultBinding?.syncStatus === "syncing" ? t("sync.syncing") : t("sync.syncNow")}
           </button>
         </div>
       </div>
@@ -1621,10 +2336,28 @@ export default function SyncSettingsPanel({
             </div>
             <div className="sync-settings-modal-body">
               <p className="sync-settings-modal-copy">{confirmState.description}</p>
+              {confirmState.details && confirmState.details.length > 0 ? (
+                <div className="sync-settings-confirm-details">
+                  {confirmState.details.map((detail) => (
+                    <span key={detail} className="sync-settings-confirm-detail">
+                      {detail}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="sync-settings-modal-actions">
                 <button type="button" className="sync-settings-inline-action" onClick={closeModal}>
                   {t("dialog.cancel")}
                 </button>
+                {confirmState.secondaryAction && confirmState.secondaryLabel ? (
+                  <button
+                    type="button"
+                    className={`sync-settings-inline-action ${confirmState.secondaryTone === "danger" ? "is-danger" : ""}`}
+                    onClick={() => void confirmState.secondaryAction?.()}
+                  >
+                    {confirmState.secondaryLabel}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={`sync-settings-primary-action ${confirmState.tone === "danger" ? "is-danger" : ""}`}

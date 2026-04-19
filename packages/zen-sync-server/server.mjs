@@ -6,7 +6,7 @@ import {
   timingSafeEqual
 } from "node:crypto";
 import { createServer } from "node:http";
-import { copyFile } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -731,6 +731,37 @@ async function createVaultRecord(registry, payload) {
   };
 }
 
+async function deleteVaultRecord(registry, vaultId) {
+  const vault = getVaultById(registry, vaultId);
+
+  if (!vault) {
+    return {
+      statusCode: 404,
+      error: "VAULT_NOT_FOUND"
+    };
+  }
+
+  const nextRegistry = {
+    ...registry,
+    vaults: registry.vaults.filter((entry) => entry.id !== vaultId),
+    tokens: registry.tokens.filter((entry) => entry.vaultId !== vaultId)
+  };
+
+  await writeRegistry(nextRegistry);
+  await rm(getVaultStateFile(vaultId), {
+    force: true
+  });
+  await rm(getVaultJournalFile(vaultId), {
+    force: true
+  });
+
+  return {
+    statusCode: 200,
+    nextRegistry,
+    vaultId
+  };
+}
+
 async function createUserRecord(registry, payload, options = {}) {
   const allowCustomId = options.allowCustomId === true;
   const requireCredentials = options.requireCredentials === true;
@@ -1088,6 +1119,40 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, created.statusCode, {
         vault: created.vault
+      });
+      return;
+    }
+
+    const accountVaultMatch = pathname.match(/^\/v1\/account\/vaults\/([a-z0-9-_]{1,64})$/i);
+
+    if (accountVaultMatch && request.method === "DELETE") {
+      const context = await getAuthenticatedAccountContext(registry, request);
+
+      if (!context) {
+        sendJson(response, 401, { error: "UNAUTHORIZED" });
+        return;
+      }
+
+      const vaultId = sanitizeVaultId(accountVaultMatch[1]);
+      const vault = getVaultById(context.registry, vaultId);
+
+      if (!vault || !isVaultOwnedByUser(vault, context.user.id)) {
+        sendJson(response, 404, { error: "VAULT_NOT_FOUND" });
+        return;
+      }
+
+      const removed = await deleteVaultRecord(context.registry, vaultId);
+
+      if (removed.error) {
+        sendJson(response, removed.statusCode, {
+          error: removed.error
+        });
+        return;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        vaultId: removed.vaultId
       });
       return;
     }

@@ -1,7 +1,9 @@
 import Dexie from "dexie";
+import type { SyncVaultBinding } from "../types";
 
 export interface LocalVaultProfile {
   id: string;
+  vaultGuid: string;
   name: string;
   createdAt: number;
   updatedAt: number;
@@ -27,11 +29,20 @@ function sanitizeLocalVaultName(value: string) {
   return value.trim().slice(0, 80);
 }
 
+function sanitizeVaultGuid(value: string) {
+  return value.trim().slice(0, 120);
+}
+
+function createVaultGuid() {
+  return crypto.randomUUID();
+}
+
 function createDefaultVaultProfile(): LocalVaultProfile {
   const timestamp = now();
 
   return {
     id: DEFAULT_LOCAL_VAULT_ID,
+    vaultGuid: createVaultGuid(),
     name: "Main vault",
     createdAt: timestamp,
     updatedAt: timestamp
@@ -63,13 +74,16 @@ function normalizeRegistryState(value: unknown): LocalVaultRegistryState {
           const vault = entry as Record<string, unknown>;
           const id = typeof vault.id === "string" ? vault.id : "";
           const name = typeof vault.name === "string" ? sanitizeLocalVaultName(vault.name) : "";
+          const vaultGuid =
+            typeof vault.vaultGuid === "string" ? sanitizeVaultGuid(vault.vaultGuid) : createVaultGuid();
 
-          if (!id || !name) {
+          if (!id || !name || !vaultGuid) {
             return null;
           }
 
           return {
             id,
+            vaultGuid,
             name,
             createdAt: typeof vault.createdAt === "number" ? vault.createdAt : now(),
             updatedAt: typeof vault.updatedAt === "number" ? vault.updatedAt : now()
@@ -162,22 +176,88 @@ export function setStoredActiveLocalVaultId(localVaultId: string) {
   return nextState.activeVaultId;
 }
 
-export function createLocalVaultProfile(name: string) {
-  const registry = getLocalVaultRegistry();
+export function getLocalVaultProfile(localVaultId: string) {
+  return getLocalVaultRegistry().vaults.find((vault) => vault.id === localVaultId) ?? null;
+}
+
+export function getLocalVaultProfileByGuid(vaultGuid: string) {
+  const normalizedGuid = sanitizeVaultGuid(vaultGuid);
+
+  if (!normalizedGuid) {
+    return null;
+  }
+
+  return getLocalVaultRegistry().vaults.find((vault) => vault.vaultGuid === normalizedGuid) ?? null;
+}
+
+export function resolveUniqueLocalVaultName(name: string, excludeLocalVaultId?: string) {
   const normalizedName = sanitizeLocalVaultName(name);
 
   if (!normalizedName) {
     throw new Error("LOCAL_VAULT_NAME_REQUIRED");
   }
 
+  const registry = getLocalVaultRegistry();
+  const takenNames = new Set(
+    registry.vaults
+      .filter((vault) => vault.id !== excludeLocalVaultId)
+      .map((vault) => vault.name.trim().toLowerCase())
+  );
+
+  if (!takenNames.has(normalizedName.toLowerCase())) {
+    return normalizedName;
+  }
+
+  let index = 2;
+
+  while (true) {
+    const candidate = `${normalizedName} (${index})`;
+
+    if (!takenNames.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+
+    index += 1;
+  }
+}
+
+export function createLocalVaultProfile(
+  name: string,
+  options?: {
+    activate?: boolean;
+    localVaultId?: string;
+    vaultGuid?: string;
+  }
+) {
+  const registry = getLocalVaultRegistry();
+  const normalizedName = sanitizeLocalVaultName(name);
+  const localVaultId = sanitizeVaultGuid(options?.localVaultId ?? "") || crypto.randomUUID();
+  const vaultGuid = sanitizeVaultGuid(options?.vaultGuid ?? "") || createVaultGuid();
+
+  if (!normalizedName) {
+    throw new Error("LOCAL_VAULT_NAME_REQUIRED");
+  }
+
+  if (registry.vaults.some((vault) => vault.id === localVaultId)) {
+    throw new Error("LOCAL_VAULT_ID_EXISTS");
+  }
+
+  if (registry.vaults.some((vault) => vault.vaultGuid === vaultGuid)) {
+    throw new Error("LOCAL_VAULT_GUID_EXISTS");
+  }
+
   const timestamp = now();
   const nextVault: LocalVaultProfile = {
-    id: crypto.randomUUID(),
+    id: localVaultId,
+    vaultGuid,
     name: normalizedName,
     createdAt: timestamp,
     updatedAt: timestamp
   };
-  const nextState = buildRegistryState([...registry.vaults, nextVault], nextVault.id);
+  const nextState = buildRegistryState(
+    [...registry.vaults, nextVault],
+    options?.activate === false ? registry.activeVaultId : nextVault.id
+  );
   writeRegistryToStorage(nextState);
   return nextVault;
 }
@@ -202,6 +282,75 @@ export function renameLocalVaultProfile(localVaultId: string, name: string) {
   const nextState = buildRegistryState(nextVaults, registry.activeVaultId);
   writeRegistryToStorage(nextState);
   return nextState.vaults.find((vault) => vault.id === localVaultId) ?? null;
+}
+
+export function updateLocalVaultProfile(
+  localVaultId: string,
+  patch: Partial<Pick<LocalVaultProfile, "name" | "vaultGuid">>
+) {
+  const registry = getLocalVaultRegistry();
+  const normalizedName =
+    typeof patch.name === "string" ? sanitizeLocalVaultName(patch.name) : null;
+  const normalizedVaultGuid =
+    typeof patch.vaultGuid === "string" ? sanitizeVaultGuid(patch.vaultGuid) : null;
+
+  if (normalizedName !== null && !normalizedName) {
+    throw new Error("LOCAL_VAULT_NAME_REQUIRED");
+  }
+
+  if (
+    normalizedVaultGuid &&
+    registry.vaults.some((vault) => vault.id !== localVaultId && vault.vaultGuid === normalizedVaultGuid)
+  ) {
+    throw new Error("LOCAL_VAULT_GUID_EXISTS");
+  }
+
+  const timestamp = now();
+  const nextVaults = registry.vaults.map((vault) =>
+    vault.id === localVaultId
+      ? {
+          ...vault,
+          name: normalizedName ?? vault.name,
+          vaultGuid: normalizedVaultGuid ?? vault.vaultGuid,
+          updatedAt: timestamp
+        }
+      : vault
+  );
+  const nextState = buildRegistryState(nextVaults, registry.activeVaultId);
+  writeRegistryToStorage(nextState);
+  return nextState.vaults.find((vault) => vault.id === localVaultId) ?? null;
+}
+
+export function syncLocalVaultGuidsWithBindings(bindings: readonly Pick<SyncVaultBinding, "localVaultId" | "remoteVaultId">[]) {
+  const registry = getLocalVaultRegistry();
+  const remoteVaultIdByLocalVaultId = new Map(
+    bindings.map((binding) => [binding.localVaultId, sanitizeVaultGuid(binding.remoteVaultId)])
+  );
+  let changed = false;
+
+  const nextVaults = registry.vaults.map((vault) => {
+    const remoteVaultId = remoteVaultIdByLocalVaultId.get(vault.id) ?? null;
+
+    if (!remoteVaultId || remoteVaultId === vault.vaultGuid) {
+      return vault;
+    }
+
+    changed = true;
+
+    return {
+      ...vault,
+      vaultGuid: remoteVaultId,
+      updatedAt: now()
+    };
+  });
+
+  if (!changed) {
+    return registry.vaults;
+  }
+
+  const nextState = buildRegistryState(nextVaults, registry.activeVaultId);
+  writeRegistryToStorage(nextState);
+  return nextState.vaults;
 }
 
 export function getNextLocalVaultAfterDelete(localVaultId: string) {

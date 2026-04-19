@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -243,24 +244,44 @@ async function ensureInitialized() {
 
   const timestamp = now();
   const storedConfig = await readConfig();
+  let registry = await readRegistry();
+  let changed = false;
+  const storedDefaultVaultId =
+    storedConfig && typeof storedConfig.defaultVaultId === "string"
+      ? sanitizeVaultId(storedConfig.defaultVaultId)
+      : "";
   const legacyVaultId =
     storedConfig && typeof storedConfig.vaultId === "string" ? sanitizeVaultId(storedConfig.vaultId) : "";
-  const defaultVaultId = legacyVaultId || "default";
-  const defaultVaultName =
-    storedConfig && typeof storedConfig.defaultVaultName === "string"
-      ? sanitizeDisplayName(storedConfig.defaultVaultName, "Default vault")
-      : "Default vault";
   const managementToken =
     ENV_MANAGEMENT_TOKEN ||
     (storedConfig && typeof storedConfig.managementToken === "string"
       ? String(storedConfig.managementToken).trim()
       : "") ||
     createManagementToken();
+  const legacyVaultToken =
+    LEGACY_SYNC_TOKEN ||
+    (storedConfig && typeof storedConfig.token === "string" ? String(storedConfig.token).trim() : "");
+  const requestedDefaultVaultId = storedDefaultVaultId || legacyVaultId;
+  const shouldBootstrapLegacyVault = Boolean(requestedDefaultVaultId) && registry.vaults.length === 0;
+  let defaultVaultId =
+    (storedDefaultVaultId && registry.vaults.some((vault) => vault.id === storedDefaultVaultId)
+      ? storedDefaultVaultId
+      : "") ||
+    (requestedDefaultVaultId && registry.vaults.some((vault) => vault.id === requestedDefaultVaultId)
+      ? requestedDefaultVaultId
+      : "") ||
+    (shouldBootstrapLegacyVault ? requestedDefaultVaultId : "") ||
+    (registry.vaults[0]?.id ?? "");
 
-  let registry = await readRegistry();
-  let changed = false;
+  const storedDefaultVaultName =
+    storedConfig && typeof storedConfig.defaultVaultName === "string"
+      ? sanitizeDisplayName(storedConfig.defaultVaultName, "Default vault")
+      : "";
+  let defaultVaultName =
+    storedDefaultVaultName ||
+    (defaultVaultId ? registry.vaults.find((vault) => vault.id === defaultVaultId)?.name ?? "Default vault" : "");
 
-  if (!registry.vaults.some((vault) => vault.id === defaultVaultId)) {
+  if (shouldBootstrapLegacyVault && !registry.vaults.some((vault) => vault.id === defaultVaultId)) {
     registry = {
       ...registry,
       vaults: [
@@ -276,13 +297,21 @@ async function ensureInitialized() {
       ]
     };
     changed = true;
+    defaultVaultName = defaultVaultName || "Default vault";
   }
 
-  const legacyVaultToken =
-    LEGACY_SYNC_TOKEN ||
-    (storedConfig && typeof storedConfig.token === "string" ? String(storedConfig.token).trim() : "");
+  defaultVaultId =
+    (storedDefaultVaultId && registry.vaults.some((vault) => vault.id === storedDefaultVaultId)
+      ? storedDefaultVaultId
+      : "") ||
+    (requestedDefaultVaultId && registry.vaults.some((vault) => vault.id === requestedDefaultVaultId)
+      ? requestedDefaultVaultId
+      : "") ||
+    (registry.vaults[0]?.id ?? "");
+  defaultVaultName =
+    defaultVaultId ? registry.vaults.find((vault) => vault.id === defaultVaultId)?.name ?? defaultVaultName : "";
 
-  if (legacyVaultToken) {
+  if (legacyVaultToken && defaultVaultId) {
     const legacyHash = hashToken(legacyVaultToken);
     const hasLegacyToken = registry.tokens.some(
       (token) => token.vaultId === defaultVaultId && token.tokenHash === legacyHash
@@ -305,44 +334,15 @@ async function ensureInitialized() {
       };
       changed = true;
     }
-  } else {
-    const defaultTokenExists = registry.tokens.some((token) => token.vaultId === defaultVaultId);
-
-    if (!defaultTokenExists) {
-      const tokenValue = createVaultSyncToken(defaultVaultId);
-      registry = {
-        ...registry,
-        tokens: [
-          ...registry.tokens,
-          {
-            id: randomUUID(),
-            vaultId: defaultVaultId,
-            label: "Default vault token",
-            tokenHash: hashToken(tokenValue),
-            createdAt: timestamp,
-            lastUsedAt: null
-          }
-        ]
-      };
-      await writeConfig({
-        mode: "personal",
-        managementToken,
-        defaultVaultId,
-        defaultVaultName,
-        token: tokenValue,
-        createdAt:
-          storedConfig && typeof storedConfig.createdAt === "number" ? storedConfig.createdAt : timestamp,
-        updatedAt: timestamp
-      });
-      changed = true;
-    }
   }
 
   if (changed) {
     await writeRegistry(registry);
   }
 
-  await ensureDefaultVaultState(defaultVaultId);
+  if (defaultVaultId) {
+    await ensureDefaultVaultState(defaultVaultId);
+  }
 
   const config = {
     mode: "personal",
@@ -353,6 +353,14 @@ async function ensureInitialized() {
       storedConfig && typeof storedConfig.createdAt === "number" ? storedConfig.createdAt : timestamp,
     updatedAt: timestamp
   };
+
+  if (legacyVaultId) {
+    config.vaultId = legacyVaultId;
+  }
+
+  if (legacyVaultToken) {
+    config.token = legacyVaultToken;
+  }
 
   await writeConfig(config);
 
@@ -471,6 +479,57 @@ async function createVaultRecord(registry, payload) {
   };
 }
 
+async function deleteVaultRecord(registry, config, vaultId) {
+  const vault = getVaultById(registry, vaultId);
+
+  if (!vault) {
+    return {
+      statusCode: 404,
+      error: "VAULT_NOT_FOUND"
+    };
+  }
+
+  if (registry.vaults.length <= 1) {
+    return {
+      statusCode: 409,
+      error: "LAST_VAULT_REQUIRED"
+    };
+  }
+
+  const nextRegistry = {
+    ...registry,
+    vaults: registry.vaults.filter((entry) => entry.id !== vaultId),
+    tokens: registry.tokens.filter((entry) => entry.vaultId !== vaultId)
+  };
+
+  await writeRegistry(nextRegistry);
+  await rm(getVaultStateFile(vaultId), {
+    force: true
+  });
+  await rm(getVaultJournalFile(vaultId), {
+    force: true
+  });
+
+  if (config.defaultVaultId === vaultId) {
+    const nextDefaultVault = buildVaultList(nextRegistry)[0] ?? null;
+
+    if (nextDefaultVault) {
+      await writeConfig({
+        ...config,
+        defaultVaultId: nextDefaultVault.id,
+        defaultVaultName: nextDefaultVault.name,
+        updatedAt: now()
+      });
+    }
+  }
+
+  return {
+    statusCode: 200,
+    nextRegistry,
+    vaultId
+  };
+}
+
 async function issueVaultToken(registry, vaultId, labelValue) {
   if (!getVaultById(registry, vaultId)) {
     return {
@@ -532,7 +591,7 @@ function renderSetupPage(config, registry) {
           </div>
           <div>
             <dt>Default vault</dt>
-            <dd><code>${config.defaultVaultId}</code></dd>
+            <dd><code>${config.defaultVaultId || "none"}</code></dd>
           </div>
           <div>
             <dt>Management token</dt>
@@ -592,7 +651,7 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         mode: "personal",
-        defaultVaultId: config.defaultVaultId,
+        defaultVaultId: config.defaultVaultId || null,
         vaultCount: registry.vaults.length
       });
       return;
@@ -613,7 +672,7 @@ const server = createServer(async (request, response) => {
           managementApi: true,
           deltaSync: true
         },
-        defaultVaultId: config.defaultVaultId
+        defaultVaultId: config.defaultVaultId || null
       });
       return;
     }
@@ -646,6 +705,31 @@ const server = createServer(async (request, response) => {
 
       sendJson(response, created.statusCode, {
         vault: created.vault
+      });
+      return;
+    }
+
+    const personalVaultMatch = pathname.match(/^\/v1\/personal\/vaults\/([a-z0-9-_]{1,64})$/i);
+
+    if (personalVaultMatch && request.method === "DELETE") {
+      if (!getAuthorizedManagement(config, request)) {
+        sendJson(response, 401, { error: "UNAUTHORIZED" });
+        return;
+      }
+
+      const vaultId = sanitizeVaultId(personalVaultMatch[1]);
+      const removed = await deleteVaultRecord(registry, config, vaultId);
+
+      if (removed.error) {
+        sendJson(response, removed.statusCode, {
+          error: removed.error
+        });
+        return;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        vaultId: removed.vaultId
       });
       return;
     }
@@ -697,7 +781,8 @@ const server = createServer(async (request, response) => {
     }
 
     const changesMatch = pathname.match(/^\/v1\/vaults\/([a-z0-9-_]{1,64})\/changes$/i);
-    const legacyDefaultChangesRoute = pathname === "/v1/changes" ? ["", config.defaultVaultId] : null;
+    const legacyDefaultChangesRoute =
+      pathname === "/v1/changes" && config.defaultVaultId ? ["", config.defaultVaultId] : null;
     const changesVaultId = sanitizeVaultId(changesMatch?.[1] ?? legacyDefaultChangesRoute?.[1] ?? "");
 
     if (changesVaultId && (request.method === "GET" || request.method === "POST")) {
@@ -812,7 +897,8 @@ const server = createServer(async (request, response) => {
     }
 
     const stateMatch = pathname.match(/^\/v1\/vaults\/([a-z0-9-_]{1,64})\/state$/i);
-    const legacyDefaultStateRoute = pathname === "/v1/state" ? ["", config.defaultVaultId] : null;
+    const legacyDefaultStateRoute =
+      pathname === "/v1/state" && config.defaultVaultId ? ["", config.defaultVaultId] : null;
     const stateVaultId = sanitizeVaultId(stateMatch?.[1] ?? legacyDefaultStateRoute?.[1] ?? "");
 
     if (stateVaultId && (request.method === "GET" || request.method === "PUT")) {
@@ -869,6 +955,6 @@ const server = createServer(async (request, response) => {
 server.listen(PORT, () => {
   console.log(`Zen Sync Personal listening on http://localhost:${PORT}`);
   console.log(`Data dir: ${DATA_DIR}`);
-  console.log(`Default vault: ${bootstrap.config.defaultVaultId}`);
+  console.log(`Default vault: ${bootstrap.config.defaultVaultId || "none"}`);
   console.log(`Management token: ${bootstrap.config.managementToken}`);
 });
