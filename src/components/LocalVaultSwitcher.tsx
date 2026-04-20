@@ -10,6 +10,7 @@ export interface LocalVaultSwitcherItem {
   providerLabel: string | null;
   providerTone: "local" | "selfHosted" | "hosted" | "googleDrive";
   detail: string;
+  encryptionState: "disabled" | "ready" | "locked";
 }
 
 interface LocalVaultSwitcherProps {
@@ -34,6 +35,21 @@ function ChevronGlyph({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
       <path d={open ? "M5.5 7.4 10 11.9l4.5-4.5" : "M7.4 5.5 11.9 10l-4.5 4.5"} />
+    </svg>
+  );
+}
+
+function LockGlyph({ unlocked = false }: { unlocked?: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path
+        d={
+          unlocked
+            ? "M6.2 8V6.8A3.8 3.8 0 0 1 13 4.5M5 8.1h10v7.6H5z"
+            : "M6.2 8V6.7a3.8 3.8 0 1 1 7.6 0V8M5 8.1h10v7.6H5z"
+        }
+      />
+      <path d="M10 10.3v2.5" className="vault-switcher-icon-accent" />
     </svg>
   );
 }
@@ -92,7 +108,17 @@ export default function LocalVaultSwitcher({
         </span>
         <span className="vault-switcher-trigger-copy">
           <span className="vault-switcher-trigger-label">{label}</span>
-          <strong title={activeItem.name}>{activeItem.name}</strong>
+          <span className="vault-switcher-trigger-titleline">
+            <strong title={activeItem.name}>{activeItem.name}</strong>
+            {activeItem.encryptionState !== "disabled" ? (
+              <span
+                className={`vault-switcher-lock-badge is-${activeItem.encryptionState}`}
+                aria-hidden="true"
+              >
+                <LockGlyph unlocked={activeItem.encryptionState === "ready"} />
+              </span>
+            ) : null}
+          </span>
         </span>
         <span className={`vault-switcher-chip is-${activeItem.statusTone}`}>{activeItem.statusLabel}</span>
         <span className="vault-switcher-trigger-chevron" aria-hidden="true">
@@ -129,6 +155,14 @@ export default function LocalVaultSwitcher({
                   <span className="vault-switcher-item-copy">
                     <span className="vault-switcher-item-titleline">
                       <strong title={item.name}>{item.name}</strong>
+                      {item.encryptionState !== "disabled" ? (
+                        <span
+                          className={`vault-switcher-lock-badge is-${item.encryptionState}`}
+                          aria-hidden="true"
+                        >
+                          <LockGlyph unlocked={item.encryptionState === "ready"} />
+                        </span>
+                      ) : null}
                     </span>
                     <span className="vault-switcher-item-detail" title={item.detail}>
                       {item.detail}

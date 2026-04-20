@@ -54,6 +54,7 @@ function normalizeConnection(entry: unknown): SyncConnection | null {
     serverUrl,
     managementToken: sanitizeText(record.managementToken, 512),
     sessionToken: sanitizeText(record.sessionToken, 1024),
+    tokenExpiresAt: typeof record.tokenExpiresAt === "number" ? record.tokenExpiresAt : null,
     userId: sanitizeText(record.userId, 120) || null,
     userName: sanitizeText(record.userName, 160),
     userEmail: sanitizeText(record.userEmail, 160),
@@ -215,6 +216,7 @@ export function createSyncConnection(input: {
   label?: string;
   managementToken?: string;
   sessionToken?: string;
+  tokenExpiresAt?: number | null;
   userId?: string | null;
   userName?: string;
   userEmail?: string;
@@ -234,6 +236,7 @@ export function createSyncConnection(input: {
     serverUrl,
     managementToken: sanitizeText(input.managementToken, 512),
     sessionToken: sanitizeText(input.sessionToken, 1024),
+    tokenExpiresAt: typeof input.tokenExpiresAt === "number" ? input.tokenExpiresAt : null,
     userId: sanitizeText(input.userId, 120) || null,
     userName: sanitizeText(input.userName, 160),
     userEmail: sanitizeText(input.userEmail, 160),
@@ -271,6 +274,10 @@ export function updateSyncConnection(connectionId: string, patch: Partial<Omit<S
             typeof patch.sessionToken === "string"
               ? sanitizeText(patch.sessionToken, 1024)
               : connection.sessionToken,
+          tokenExpiresAt:
+            typeof patch.tokenExpiresAt === "number" || patch.tokenExpiresAt === null
+              ? patch.tokenExpiresAt ?? null
+              : connection.tokenExpiresAt,
           userId:
             typeof patch.userId === "string" || patch.userId === null
               ? sanitizeText(patch.userId, 120) || null
@@ -453,6 +460,7 @@ export async function migrateSyncRegistryFromLegacyVaultSettings(
           serverUrl: settings.selfHostedUrl.trim(),
           managementToken: "",
           sessionToken: "",
+          tokenExpiresAt: null,
           userId: null,
           userName: "",
           userEmail: "",
@@ -498,6 +506,7 @@ export async function migrateSyncRegistryFromLegacyVaultSettings(
           serverUrl: settings.hostedUrl.trim(),
           managementToken: "",
           sessionToken: settings.hostedSessionToken.trim(),
+          tokenExpiresAt: null,
           userId: settings.hostedUserId,
           userName: settings.hostedUserName.trim(),
           userEmail: settings.hostedUserEmail.trim(),

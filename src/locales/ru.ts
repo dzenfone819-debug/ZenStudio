@@ -241,6 +241,8 @@ const ru = {
     statusReady: "Готово к sync",
     statusSyncing: "Синхронизация…",
     statusPending: "Ожидает: {{count}}",
+    statusUnlockRequired: "Нужно разблокировать",
+    statusUnlockRequiredPending: "Разблокируй vault · ожидает: {{count}}",
     statusOfflinePending: "Оффлайн · ожидает: {{count}}",
     statusUnavailable: "Сервер недоступен",
     statusUnavailablePending: "Сервер недоступен · ожидает: {{count}}",
@@ -253,6 +255,18 @@ const ru = {
     hostedUrlRequired: "Сначала укажи URL hosted сервера.",
     hostedVaultRequired: "Сначала выбери hosted vault.",
     hostedTokenRequired: "Сначала привяжи этот локальный vault к hosted vault.",
+    googleDriveClientIdRequired:
+      "Для Google Drive в этой сборке сначала задай VITE_GOOGLE_DRIVE_CLIENT_ID.",
+    googleDriveAuthRequired:
+      "Google Drive требует новую авторизацию. Переподключи способ синхронизации Google Drive.",
+    googleDriveConnected: "Google Drive подключен.",
+    googleDrivePopupClosed: "Окно входа Google было закрыто до завершения авторизации.",
+    googleDrivePopupFailed: "Не удалось открыть окно входа Google.",
+    googleDrivePreparing: "Подготавливаем Google OAuth. Подожди секунду и попробуй снова.",
+    googleDriveSdkFailed:
+      "Не удалось подготовить Google OAuth в браузере. Проверь сеть, блокировщики контента и попробуй снова.",
+    googleDriveEncryptedPending:
+      "Этот vault в Google Drive зашифрован, но импорт зашифрованной sync-оболочки пока не включён в приложении.",
     unauthorized: "Сервер отклонил токен.",
     hostedUnauthorized: "Hosted vault отклонил токен. Привяжи vault заново.",
     hostedSessionExpired: "Сессия hosted аккаунта истекла. Войди снова.",
@@ -271,6 +285,26 @@ const ru = {
     selfHostedVaultBound: "Локальный vault привязан к self-hosted remote vault.",
     selfHostedManageFailed:
       "Операция управления self-hosted сервером не удалась. Проверь URL сервера, management token и состояние vault.",
+    vaultEncryptionEnabled: "Шифрование vault включено для этого устройства и sync-профиля.",
+    vaultEncryptionUnlocked: "Шифрование vault разблокировано на этом устройстве.",
+    vaultEncryptionLocked: "Шифрование vault заблокировано на этом устройстве.",
+    vaultEncryptionPassphraseRequired: "Сначала введи passphrase этого vault.",
+    vaultEncryptionPassphraseTooShort: "Используй passphrase длиной минимум 8 символов.",
+    vaultEncryptionPassphraseMismatch: "Подтверждение passphrase не совпадает.",
+    vaultEncryptionInvalidPassphrase: "Этот passphrase не подходит к ключу шифрования vault.",
+    vaultEncryptionDisabled: "Для этого vault шифрование пока не включено.",
+    vaultEncryptionSyncLocked:
+      "Разблокируй шифрование этого vault на текущем устройстве перед импортом или sync зашифрованных данных.",
+    vaultEncryptionRemoteMigrationRequired:
+      "Переподключи этот vault к его способу sync и оставайся онлайн, чтобы сменить passphrase или отключить шифрование.",
+    vaultEncryptionPassphraseChanged:
+      "Passphrase vault обновлена, а удаленный зашифрованный snapshot успешно переупакован.",
+    vaultEncryptionPassphraseChangedLocalOnly:
+      "Passphrase обновлена для этого локального vault.",
+    vaultEncryptionDisabledAndMigrated:
+      "Шифрование vault отключено, а удаленный snapshot переведен обратно в обычный sync-режим.",
+    vaultEncryptionDisabledLocalOnly:
+      "Шифрование отключено для этого локального vault.",
     lastRemoteVaultRequired: "На этом self-hosted сервере должен остаться хотя бы один remote vault.",
     bindingUpdated: "Привязка vault обновлена.",
     bindingCleared: "Привязка vault удалена.",
@@ -310,6 +344,53 @@ const ru = {
       "Добавь один managed cloud, подключи столько self-hosted серверов, сколько нужно, и разведи vault по нужным назначениям.",
     addConnection: "Добавить подключение",
     connectionAdded: "Способ sync добавлен.",
+    vaultEncryptionKicker: "Шифрование vault",
+    enableVaultEncryption: "Включить шифрование",
+    unlockVaultEncryption: "Разблокировать vault",
+    manageVaultEncryption: "Управление шифрованием",
+    vaultEncryptionChangePassphrase: "Сменить passphrase",
+    vaultEncryptionDisable: "Отключить шифрование",
+    vaultEncryptionTitle: "Шифрование vault · {{vault}}",
+    vaultEncryptionEnableDescription:
+      "Защити remote sync-данные этого vault опциональной end-to-end passphrase. Passphrase хранится только на устройстве и только пока эта сессия разблокирована.",
+    vaultEncryptionUnlockDescription:
+      "Этот vault зашифрован. Введи passphrase, чтобы разблокировать доступ к зашифрованной sync на этом устройстве.",
+    vaultEncryptionUnlockToContinueImport:
+      "Этот remote vault уже импортирован, но его зашифрованный контент еще ждет passphrase. Разблокируй его один раз, и первый sync продолжится автоматически.",
+    vaultEncryptionUnlockToContinueSync:
+      "Этот vault заблокирован на текущем устройстве. Разблокируй его, и sync сразу продолжится без повторного ручного шага.",
+    vaultEncryptionReadyDescription:
+      "Шифрование уже включено и сейчас разблокировано на этом устройстве. При необходимости можно снова заблокировать текущую сессию.",
+    vaultEncryptionChangeDescription:
+      "Смени passphrase этого vault. Если vault привязан к sync, мы в одном безопасном шаге перешифруем и удаленный snapshot.",
+    vaultEncryptionDisableDescription:
+      "Отключи шифрование для этого vault. Если vault привязан удаленно, перед отключением локальных ключевых метаданных мы переведем stored snapshot обратно в plain sync.",
+    vaultEncryptionEnableHint:
+      "После включения зашифрованный sync-слой будет использовать ключевой материал именно этого vault. Сохрани passphrase надежно: восстановимой копии у нас нет.",
+    vaultEncryptionLockedHint:
+      "Удаленно vault остается зашифрованным. Разблокировка только возвращает локальный доступ к сессии шифрования на этом устройстве.",
+    vaultEncryptionReadyHint:
+      "Сейчас это устройство держит unlock-сессию в памяти. Заблокируй ее, если хочешь снова требовать passphrase именно здесь.",
+    vaultEncryptionChangeHint:
+      "Новая passphrase заменит текущую только для этого vault. У других vault останутся свои собственные настройки шифрования.",
+    vaultEncryptionBoundMigrationHint:
+      "Этот vault уже подключен к sync, поэтому смена passphrase сразу обновит и удаленный зашифрованный snapshot.",
+    vaultEncryptionDisableRemoteHint:
+      "Так как этот vault подключен к sync, отключение шифрования также переведет удаленный snapshot обратно в plain режим.",
+    vaultEncryptionDisableLocalHint:
+      "Этот vault существует только локально, поэтому отключение шифрования просто уберет локальные ключевые метаданные без удаленной миграции.",
+    vaultEncryptionPassphrase: "Passphrase vault",
+    vaultEncryptionConfirmPassphrase: "Подтверди passphrase",
+    vaultEncryptionCurrentPassphrase: "Текущая passphrase vault",
+    vaultEncryptionNewPassphrase: "Новая passphrase vault",
+    vaultEncryptionConfirmNewPassphrase: "Подтверди новую passphrase",
+    vaultEncryptionKeyId: "Key ID",
+    vaultEncryptionUpdatedAt: "Включено",
+    vaultEncryptionReady: "Разблокирован",
+    vaultEncryptionLocked: "Заблокирован",
+    vaultEncryptionLockDevice: "Заблокировать на этом устройстве",
+    vaultEncryptionDisableConfirm:
+      "После завершения миграции remote sync для этого vault перестанет использовать шифрование. Локальный unlock-доступ на этом устройстве тоже будет очищен.",
     createVaultTitle: "Создать vault",
     renameVaultTitle: "Переименовать vault",
     createVaultDescription:
@@ -318,12 +399,25 @@ const ru = {
       "Обнови имя локального vault без изменения его удаленной sync-идентичности.",
     connectionCatalogTitle: "Добавить способ sync",
     connectionCatalogDescription:
-      "Выбери, какой путь синхронизации добавить. Cloud может быть только один, self-hosted можно добавлять много раз, Google Drive появится позже.",
+      "Выбери, какой путь синхронизации добавить. Cloud может быть только один, self-hosted можно добавлять много раз, а Google Drive хранит vault в скрытой app-папке.",
     hostedConnectionTitle: "Подключить cloud",
     hostedConnectionDescription: "Managed аккаунтный sync для твоего hosted пространства Zen.",
     selfHostedConnectionTitle: "Подключить self-hosted сервер",
     selfHostedConnectionDescription: "Single-user personal server с поддержкой нескольких vault.",
-    googleDriveComingSoon: "Архитектурно уже подготовлен, но в продукт пока не подключен.",
+    googleDriveConnectionTitle: "Подключить Google Drive",
+    googleDriveConnectionDescription: "Синхронизация через скрытую appDataFolder внутри твоего Google-аккаунта.",
+    googleDriveClientMissing:
+      "Сначала задай Google OAuth client ID, и после этого этот способ можно будет подключить.",
+    googleDriveModalDescription:
+      "Авторизуй Zen Studio в браузере, и мы будем хранить каждый remote vault внутри Google Drive appDataFolder.",
+    googleDriveConnect: "Подключить Google Drive",
+    googleDriveAppFolder: "appDataFolder",
+    googleDriveAppFolderDescription:
+      "Файлы там скрыты от обычного интерфейса Drive и доступны только этому приложению.",
+    googleDriveSessionReady: "OAuth-сессия готова для доступа к Drive appDataFolder.",
+    googleDriveSdkLoading:
+      "Подготавливаем браузерный Google OAuth SDK. Как только он будет готов, кнопку подключения можно нажать.",
+    googleDriveSdkReady: "Google OAuth SDK готов. Можно открывать окно авторизации.",
     selfHostedModalDescription:
       "Укажи endpoint personal server и management token. После этого можно сразу соединять vault прямо на этом экране.",
     hostedModalDescription:
@@ -336,6 +430,7 @@ const ru = {
     statusReady: "Готово",
     statusSyncing: "Синхронизация",
     statusError: "Ошибка",
+    statusUnlockRequired: "Нужно разблокировать",
     connectionChecking: "Проверка",
     connectionAvailable: "Доступен",
     connectionUnavailable: "Недоступен",

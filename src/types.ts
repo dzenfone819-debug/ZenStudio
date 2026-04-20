@@ -10,6 +10,10 @@ export type SyncState = "local" | "dirty" | "synced" | "conflict";
 export type SyncStatus = "disabled" | "idle" | "syncing" | "error";
 export type ConflictStrategy = "duplicate";
 export type SyncEntityKind = "project" | "folder" | "tag" | "note" | "asset";
+export type SyncPayloadMode = "plain" | "encrypted";
+export type SyncEncryptionState = "disabled" | "ready" | "locked";
+export type SyncEncryptionKdf = "pbkdf2-sha256";
+export type SyncEncryptionCipher = "aes-gcm-256";
 
 export interface StoredBlock {
   id?: string;
@@ -129,10 +133,24 @@ export interface AppSettings {
   hostedSyncToken: string;
   conflictStrategy: ConflictStrategy;
   encryptionEnabled: boolean;
+  encryptionVersion: number | null;
+  encryptionKdf: SyncEncryptionKdf | null;
+  encryptionIterations: number | null;
+  encryptionKeyId: string | null;
+  encryptionSalt: string | null;
+  encryptionKeyCheck: string | null;
+  encryptionUpdatedAt: number | null;
   lastSyncAt: number | null;
   syncCursor: string | null;
   localDeviceId: string;
   lastOpenedNoteId: string | null;
+}
+
+export interface VaultEncryptionSummary {
+  enabled: boolean;
+  state: SyncEncryptionState;
+  keyId: string | null;
+  updatedAt: number | null;
 }
 
 export interface SyncRemoteVault {
@@ -152,6 +170,7 @@ export interface SyncConnection {
   serverUrl: string;
   managementToken: string;
   sessionToken: string;
+  tokenExpiresAt: number | null;
   userId: string | null;
   userName: string;
   userEmail: string;
@@ -177,7 +196,7 @@ export interface SyncVaultBinding {
 export interface RemoteVaultImportResult {
   localVaultId: string;
   localVaultName: string;
-  disposition: "imported" | "linked";
+  disposition: "imported" | "linked" | "pendingUnlock";
   nameAdjusted: boolean;
 }
 
@@ -268,6 +287,37 @@ export interface SyncedAssetRecord {
   updatedAt: number;
 }
 
+export interface SyncVaultDescriptor {
+  localVaultId: string | null;
+  vaultGuid: string | null;
+  name: string | null;
+  schemaVersion: number;
+}
+
+export interface SyncEncryptionDescriptor {
+  version: 1;
+  state: SyncEncryptionState;
+  keyId: string | null;
+  kdf: SyncEncryptionKdf;
+  iterations: number | null;
+  salt: string | null;
+  keyCheck: string | null;
+}
+
+export interface SyncEncryptedPayload {
+  version: 1;
+  cipher: SyncEncryptionCipher;
+  iv: string;
+  ciphertext: string;
+}
+
+export interface SyncEnvelopeMetadata {
+  schemaVersion: 1;
+  payloadMode: SyncPayloadMode;
+  vault: SyncVaultDescriptor | null;
+  encryption: SyncEncryptionDescriptor | null;
+}
+
 export interface SyncSnapshot {
   deviceId: string;
   exportedAt: number;
@@ -293,6 +343,13 @@ export interface SyncChangeSet {
 export interface SyncEnvelope {
   revision: string | null;
   snapshot: SyncSnapshot;
+  metadata?: SyncEnvelopeMetadata | null;
+}
+
+export interface SyncSecureEnvelope {
+  revision: string | null;
+  metadata: SyncEnvelopeMetadata;
+  encryptedSnapshot: SyncEncryptedPayload;
 }
 
 export interface SyncChangeFeed {
@@ -301,6 +358,7 @@ export interface SyncChangeFeed {
   baseRevision: string | null;
   changes: SyncChangeSet | null;
   snapshot: SyncSnapshot | null;
+  metadata?: SyncEnvelopeMetadata | null;
 }
 
 export interface SyncRunStats {

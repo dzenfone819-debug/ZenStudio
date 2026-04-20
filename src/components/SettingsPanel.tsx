@@ -7,7 +7,8 @@ import type {
   AppSettings,
   RemoteVaultImportResult,
   SyncConnection,
-  SyncVaultBinding
+  SyncVaultBinding,
+  VaultEncryptionSummary
 } from "../types";
 import SyncSettingsPanel from "./SyncSettingsPanel";
 import "./SettingsPanel.css";
@@ -25,6 +26,7 @@ interface SettingsPanelProps {
   selectedLocalVaultId: string;
   syncConnections: SyncConnection[];
   syncBindings: SyncVaultBinding[];
+  vaultEncryptionById: Record<string, VaultEncryptionSummary>;
   syncFeedback?: SyncFeedbackState;
   onLanguageChange: (language: AppLanguage) => void;
   onSelectLocalVault: (localVaultId: string) => void;
@@ -37,16 +39,21 @@ interface SettingsPanelProps {
     }
   ) => void | Promise<void>;
   onCreateConnection: (input: {
-    provider: "selfHosted" | "hosted";
+    provider: "selfHosted" | "hosted" | "googleDrive";
     serverUrl: string;
     label?: string;
     managementToken?: string;
     sessionToken?: string;
+    tokenExpiresAt?: number | null;
     userId?: string | null;
     userName?: string;
     userEmail?: string;
   }) => void;
   onDeleteConnection: (connectionId: string) => void;
+  onUpdateConnection: (
+    connectionId: string,
+    patch: Partial<Omit<SyncConnection, "id" | "provider" | "createdAt">>
+  ) => void;
   onBindVault: (input: {
     localVaultId: string;
     connectionId: string;
@@ -66,6 +73,24 @@ interface SettingsPanelProps {
   }) => Promise<void>;
   onClearBinding: (localVaultId: string) => void | Promise<void>;
   onRunVaultSync: (localVaultId: string) => void | Promise<void>;
+  onEnableVaultEncryption: (input: {
+    localVaultId: string;
+    passphrase: string;
+  }) => void | Promise<void>;
+  onUnlockVaultEncryption: (input: {
+    localVaultId: string;
+    passphrase: string;
+  }) => void | Promise<void>;
+  onChangeVaultEncryptionPassphrase: (input: {
+    localVaultId: string;
+    currentPassphrase?: string;
+    nextPassphrase: string;
+  }) => void | Promise<void>;
+  onDisableVaultEncryption: (input: {
+    localVaultId: string;
+    currentPassphrase?: string;
+  }) => void | Promise<void>;
+  onLockVaultEncryption: (localVaultId: string) => void | Promise<void>;
 }
 
 function SettingsGlyph() {
@@ -119,6 +144,7 @@ export default function SettingsPanel({
   selectedLocalVaultId,
   syncConnections,
   syncBindings,
+  vaultEncryptionById,
   syncFeedback = null,
   onLanguageChange,
   onSelectLocalVault,
@@ -127,11 +153,17 @@ export default function SettingsPanel({
   onDeleteLocalVault,
   onCreateConnection,
   onDeleteConnection,
+  onUpdateConnection,
   onBindVault,
   onImportRemoteVault,
   onDeleteRemoteVault,
   onClearBinding,
-  onRunVaultSync
+  onRunVaultSync,
+  onEnableVaultEncryption,
+  onUnlockVaultEncryption,
+  onChangeVaultEncryptionPassphrase,
+  onDisableVaultEncryption,
+  onLockVaultEncryption
 }: SettingsPanelProps) {
   const { t } = useTranslation();
   const [view, setView] = useState<SettingsView>("root");
@@ -159,6 +191,7 @@ export default function SettingsPanel({
         selectedLocalVaultId={selectedLocalVaultId}
         syncConnections={syncConnections}
         syncBindings={syncBindings}
+        vaultEncryptionById={vaultEncryptionById}
         syncFeedback={syncFeedback}
         onBack={() => setView("root")}
         onSelectLocalVault={onSelectLocalVault}
@@ -167,11 +200,17 @@ export default function SettingsPanel({
         onDeleteLocalVault={onDeleteLocalVault}
         onCreateConnection={onCreateConnection}
         onDeleteConnection={onDeleteConnection}
+        onUpdateConnection={onUpdateConnection}
         onBindVault={onBindVault}
         onImportRemoteVault={onImportRemoteVault}
         onDeleteRemoteVault={onDeleteRemoteVault}
         onClearBinding={onClearBinding}
         onRunVaultSync={onRunVaultSync}
+        onEnableVaultEncryption={onEnableVaultEncryption}
+        onUnlockVaultEncryption={onUnlockVaultEncryption}
+        onChangeVaultEncryptionPassphrase={onChangeVaultEncryptionPassphrase}
+        onDisableVaultEncryption={onDisableVaultEncryption}
+        onLockVaultEncryption={onLockVaultEncryption}
       />
     );
   }

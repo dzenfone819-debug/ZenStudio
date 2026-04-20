@@ -16,7 +16,9 @@ import {
   getBearerToken,
   handleOptimisticSyncRoute,
   isChangeSetEmpty,
+  isEncryptedEnvelope,
   normalizeChangeSet,
+  normalizeStoredEnvelope,
   now,
   pruneChangeHistory,
   readJsonFile,
@@ -214,14 +216,7 @@ async function writeRegistry(registry) {
 
 async function readVaultEnvelope(vaultId) {
   const parsed = await readJsonFile(getVaultStateFile(vaultId), createEmptyEnvelope());
-
-  return {
-    revision: typeof parsed.revision === "string" ? parsed.revision : null,
-    snapshot:
-      parsed.snapshot && typeof parsed.snapshot === "object"
-        ? parsed.snapshot
-        : createEmptyEnvelope().snapshot
-  };
+  return normalizeStoredEnvelope(parsed);
 }
 
 async function writeVaultEnvelope(vaultId, envelope) {
@@ -432,7 +427,8 @@ function buildSnapshotFallbackFeed(envelope) {
     revision: envelope.revision,
     baseRevision: null,
     changes: null,
-    snapshot: envelope.snapshot
+    snapshot: isEncryptedEnvelope(envelope) ? null : envelope.snapshot,
+    metadata: envelope.metadata ?? null
   };
 }
 
@@ -805,6 +801,11 @@ const server = createServer(async (request, response) => {
       const currentEnvelope = await readVaultEnvelope(changesVaultId);
 
       if (request.method === "GET") {
+        if (currentEnvelope.metadata?.payloadMode === "encrypted") {
+          sendJson(response, 200, buildSnapshotFallbackFeed(currentEnvelope));
+          return;
+        }
+
         const sinceRevision = url.searchParams.get("since")?.trim() ?? "";
 
         if (!sinceRevision || !currentEnvelope.revision) {
@@ -849,6 +850,14 @@ const server = createServer(async (request, response) => {
       const rawChanges =
         payload && typeof payload === "object" && "changes" in payload ? payload.changes : null;
       const changes = normalizeChangeSet(rawChanges, "server");
+
+      if (currentEnvelope.metadata?.payloadMode === "encrypted") {
+        sendJson(response, 409, {
+          error: "DELTA_SYNC_UNAVAILABLE",
+          revision: currentEnvelope.revision
+        });
+        return;
+      }
 
       if (currentEnvelope.revision !== baseRevision) {
         sendJson(response, 409, {
@@ -925,6 +934,15 @@ const server = createServer(async (request, response) => {
         readEnvelope: () => readVaultEnvelope(stateVaultId),
         writeEnvelope: (envelope) => writeVaultEnvelope(stateVaultId, envelope),
         onAfterWrite: async (envelope, previousEnvelope) => {
+          if (isEncryptedEnvelope(envelope) || isEncryptedEnvelope(previousEnvelope)) {
+            await writeVaultJournal(stateVaultId, []);
+            await updateVaultMeta(registryWithUsage, stateVaultId, {
+              lastRevision: envelope.revision,
+              lastSyncAt: Date.now()
+            });
+            return;
+          }
+
           const changeSet = buildChangeSetFromSnapshots(previousEnvelope?.snapshot, envelope.snapshot);
 
           if (!isChangeSetEmpty(changeSet)) {

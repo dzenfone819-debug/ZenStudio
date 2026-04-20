@@ -13,6 +13,30 @@ import {
   remapCanvasFileIds
 } from "./canvas";
 import {
+  createEncryptionDescriptor,
+  createPlainSyncDescriptor,
+  decryptSyncPayload,
+  encryptSyncPayload
+} from "./e2ee";
+import { getVaultEncryptionSessionPassphrase } from "./e2eeSession";
+import {
+  buildGoogleDriveBindingToken,
+  buildGoogleDriveConnectionLabel,
+  connectGoogleDriveAccount as connectGoogleDriveAccountViaOAuth,
+  createGoogleDriveRemoteVault,
+  deleteGoogleDriveRemoteVault,
+  GOOGLE_DRIVE_API_BASE_URL,
+  getGoogleDriveClientId,
+  googleDriveOAuthReady as googleDriveOAuthReadyViaApi,
+  isGoogleDriveConfigured,
+  listGoogleDriveRemoteVaults,
+  loadGoogleDriveRemoteEnvelope,
+  prepareGoogleDriveOAuth as prepareGoogleDriveOAuthViaApi,
+  probeGoogleDriveConnection,
+  saveGoogleDriveRemoteEnvelope
+} from "./googleDriveSync";
+import { getLocalVaultProfile, type LocalVaultProfile } from "./localVaults";
+import {
   db,
   resetResolvedAssetCache,
   withLocalVaultDatabase,
@@ -29,20 +53,25 @@ import type {
   HostedAccountVault,
   Note,
   Project,
+  SyncEnvelope,
+  SyncEnvelopeMetadata,
   SyncConnection,
   SyncConnectionProvider,
   SyncChangeFeed,
   SyncChangeSet,
-  SyncEnvelope,
+  SyncEncryptionDescriptor,
   SyncEntityKind,
+  SyncPayloadMode,
   SyncRemoteVault,
   SyncRunStats,
+  SyncSecureEnvelope,
   SyncShadow,
   SyncSnapshot,
   SyncStatus,
   SyncTombstone,
   SyncedAssetRecord,
   SyncedNoteRecord,
+  SyncVaultDescriptor,
   Tag
 } from "../types";
 
@@ -83,10 +112,214 @@ type RemoteSyncConfig = {
   serverUrl: string;
   vaultId: string;
   token: string;
+  localVaultId?: string | null;
+  localVaultName?: string | null;
+};
+
+type RemoteEnvelopeRecord = SyncEnvelope | SyncSecureEnvelope;
+
+type ResolvedRemoteEnvelope = {
+  revision: string | null;
+  snapshot: SyncSnapshot;
+  metadata: SyncEnvelopeMetadata | null;
+};
+
+type ResolveRemoteEnvelopeOptions = {
+  passphraseOverride?: string | null;
+  hydrateFromMetadata?: boolean;
+};
+
+type CreateOutgoingRemoteEnvelopeOptions = {
+  forcePayloadMode?: SyncPayloadMode | null;
+  passphraseOverride?: string | null;
+  descriptorOverride?: SyncEncryptionDescriptor | null;
 };
 
 function getEntityKey(entityType: SyncEntityKind, entityId: string) {
   return `${entityType}:${entityId}`;
+}
+
+function createSyncRevision() {
+  return `rev-${Date.now()}-${crypto.randomUUID()}`;
+}
+
+function isEncryptedEnvelopeRecord(envelope: RemoteEnvelopeRecord): envelope is SyncSecureEnvelope {
+  return (
+    envelope &&
+    typeof envelope === "object" &&
+    "encryptedSnapshot" in envelope &&
+    Boolean(envelope.encryptedSnapshot)
+  );
+}
+
+function buildRemoteVaultDescriptor(remote: RemoteSyncConfig): SyncVaultDescriptor {
+  const localVaultProfile = remote.localVaultId ? getLocalVaultProfile(remote.localVaultId) : null;
+
+  return {
+    localVaultId: remote.localVaultId ?? localVaultProfile?.id ?? null,
+    vaultGuid: localVaultProfile?.vaultGuid ?? remote.vaultId ?? null,
+    name: remote.localVaultName ?? localVaultProfile?.name ?? null,
+    schemaVersion: 1
+  };
+}
+
+function buildEncryptionDescriptorFromSettings(settings: AppSettings): SyncEncryptionDescriptor {
+  if (
+    !settings.encryptionEnabled ||
+    !settings.encryptionKdf ||
+    !settings.encryptionKeyId ||
+    !settings.encryptionSalt
+  ) {
+    throw new Error("VAULT_ENCRYPTION_DISABLED");
+  }
+
+  return {
+    version: (settings.encryptionVersion ?? 1) as 1,
+    state: "locked",
+    keyId: settings.encryptionKeyId,
+    kdf: settings.encryptionKdf,
+    iterations: settings.encryptionIterations,
+    salt: settings.encryptionSalt,
+    keyCheck: settings.encryptionKeyCheck
+  };
+}
+
+async function hydrateVaultEncryptionFromMetadata(
+  metadata: SyncEnvelopeMetadata | null | undefined,
+  database: ZenNotesDatabase = db
+) {
+  if (metadata?.payloadMode !== "encrypted" || !metadata.encryption) {
+    return;
+  }
+
+  const settings = await database.settings.get("app");
+
+  if (!settings) {
+    return;
+  }
+
+  await database.settings.update("app", {
+    encryptionEnabled: true,
+    encryptionVersion: metadata.encryption.version ?? settings.encryptionVersion ?? 1,
+    encryptionKdf: metadata.encryption.kdf ?? settings.encryptionKdf ?? "pbkdf2-sha256",
+    encryptionIterations: metadata.encryption.iterations ?? settings.encryptionIterations ?? null,
+    encryptionKeyId: metadata.encryption.keyId ?? settings.encryptionKeyId ?? null,
+    encryptionSalt: metadata.encryption.salt ?? settings.encryptionSalt ?? null,
+    encryptionKeyCheck: metadata.encryption.keyCheck ?? settings.encryptionKeyCheck ?? null,
+    encryptionUpdatedAt: settings.encryptionUpdatedAt ?? Date.now()
+  });
+}
+
+async function resolveRemoteEnvelopeRecord(
+  envelope: RemoteEnvelopeRecord,
+  remote: RemoteSyncConfig,
+  database: ZenNotesDatabase = db,
+  options?: ResolveRemoteEnvelopeOptions
+): Promise<ResolvedRemoteEnvelope> {
+  const metadata = envelope.metadata ?? createPlainSyncDescriptor(buildRemoteVaultDescriptor(remote));
+
+  if (options?.hydrateFromMetadata ?? true) {
+    await hydrateVaultEncryptionFromMetadata(metadata, database);
+  }
+
+  if (metadata.payloadMode === "encrypted" || isEncryptedEnvelopeRecord(envelope)) {
+    if (!isEncryptedEnvelopeRecord(envelope) || !metadata.encryption) {
+      throw new Error("ENCRYPTED_SYNC_NOT_IMPLEMENTED");
+    }
+
+    const localVaultId = remote.localVaultId?.trim() ?? "";
+    const passphrase =
+      options?.passphraseOverride?.trim() ||
+      (localVaultId ? getVaultEncryptionSessionPassphrase(localVaultId) : null);
+
+    if (!passphrase) {
+      throw new Error("VAULT_ENCRYPTION_LOCKED");
+    }
+
+    const snapshot = await decryptSyncPayload<SyncSnapshot>(
+      envelope.encryptedSnapshot,
+      passphrase,
+      metadata.encryption,
+      metadata.vault ?? buildRemoteVaultDescriptor(remote)
+    );
+
+    return {
+      revision: envelope.revision ?? null,
+      snapshot,
+      metadata
+    };
+  }
+
+  return {
+    revision: envelope.revision ?? null,
+    snapshot: envelope.snapshot,
+    metadata
+  };
+}
+
+async function createOutgoingRemoteEnvelope(
+  snapshot: SyncSnapshot,
+  existingEnvelope: RemoteEnvelopeRecord | null,
+  remote: RemoteSyncConfig,
+  settings: AppSettings,
+  options?: CreateOutgoingRemoteEnvelopeOptions
+): Promise<RemoteEnvelopeRecord> {
+  const vaultDescriptor = buildRemoteVaultDescriptor(remote);
+  const nextSnapshot = {
+    ...snapshot,
+    exportedAt: Date.now()
+  };
+  const payloadMode =
+    options?.forcePayloadMode ??
+    (settings.encryptionEnabled ? ("encrypted" as const) : ("plain" as const));
+
+  if (payloadMode === "plain") {
+    const existingMetadata =
+      existingEnvelope?.metadata && existingEnvelope.metadata.payloadMode !== "encrypted"
+        ? existingEnvelope.metadata
+        : null;
+
+    return {
+      revision: createSyncRevision(),
+      snapshot: nextSnapshot,
+      metadata: existingMetadata
+        ? {
+            ...existingMetadata,
+            payloadMode: "plain",
+            vault: vaultDescriptor,
+            encryption: null
+          }
+        : createPlainSyncDescriptor(vaultDescriptor)
+    };
+  }
+
+  const localVaultId = remote.localVaultId?.trim() ?? "";
+  const passphrase =
+    options?.passphraseOverride?.trim() ||
+    (localVaultId ? getVaultEncryptionSessionPassphrase(localVaultId) : null);
+
+  if (!passphrase) {
+    throw new Error("VAULT_ENCRYPTION_LOCKED");
+  }
+
+  const { descriptor, payload } = await encryptSyncPayload(nextSnapshot, passphrase, {
+    vault: vaultDescriptor,
+    descriptor: options?.descriptorOverride ?? buildEncryptionDescriptorFromSettings(settings)
+  });
+
+  return {
+    revision: createSyncRevision(),
+    metadata: {
+      schemaVersion: 1,
+      payloadMode: "encrypted",
+      vault: vaultDescriptor,
+      encryption: {
+        ...descriptor,
+        state: "locked"
+      }
+    },
+    encryptedSnapshot: payload
+  };
 }
 
 function normalizeBaseUrl(value: string) {
@@ -138,6 +371,30 @@ function normalizeRequestError(error: unknown) {
   }
 
   return "SYNC_FAILED";
+}
+
+function createNextSyncEnvelope(snapshot: SyncSnapshot, existing: SyncEnvelope | null = null): SyncEnvelope {
+  const metadata =
+    existing?.metadata ??
+    createPlainSyncDescriptor(
+      snapshot.projects.length > 0
+        ? {
+            localVaultId: null,
+            vaultGuid: null,
+            name: null,
+            schemaVersion: 1
+          }
+        : null
+    );
+
+  return {
+    revision: `rev-${Date.now()}-${crypto.randomUUID()}`,
+    snapshot: {
+      ...snapshot,
+      exportedAt: Date.now()
+    },
+    metadata
+  };
 }
 
 function sortObjectKeys(value: unknown): unknown {
@@ -898,8 +1155,15 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
 }
 
 export async function probeSyncConnectionAvailability(
-  connection: Pick<SyncConnection, "provider" | "serverUrl" | "managementToken" | "sessionToken">
+  connection: Pick<SyncConnection, "provider" | "serverUrl" | "managementToken" | "sessionToken" | "tokenExpiresAt">
 ): Promise<"available" | "unavailable" | "authError"> {
+  if (connection.provider === "googleDrive") {
+    return probeGoogleDriveConnection({
+      sessionToken: connection.sessionToken,
+      tokenExpiresAt: "tokenExpiresAt" in connection ? connection.tokenExpiresAt ?? null : null
+    });
+  }
+
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), 3500);
 
@@ -936,6 +1200,29 @@ export async function probeSyncConnectionAvailability(
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
+}
+
+export function googleDriveClientConfigured() {
+  return isGoogleDriveConfigured();
+}
+
+export function getConfiguredGoogleDriveClientId() {
+  return getGoogleDriveClientId();
+}
+
+export function googleDriveOAuthReady() {
+  return googleDriveOAuthReadyViaApi();
+}
+
+export async function prepareGoogleDriveOAuth() {
+  return prepareGoogleDriveOAuthViaApi();
+}
+
+export async function connectGoogleDriveAccount(options?: {
+  clientId?: string;
+  loginHint?: string;
+}) {
+  return connectGoogleDriveAccountViaOAuth(options);
 }
 
 export async function registerHostedAccount(
@@ -1066,6 +1353,12 @@ export async function loadPersonalServerVaults(serverUrl: string, managementToke
   });
 }
 
+export async function loadGoogleDriveVaults(sessionToken: string) {
+  return {
+    vaults: await listGoogleDriveRemoteVaults(sessionToken)
+  };
+}
+
 export async function createPersonalServerVault(
   serverUrl: string,
   managementToken: string,
@@ -1083,6 +1376,18 @@ export async function createPersonalServerVault(
   });
 }
 
+export async function createGoogleDriveVault(
+  sessionToken: string,
+  payload: {
+    name: string;
+    id?: string;
+  }
+) {
+  return {
+    vault: await createGoogleDriveRemoteVault(sessionToken, payload)
+  };
+}
+
 export async function deletePersonalServerVault(
   serverUrl: string,
   managementToken: string,
@@ -1095,6 +1400,14 @@ export async function deletePersonalServerVault(
     method: "DELETE",
     headers: createBearerHeaders(managementToken, false)
   });
+}
+
+export async function deleteGoogleDriveVault(sessionToken: string, vaultId: string) {
+  await deleteGoogleDriveRemoteVault(sessionToken, vaultId);
+  return {
+    ok: true as const,
+    vaultId
+  };
 }
 
 export async function issuePersonalServerVaultToken(
@@ -1121,21 +1434,51 @@ export async function issuePersonalServerVaultToken(
   });
 }
 
+export async function issueGoogleDriveVaultToken(vaultId: string) {
+  return {
+    token: buildGoogleDriveBindingToken(),
+    tokenMeta: {
+      id: `google-drive-${vaultId}`,
+      vaultId,
+      label: "Google Drive session",
+      createdAt: Date.now(),
+      lastUsedAt: Date.now()
+    }
+  };
+}
+
 async function pullSelfHostedEnvelope(serverUrl: string, vaultId: string, token: string) {
-  return requestJson<SyncEnvelope>(buildVaultStateUrl(serverUrl, vaultId), {
+  return requestJson<RemoteEnvelopeRecord>(buildVaultStateUrl(serverUrl, vaultId), {
     method: "GET",
     headers: createBearerHeaders(token, false)
   });
 }
 
 export async function importRemoteVaultIntoLocalVault(input: {
+  provider: SyncConnectionProvider;
   localVaultId: string;
   serverUrl: string;
   remoteVaultId: string;
   syncToken: string;
   language?: AppLanguage;
 }) {
-  const envelope = await pullSelfHostedEnvelope(input.serverUrl, input.remoteVaultId, input.syncToken);
+  const rawEnvelope =
+    input.provider === "googleDrive"
+      ? await loadGoogleDriveRemoteEnvelope(input.syncToken, input.remoteVaultId)
+      : await pullSelfHostedEnvelope(input.serverUrl, input.remoteVaultId, input.syncToken);
+  const envelope = await withLocalVaultDatabase(input.localVaultId, async (database) =>
+    resolveRemoteEnvelopeRecord(
+      rawEnvelope,
+      {
+        provider: input.provider,
+        serverUrl: input.serverUrl,
+        vaultId: input.remoteVaultId,
+        token: input.syncToken,
+        localVaultId: input.localVaultId
+      },
+      database
+    )
+  );
 
   await writeImportedVaultSnapshot(input.localVaultId, {
     snapshot: envelope.snapshot,
@@ -1224,29 +1567,38 @@ async function pushSelfHostedEnvelope(
   vaultId: string,
   token: string,
   baseRevision: string | null,
-  snapshot: SyncSnapshot
+  envelope: RemoteEnvelopeRecord
 ) {
   let response: Response;
 
   try {
+    const body = isEncryptedEnvelopeRecord(envelope)
+      ? JSON.stringify({
+          baseRevision,
+          encryptedSnapshot: envelope.encryptedSnapshot,
+          metadata: envelope.metadata ?? null
+        })
+      : JSON.stringify({
+          baseRevision,
+          snapshot: envelope.snapshot,
+          metadata: envelope.metadata ?? null
+        });
+
     response = await fetch(buildVaultStateUrl(serverUrl, vaultId), {
       method: "PUT",
       headers: createBearerHeaders(token, true),
-      body: JSON.stringify({
-        baseRevision,
-        snapshot
-      })
+      body
     });
   } catch (error) {
     throw new Error(normalizeRequestError(error));
   }
 
-  const payload = (await response.json().catch(() => null)) as SyncEnvelope | { error?: string } | null;
+  const payload = (await response.json().catch(() => null)) as RemoteEnvelopeRecord | { error?: string } | null;
 
   if (response.status === 409) {
     return {
       conflict: true,
-      envelope: payload as SyncEnvelope
+      envelope: payload as RemoteEnvelopeRecord
     };
   }
 
@@ -1260,8 +1612,121 @@ async function pushSelfHostedEnvelope(
 
   return {
     conflict: false,
-    envelope: payload as SyncEnvelope
+    envelope: payload as RemoteEnvelopeRecord
   };
+}
+
+async function loadRemoteEnvelopeRecord(
+  remote: RemoteSyncConfig
+): Promise<RemoteEnvelopeRecord> {
+  if (remote.provider === "googleDrive") {
+    return loadGoogleDriveRemoteEnvelope(remote.token, remote.vaultId);
+  }
+
+  return pullSelfHostedEnvelope(remote.serverUrl, remote.vaultId, remote.token);
+}
+
+async function saveRemoteEnvelopeRecord(
+  remote: RemoteSyncConfig,
+  baseRevision: string | null,
+  envelope: RemoteEnvelopeRecord
+) {
+  if (remote.provider === "googleDrive") {
+    await saveGoogleDriveRemoteEnvelope(remote.token, {
+      vaultId: remote.vaultId,
+      vaultName: remote.localVaultName ?? buildRemoteVaultDescriptor(remote).name ?? remote.vaultId,
+      envelope
+    });
+
+    return {
+      conflict: false as const,
+      envelope
+    };
+  }
+
+  return pushSelfHostedEnvelope(
+    remote.serverUrl,
+    remote.vaultId,
+    remote.token,
+    baseRevision,
+    envelope
+  );
+}
+
+export async function migrateRemoteVaultEncryption(
+  remote: RemoteSyncConfig,
+  input:
+    | {
+        mode: "changePassphrase";
+        currentPassphrase: string;
+        nextPassphrase: string;
+      }
+    | {
+        mode: "disable";
+        currentPassphrase: string;
+      },
+  database: ZenNotesDatabase = db
+) {
+  const settings = await database.settings.get("app");
+
+  if (!settings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const [rawRemoteEnvelope, localSnapshot, shadows] = await Promise.all([
+      loadRemoteEnvelopeRecord(remote),
+      exportLocalSyncSnapshot(database),
+      database.syncShadows.toArray()
+    ]);
+
+    const remoteEnvelope = await resolveRemoteEnvelopeRecord(
+      rawRemoteEnvelope,
+      remote,
+      database,
+      {
+        passphraseOverride: input.currentPassphrase,
+        hydrateFromMetadata: false
+      }
+    );
+    const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
+    const nextDescriptor =
+      input.mode === "changePassphrase"
+        ? await createEncryptionDescriptor(input.nextPassphrase, buildRemoteVaultDescriptor(remote))
+        : null;
+    const nextEnvelope = await createOutgoingRemoteEnvelope(
+      merged.snapshot,
+      rawRemoteEnvelope,
+      remote,
+      settings,
+      {
+        forcePayloadMode: input.mode === "disable" ? "plain" : "encrypted",
+        passphraseOverride: input.mode === "changePassphrase" ? input.nextPassphrase : null,
+        descriptorOverride: nextDescriptor
+      }
+    );
+    const pushed = await saveRemoteEnvelopeRecord(remote, remoteEnvelope.revision, nextEnvelope);
+
+    if (pushed.conflict) {
+      continue;
+    }
+
+    await replaceLocalDataFromSnapshot(merged.snapshot, settings, database);
+    await persistSyncShadows(merged.snapshot, pushed.envelope.revision, database);
+    await database.syncDirtyEntries.clear();
+    await database.settings.update("app", {
+      syncStatus: "idle",
+      lastSyncAt: Date.now(),
+      syncCursor: pushed.envelope.revision
+    });
+
+    return {
+      revision: pushed.envelope.revision ?? "",
+      descriptor: nextDescriptor
+    };
+  }
+
+  throw new Error("SYNC_REVISION_CONFLICT");
 }
 
 export async function exportLocalSyncSnapshot(database: ZenNotesDatabase = db): Promise<SyncSnapshot> {
@@ -2088,34 +2553,53 @@ async function runSnapshotSyncCycle(
   serverUrl: string,
   vaultId: string,
   token: string,
-  providedEnvelope?: SyncEnvelope | null,
+  options?: {
+    localVaultId?: string | null;
+    localVaultName?: string | null;
+  },
+  providedEnvelope?: RemoteEnvelopeRecord | null,
   database: ZenNotesDatabase = db
 ) {
-  const [remoteEnvelope, localSnapshot, shadows] = await Promise.all([
+  const remoteConfig = {
+    provider: "selfHosted" as const,
+    serverUrl,
+    vaultId,
+    token,
+    localVaultId: options?.localVaultId ?? null,
+    localVaultName: options?.localVaultName ?? null
+  };
+  const [rawRemoteEnvelope, localSnapshot, shadows] = await Promise.all([
     providedEnvelope ? Promise.resolve(providedEnvelope) : pullSelfHostedEnvelope(serverUrl, vaultId, token),
     exportLocalSyncSnapshot(database),
     database.syncShadows.toArray()
   ]);
+  const remoteEnvelope = await resolveRemoteEnvelopeRecord(rawRemoteEnvelope, remoteConfig, database);
   const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
+  const settings = await database.settings.get("app");
+
+  if (!settings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  const nextEnvelope = await createOutgoingRemoteEnvelope(
+    merged.snapshot,
+    rawRemoteEnvelope,
+    remoteConfig,
+    settings
+  );
   const pushed = await pushSelfHostedEnvelope(
     serverUrl,
     vaultId,
     token,
     remoteEnvelope.revision,
-    merged.snapshot
+    nextEnvelope
   );
 
   if (pushed.conflict) {
     return "retry" as const;
   }
 
-  const nextSettings = await database.settings.get("app");
-
-  if (!nextSettings) {
-    throw new Error("SETTINGS_MISSING");
-  }
-
-  await replaceLocalDataFromSnapshot(merged.snapshot, nextSettings, database);
+  await replaceLocalDataFromSnapshot(merged.snapshot, settings, database);
   await persistSyncShadows(merged.snapshot, pushed.envelope.revision, database);
   await database.syncDirtyEntries.clear();
   await database.settings.update("app", {
@@ -2126,6 +2610,72 @@ async function runSnapshotSyncCycle(
 
   return {
     revision: pushed.envelope.revision ?? "",
+    stats: merged.stats
+  } satisfies SyncExecutionResult;
+}
+
+async function runGoogleDriveSyncCycle(
+  vaultId: string,
+  token: string,
+  options?: {
+    localVaultId?: string | null;
+    localVaultName?: string | null;
+  },
+  database: ZenNotesDatabase = db
+) {
+  const remoteConfig = {
+    provider: "googleDrive" as const,
+    serverUrl: GOOGLE_DRIVE_API_BASE_URL,
+    vaultId,
+    token,
+    localVaultId: options?.localVaultId ?? null,
+    localVaultName: options?.localVaultName ?? null
+  };
+  const [rawRemoteEnvelope, localSnapshot, shadows] = await Promise.all([
+    loadGoogleDriveRemoteEnvelope(token, vaultId),
+    exportLocalSyncSnapshot(database),
+    database.syncShadows.toArray()
+  ]);
+  const remoteEnvelope = await resolveRemoteEnvelopeRecord(rawRemoteEnvelope, remoteConfig, database);
+  const settings = await database.settings.get("app");
+
+  if (!settings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  const localVaultProfile =
+    options?.localVaultId ? getLocalVaultProfile(options.localVaultId) : null;
+  const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
+  const nextEnvelope = await createOutgoingRemoteEnvelope(
+    merged.snapshot,
+    rawRemoteEnvelope,
+    {
+      ...remoteConfig,
+      localVaultName: localVaultProfile?.name ?? options?.localVaultName ?? null
+    },
+    settings
+  );
+
+  await saveGoogleDriveRemoteEnvelope(token, {
+    vaultId,
+    vaultName:
+      localVaultProfile?.name ||
+      remoteEnvelope.metadata?.vault?.name ||
+      vaultId,
+    envelope: nextEnvelope
+  });
+
+  await replaceLocalDataFromSnapshot(merged.snapshot, settings, database);
+  await persistSyncShadows(merged.snapshot, nextEnvelope.revision, database);
+  await database.syncDirtyEntries.clear();
+  await database.settings.update("app", {
+    syncStatus: "idle",
+    lastSyncAt: Date.now(),
+    syncCursor: nextEnvelope.revision
+  });
+
+  return {
+    revision: nextEnvelope.revision ?? "",
     stats: merged.stats
   } satisfies SyncExecutionResult;
 }
@@ -2148,6 +2698,10 @@ async function runDeltaSyncCycle(
     throw new Error("SETTINGS_MISSING");
   }
 
+  if (settings.encryptionEnabled) {
+    return null;
+  }
+
   if (!settings.syncCursor || shadows.length === 0) {
     return null;
   }
@@ -2164,12 +2718,24 @@ async function runDeltaSyncCycle(
     throw error;
   }
 
+  if (remoteFeed.metadata?.payloadMode === "encrypted") {
+    return null;
+  }
+
   if (remoteFeed.mode === "snapshot") {
     if (remoteFeed.snapshot) {
-      return runSnapshotSyncCycle(serverUrl, vaultId, token, {
-        revision: remoteFeed.revision,
-        snapshot: remoteFeed.snapshot
-      }, database);
+      return runSnapshotSyncCycle(
+        serverUrl,
+        vaultId,
+        token,
+        undefined,
+        {
+          revision: remoteFeed.revision,
+          snapshot: remoteFeed.snapshot,
+          metadata: remoteFeed.metadata ?? null
+        },
+        database
+      );
     }
 
     return null;
@@ -2257,23 +2823,48 @@ async function runConfiguredSyncInternal(
   const vaultId = normalizeVaultId(remote.vaultId);
   const token = remote.token.trim();
 
-  if (!serverUrl) {
+  if (!serverUrl && remote.provider !== "googleDrive") {
     throw new Error(remote.provider === "hosted" ? "HOSTED_URL_REQUIRED" : "SELF_HOSTED_URL_REQUIRED");
   }
 
   if (!token) {
     throw new Error(
-      remote.provider === "hosted" ? "HOSTED_SYNC_TOKEN_REQUIRED" : "SELF_HOSTED_TOKEN_REQUIRED"
+      remote.provider === "hosted"
+        ? "HOSTED_SYNC_TOKEN_REQUIRED"
+        : remote.provider === "googleDrive"
+          ? "GOOGLE_DRIVE_AUTH_REQUIRED"
+          : "SELF_HOSTED_TOKEN_REQUIRED"
     );
   }
 
   if (!vaultId) {
-    throw new Error(remote.provider === "hosted" ? "HOSTED_VAULT_REQUIRED" : "SELF_HOSTED_VAULT_REQUIRED");
+    throw new Error(
+      remote.provider === "hosted"
+        ? "HOSTED_VAULT_REQUIRED"
+        : remote.provider === "googleDrive"
+          ? "VAULT_NOT_FOUND"
+          : "SELF_HOSTED_VAULT_REQUIRED"
+    );
   }
 
   await options?.onStatusChange?.("syncing");
 
   try {
+    if (remote.provider === "googleDrive") {
+      const result = await runGoogleDriveSyncCycle(
+        vaultId,
+        token,
+        {
+          localVaultId: remote.localVaultId ?? null,
+          localVaultName: remote.localVaultName ?? null
+        },
+        database
+      );
+
+      await options?.onStatusChange?.("idle");
+      return result;
+    }
+
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const deltaResult = await runDeltaSyncCycle(serverUrl, vaultId, token, {
         localPendingCount: options?.localPendingCount
@@ -2288,7 +2879,17 @@ async function runConfiguredSyncInternal(
         return deltaResult;
       }
 
-      const snapshotResult = await runSnapshotSyncCycle(serverUrl, vaultId, token, undefined, database);
+      const snapshotResult = await runSnapshotSyncCycle(
+        serverUrl,
+        vaultId,
+        token,
+        {
+          localVaultId: remote.localVaultId ?? null,
+          localVaultName: remote.localVaultName ?? null
+        },
+        undefined,
+        database
+      );
 
       if (snapshotResult === "retry") {
         continue;
@@ -2318,9 +2919,23 @@ export async function runConfiguredSync(
 ): Promise<SyncExecutionResult> {
   if (options?.localVaultId) {
     return withLocalVaultDatabase(options.localVaultId, async (database) =>
-      runConfiguredSyncInternal(remote, options, database)
+      runConfiguredSyncInternal(
+        {
+          ...remote,
+          localVaultId: options.localVaultId
+        },
+        options,
+        database
+      )
     );
   }
 
-  return runConfiguredSyncInternal(remote, options, db);
+  return runConfiguredSyncInternal(
+    {
+      ...remote,
+      localVaultId: remote.localVaultId ?? null
+    },
+    options,
+    db
+  );
 }

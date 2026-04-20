@@ -271,6 +271,13 @@ function buildDefaultAppSettings(language: AppLanguage, lastOpenedNoteId: string
     hostedSyncToken: "",
     conflictStrategy: "duplicate",
     encryptionEnabled: false,
+    encryptionVersion: null,
+    encryptionKdf: null,
+    encryptionIterations: null,
+    encryptionKeyId: null,
+    encryptionSalt: null,
+    encryptionKeyCheck: null,
+    encryptionUpdatedAt: null,
     lastSyncAt: null,
     syncCursor: null,
     localDeviceId: createDeviceId(),
@@ -670,6 +677,64 @@ export class ZenNotesDatabase extends Dexie {
         if (dirtyEntries.length > 0) {
           await transaction.table("syncDirtyEntries").bulkPut(dirtyEntries);
         }
+      });
+
+    this.version(12)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings:
+          "id,syncProvider,syncStatus,syncCursor,selfHostedVaultId,hostedVaultId,hostedUserId,encryptionKeyId",
+        syncDirtyEntries: "key,entityType,entityId,updatedAt,deleted",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.encryptionVersion ??= null;
+            settings.encryptionKdf ??= null;
+            settings.encryptionIterations ??= null;
+            settings.encryptionKeyId ??= null;
+            settings.encryptionSalt ??= null;
+            settings.encryptionKeyCheck ??= null;
+            settings.encryptionUpdatedAt ??= null;
+          });
+      });
+
+    this.version(13)
+      .stores({
+        projects: "id,updatedAt",
+        folders: "id,projectId,parentId,updatedAt",
+        tags: "id,name,updatedAt",
+        notes:
+          "id,projectId,contentType,folderId,*tagIds,updatedAt,createdAt,pinned,favorite,archived,trashedAt,syncState,conflictOriginId,color",
+        assets: "id,noteId,updatedAt",
+        settings:
+          "id,syncProvider,syncStatus,syncCursor,selfHostedVaultId,hostedVaultId,hostedUserId,encryptionKeyId",
+        syncDirtyEntries: "key,entityType,entityId,updatedAt,deleted",
+        syncShadows: "key,entityType,entityId",
+        syncTombstones: "key,entityType,entityId,deletedAt"
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table("settings")
+          .toCollection()
+          .modify((settings) => {
+            settings.encryptionVersion ??= null;
+            settings.encryptionKdf ??= null;
+            settings.encryptionIterations ??= null;
+            settings.encryptionKeyId ??= null;
+            settings.encryptionSalt ??= null;
+            settings.encryptionKeyCheck ??= null;
+            settings.encryptionUpdatedAt ??= null;
+          });
       });
   }
 }

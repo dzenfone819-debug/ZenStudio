@@ -25,8 +25,19 @@ export function createEmptySnapshot() {
 export function createEmptyEnvelope() {
   return {
     revision: null,
-    snapshot: createEmptySnapshot()
+    snapshot: createEmptySnapshot(),
+    metadata: null
   };
+}
+
+export function isEncryptedEnvelope(envelope) {
+  return Boolean(
+    envelope &&
+      typeof envelope === "object" &&
+      "encryptedSnapshot" in envelope &&
+      envelope.encryptedSnapshot &&
+      typeof envelope.encryptedSnapshot === "object"
+  );
 }
 
 export function createEmptyChangeSet(deviceId = "server") {
@@ -42,13 +53,60 @@ export function createEmptyChangeSet(deviceId = "server") {
   };
 }
 
-export function buildNextEnvelope(snapshot) {
+function normalizeEnvelopeMetadata(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const metadata = value;
+
+  return {
+    schemaVersion: typeof metadata.schemaVersion === "number" ? metadata.schemaVersion : 1,
+    payloadMode: metadata.payloadMode === "encrypted" ? "encrypted" : "plain",
+    vault: metadata.vault && typeof metadata.vault === "object" ? metadata.vault : null,
+    encryption:
+      metadata.encryption && typeof metadata.encryption === "object" ? metadata.encryption : null
+  };
+}
+
+export function normalizeStoredEnvelope(value) {
+  if (!value || typeof value !== "object") {
+    return createEmptyEnvelope();
+  }
+
+  const revision = typeof value.revision === "string" ? value.revision : null;
+  const metadata = normalizeEnvelopeMetadata(value.metadata);
+
+  if (
+    "encryptedSnapshot" in value &&
+    value.encryptedSnapshot &&
+    typeof value.encryptedSnapshot === "object"
+  ) {
+    return {
+      revision,
+      encryptedSnapshot: value.encryptedSnapshot,
+      metadata
+    };
+  }
+
+  return {
+    revision,
+    snapshot:
+      value.snapshot && typeof value.snapshot === "object"
+        ? value.snapshot
+        : createEmptyEnvelope().snapshot,
+    metadata
+  };
+}
+
+export function buildNextEnvelope(snapshot, metadata = null) {
   return {
     revision: `rev-${Date.now()}-${randomUUID()}`,
     snapshot: {
       ...snapshot,
       exportedAt: Date.now()
-    }
+    },
+    metadata: normalizeEnvelopeMetadata(metadata)
   };
 }
 
@@ -432,9 +490,28 @@ export async function handleOptimisticSyncRoute({
     payload && typeof payload === "object" && "snapshot" in payload && payload.snapshot
       ? payload.snapshot
       : null;
+  const encryptedSnapshot =
+    payload && typeof payload === "object" && "encryptedSnapshot" in payload && payload.encryptedSnapshot
+      ? payload.encryptedSnapshot
+      : null;
+  const metadata =
+    payload && typeof payload === "object" && "metadata" in payload ? normalizeEnvelopeMetadata(payload.metadata) : null;
 
-  if (!snapshot || typeof snapshot !== "object") {
+  if (
+    (!snapshot || typeof snapshot !== "object") &&
+    (!encryptedSnapshot || typeof encryptedSnapshot !== "object")
+  ) {
     sendJson(response, 400, { error: "SNAPSHOT_REQUIRED" });
+    return true;
+  }
+
+  if (encryptedSnapshot && (!metadata || metadata.payloadMode !== "encrypted")) {
+    sendJson(response, 400, { error: "ENCRYPTION_METADATA_REQUIRED" });
+    return true;
+  }
+
+  if (snapshot && metadata?.payloadMode === "encrypted") {
+    sendJson(response, 400, { error: "ENCRYPTED_SNAPSHOT_REQUIRED" });
     return true;
   }
 
@@ -443,7 +520,14 @@ export async function handleOptimisticSyncRoute({
     return true;
   }
 
-  const nextEnvelope = buildNextEnvelope(snapshot);
+  const nextEnvelope =
+    encryptedSnapshot && typeof encryptedSnapshot === "object"
+      ? {
+          revision: `rev-${Date.now()}-${randomUUID()}`,
+          encryptedSnapshot,
+          metadata
+        }
+      : buildNextEnvelope(snapshot, metadata);
   await writeEnvelope(nextEnvelope);
   await onAfterWrite?.(nextEnvelope, currentEnvelope);
 

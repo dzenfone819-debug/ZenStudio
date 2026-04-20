@@ -91,6 +91,28 @@
   color: rgba(255, 203, 216, 0.96);
 }
 
+.sync-settings-icon-button.is-encryption-ready {
+  border-color: rgba(124, 244, 189, 0.2);
+  background: rgba(124, 244, 189, 0.08);
+  color: rgba(214, 255, 235, 0.98);
+}
+
+.sync-settings-icon-button.is-encryption-ready:hover {
+  border-color: rgba(124, 244, 189, 0.28);
+  background: rgba(124, 244, 189, 0.12);
+  color: rgba(228, 255, 238, 0.98);
+}
+
+.sync-settings-icon-button.is-encryption-ready svg path,
+.sync-settings-icon-button.is-encryption-ready svg rect,
+.sync-settings-icon-button.is-encryption-ready svg circle {
+  stroke: rgba(214, 255, 235, 0.96);
+}
+
+.sync-settings-icon-button.is-encryption-ready .sync-settings-icon-accent {
+  stroke: rgba(186, 255, 214, 0.96);
+}
+
 .sync-settings-icon-button:disabled {
   opacity: 0.44;
   cursor: default;
@@ -464,6 +486,52 @@
   color: rgba(245, 247, 255, 0.96);
 }
 
+.sync-settings-encryption-badge {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sync-settings-encryption-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sync-settings-encryption-badge svg path {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sync-settings-encryption-badge.is-ready {
+  border-color: rgba(124, 244, 189, 0.24);
+  background: rgba(124, 244, 189, 0.1);
+}
+
+.sync-settings-encryption-badge.is-ready svg path {
+  stroke: rgba(180, 255, 216, 0.96);
+}
+
+.sync-settings-encryption-badge.is-locked {
+  border-color: rgba(255, 224, 138, 0.18);
+  background: rgba(255, 224, 138, 0.08);
+}
+
+.sync-settings-encryption-badge.is-locked svg path {
+  stroke: rgba(255, 241, 197, 0.96);
+}
+
+.sync-settings-encryption-badge .sync-settings-icon-accent {
+  fill: none;
+}
+
 .sync-settings-card-meta,
 .sync-settings-card-submeta {
   min-width: 0;
@@ -570,6 +638,18 @@
   color: rgba(214, 255, 235, 0.96);
 }
 
+.sync-settings-chip.is-encrypted-ready {
+  border-color: rgba(124, 244, 189, 0.24);
+  background: rgba(124, 244, 189, 0.1);
+  color: rgba(214, 255, 235, 0.98);
+}
+
+.sync-settings-chip.is-encrypted-locked {
+  border-color: rgba(255, 224, 138, 0.2);
+  background: rgba(255, 224, 138, 0.08);
+  color: rgba(255, 242, 204, 0.96);
+}
+
 .sync-settings-chip.is-unbound {
   border-color: rgba(189, 165, 255, 0.16);
   background: rgba(189, 165, 255, 0.08);
@@ -586,6 +666,12 @@
   border-color: rgba(255, 210, 125, 0.18);
   background: rgba(255, 210, 125, 0.08);
   color: rgba(255, 242, 201, 0.96);
+}
+
+.sync-settings-chip.is-google-drive {
+  border-color: rgba(156, 249, 141, 0.18);
+  background: rgba(156, 249, 141, 0.08);
+  color: rgba(230, 255, 225, 0.96);
 }
 
 .sync-settings-chip.is-count {
@@ -964,6 +1050,73 @@
   flex: 1;
   display: grid;
   gap: 3px;
+}
+
+.sync-settings-note-shell {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.008)),
+    rgba(255, 255, 255, 0.012);
+}
+
+.sync-settings-note-chip {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(156, 249, 141, 0.18);
+  background: rgba(156, 249, 141, 0.08);
+  color: rgba(230, 255, 225, 0.96);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sync-settings-note-copy {
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: rgba(198, 205, 235, 0.76);
+}
+
+.sync-settings-encryption-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.sync-settings-encryption-meta {
+  display: grid;
+  gap: 5px;
+}
+
+.sync-settings-encryption-meta span {
+  font-size: 0.68rem;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 224, 138, 0.76);
+}
+
+.sync-settings-encryption-meta strong {
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(242, 245, 255, 0.92);
+  font-weight: 500;
+}
+
+.sync-settings-code-pill {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 7px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(240, 244, 255, 0.92);
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .sync-settings-mode-switch {

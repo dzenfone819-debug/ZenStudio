@@ -239,6 +239,8 @@ const en = {
     statusReady: "Ready to sync",
     statusSyncing: "Syncing…",
     statusPending: "{{count}} pending",
+    statusUnlockRequired: "Unlock required",
+    statusUnlockRequiredPending: "Unlock vault · {{count}} pending",
     statusOfflinePending: "Offline · {{count}} pending",
     statusUnavailable: "Server unavailable",
     statusUnavailablePending: "Server unavailable · {{count}} pending",
@@ -251,6 +253,18 @@ const en = {
     hostedUrlRequired: "Enter the hosted server URL first.",
     hostedVaultRequired: "Choose a hosted vault first.",
     hostedTokenRequired: "Bind this local vault to a hosted vault first.",
+    googleDriveClientIdRequired:
+      "Set VITE_GOOGLE_DRIVE_CLIENT_ID before connecting Google Drive in this build.",
+    googleDriveAuthRequired:
+      "Google Drive needs a fresh authorization session. Reconnect the Google Drive method.",
+    googleDriveConnected: "Google Drive connected.",
+    googleDrivePopupClosed: "Google sign-in was closed before access was granted.",
+    googleDrivePopupFailed: "The Google sign-in window could not be opened.",
+    googleDrivePreparing: "Preparing Google OAuth. Give it a moment and try again.",
+    googleDriveSdkFailed:
+      "Google OAuth could not be prepared in the browser. Check your network and content blockers, then try again.",
+    googleDriveEncryptedPending:
+      "This Google Drive vault is encrypted, but encrypted sync import is not enabled in the app yet.",
     unauthorized: "The server rejected the token.",
     hostedUnauthorized: "The hosted vault token was rejected. Bind the vault again.",
     hostedSessionExpired: "Your hosted session expired. Sign in again.",
@@ -269,6 +283,26 @@ const en = {
     selfHostedVaultBound: "Local vault bound to the self-hosted remote vault.",
     selfHostedManageFailed:
       "Self-hosted management action failed. Check the server URL, management token, and vault state.",
+    vaultEncryptionEnabled: "Vault encryption enabled for this device and sync profile.",
+    vaultEncryptionUnlocked: "Vault encryption unlocked on this device.",
+    vaultEncryptionLocked: "Vault encryption locked on this device.",
+    vaultEncryptionPassphraseRequired: "Enter the vault passphrase first.",
+    vaultEncryptionPassphraseTooShort: "Use a passphrase at least 8 characters long.",
+    vaultEncryptionPassphraseMismatch: "The passphrase confirmation does not match.",
+    vaultEncryptionInvalidPassphrase: "The passphrase does not match this vault encryption key.",
+    vaultEncryptionDisabled: "Vault encryption is not enabled for this vault yet.",
+    vaultEncryptionSyncLocked:
+      "Unlock this vault's encryption on this device before importing or syncing encrypted data.",
+    vaultEncryptionRemoteMigrationRequired:
+      "Reconnect this vault to its sync method and stay online to change the passphrase or disable encryption.",
+    vaultEncryptionPassphraseChanged:
+      "Vault passphrase updated and the remote encrypted snapshot was rotated successfully.",
+    vaultEncryptionPassphraseChangedLocalOnly:
+      "Vault passphrase updated for this local-only vault.",
+    vaultEncryptionDisabledAndMigrated:
+      "Vault encryption disabled and the remote snapshot was migrated back to plain sync.",
+    vaultEncryptionDisabledLocalOnly:
+      "Vault encryption disabled for this local-only vault.",
     lastRemoteVaultRequired: "At least one remote vault must remain on this self-hosted server.",
     bindingUpdated: "Vault binding updated.",
     bindingCleared: "Vault binding removed.",
@@ -308,6 +342,53 @@ const en = {
       "Add your managed cloud once, connect as many self-hosted servers as you need, then wire vaults into the right destination.",
     addConnection: "Add connection",
     connectionAdded: "Sync method added.",
+    vaultEncryptionKicker: "Vault encryption",
+    enableVaultEncryption: "Enable encryption",
+    unlockVaultEncryption: "Unlock vault",
+    manageVaultEncryption: "Manage encryption",
+    vaultEncryptionChangePassphrase: "Change passphrase",
+    vaultEncryptionDisable: "Disable encryption",
+    vaultEncryptionTitle: "Vault encryption · {{vault}}",
+    vaultEncryptionEnableDescription:
+      "Protect this vault's remote sync payload with an optional end-to-end passphrase. The passphrase stays on your device only while this session is unlocked.",
+    vaultEncryptionUnlockDescription:
+      "This vault is encrypted. Enter the passphrase to unlock encrypted sync access on this device.",
+    vaultEncryptionUnlockToContinueImport:
+      "This remote vault was imported, but its encrypted content still needs the passphrase. Unlock it once and we will continue the first sync automatically.",
+    vaultEncryptionUnlockToContinueSync:
+      "This vault is locked on this device. Unlock it and sync will continue immediately without another manual step.",
+    vaultEncryptionReadyDescription:
+      "Encryption is enabled and currently unlocked on this device. You can lock the session again at any time.",
+    vaultEncryptionChangeDescription:
+      "Rotate the passphrase for this vault. If the vault is linked to a sync method, we will re-encrypt the remote snapshot in one safe migration step.",
+    vaultEncryptionDisableDescription:
+      "Turn off encryption for this vault. If the vault is linked remotely, we will migrate the stored snapshot back to plain sync before disabling the local key metadata.",
+    vaultEncryptionEnableHint:
+      "Once enabled, the encrypted sync layer will use this vault-specific key material. Keep the passphrase safe because we do not store a recoverable copy.",
+    vaultEncryptionLockedHint:
+      "The vault stays encrypted remotely. Unlocking only restores local access to the encryption session for this device.",
+    vaultEncryptionReadyHint:
+      "This device currently holds the in-memory unlock session. Lock it if you want the vault to require the passphrase again here.",
+    vaultEncryptionChangeHint:
+      "The new passphrase replaces the current one for this vault only. Other vaults keep their own encryption settings.",
+    vaultEncryptionBoundMigrationHint:
+      "This vault is connected to sync, so passphrase rotation also updates the remote encrypted snapshot right away.",
+    vaultEncryptionDisableRemoteHint:
+      "Because this vault is connected to sync, disabling encryption also migrates the remote snapshot back to plain mode.",
+    vaultEncryptionDisableLocalHint:
+      "This vault lives locally only, so disabling encryption removes the local key metadata without any remote migration.",
+    vaultEncryptionPassphrase: "Vault passphrase",
+    vaultEncryptionConfirmPassphrase: "Confirm passphrase",
+    vaultEncryptionCurrentPassphrase: "Current vault passphrase",
+    vaultEncryptionNewPassphrase: "New vault passphrase",
+    vaultEncryptionConfirmNewPassphrase: "Confirm new passphrase",
+    vaultEncryptionKeyId: "Key ID",
+    vaultEncryptionUpdatedAt: "Enabled",
+    vaultEncryptionReady: "Unlocked",
+    vaultEncryptionLocked: "Locked",
+    vaultEncryptionLockDevice: "Lock on this device",
+    vaultEncryptionDisableConfirm:
+      "Remote sync for this vault will stop using encryption after the migration completes. Local unlocked access on this device will also be cleared.",
     createVaultTitle: "Create vault",
     renameVaultTitle: "Rename vault",
     createVaultDescription:
@@ -316,12 +397,24 @@ const en = {
       "Update the local vault name without changing the remote sync identity behind it.",
     connectionCatalogTitle: "Add sync method",
     connectionCatalogDescription:
-      "Choose which sync path to add. Cloud is single-instance, self-hosted can be added many times, Google Drive will arrive later.",
+      "Choose which sync path to add. Cloud is single-instance, self-hosted can be added many times, and Google Drive stores vaults in a hidden app folder.",
     hostedConnectionTitle: "Connect cloud",
     hostedConnectionDescription: "Managed account-based sync for your hosted Zen space.",
     selfHostedConnectionTitle: "Connect self-hosted server",
     selfHostedConnectionDescription: "Single-user personal server with multi-vault support.",
-    googleDriveComingSoon: "Prepared in the architecture, not wired into the product yet.",
+    googleDriveConnectionTitle: "Connect Google Drive",
+    googleDriveConnectionDescription: "Hidden appDataFolder sync inside your Google account.",
+    googleDriveClientMissing: "Set the Google OAuth client ID first to enable this method.",
+    googleDriveModalDescription:
+      "Authorize Zen Studio in your browser and we will store each remote vault inside Google Drive appDataFolder.",
+    googleDriveConnect: "Connect Google Drive",
+    googleDriveAppFolder: "appDataFolder",
+    googleDriveAppFolderDescription:
+      "Files stored there stay hidden from the regular Drive UI and are scoped to this app.",
+    googleDriveSessionReady: "OAuth session ready for Drive appDataFolder access.",
+    googleDriveSdkLoading:
+      "Preparing the browser Google OAuth SDK. As soon as it is ready, the connect button becomes available.",
+    googleDriveSdkReady: "Google OAuth SDK is ready. You can open the authorization window now.",
     selfHostedModalDescription:
       "Enter the personal server endpoint and management token. After that you can connect vaults directly from this screen.",
     hostedModalDescription:
@@ -334,6 +427,7 @@ const en = {
     statusReady: "Ready",
     statusSyncing: "Syncing",
     statusError: "Error",
+    statusUnlockRequired: "Unlock required",
     connectionChecking: "Checking",
     connectionAvailable: "Available",
     connectionUnavailable: "Unavailable",
