@@ -317,6 +317,10 @@ async function putSyncDirtyEntries(entries: readonly SyncDirtyEntry[]) {
   await db.syncDirtyEntries.bulkPut([...entries]);
 }
 
+function hasStableValueChanged(previous: unknown, next: unknown) {
+  return hashStableValue(previous) !== hashStableValue(next);
+}
+
 function isEntityPending(updatedAt: number, shadow: SyncShadow | undefined) {
   return !shadow || shadow.deleted || updatedAt > shadow.syncedAt;
 }
@@ -912,6 +916,30 @@ export async function readLocalVaultSettings(localVaultId: string) {
   });
 }
 
+export async function ensureLocalVaultSettingsRecord(
+  localVaultId: string,
+  options?: {
+    language?: AppLanguage;
+    lastOpenedNoteId?: string | null;
+  }
+) {
+  return withLocalVaultDatabase(localVaultId, async (database) => {
+    const existingSettings = await database.settings.get("app");
+
+    if (existingSettings) {
+      return existingSettings;
+    }
+
+    const nextSettings = {
+      ...buildDefaultAppSettings(options?.language ?? detectLanguage(), options?.lastOpenedNoteId ?? null),
+      syncStatus: "disabled" as const
+    };
+
+    await database.settings.add(nextSettings);
+    return nextSettings;
+  });
+}
+
 export async function patchLocalVaultSettings(
   localVaultId: string,
   patch: Partial<Omit<AppSettings, "id">>
@@ -1057,6 +1085,12 @@ export async function createProject(name: string, x: number, y: number, color?: 
 }
 
 export async function updateProjectPosition(projectId: string, x: number, y: number) {
+  const project = await db.projects.get(projectId);
+
+  if (!project || (project.x === x && project.y === y)) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
     await db.projects.update(projectId, {
@@ -1069,6 +1103,12 @@ export async function updateProjectPosition(projectId: string, x: number, y: num
 }
 
 export async function updateProjectColor(projectId: string, color: string) {
+  const project = await db.projects.get(projectId);
+
+  if (!project || project.color === color) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
     await db.projects.update(projectId, {
@@ -1080,6 +1120,12 @@ export async function updateProjectColor(projectId: string, color: string) {
 }
 
 export async function renameProject(projectId: string, name: string) {
+  const project = await db.projects.get(projectId);
+
+  if (!project || project.name === name) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", [db.projects, db.syncDirtyEntries], async () => {
     await db.projects.update(projectId, {
@@ -1186,6 +1232,12 @@ export async function createFolder(
 }
 
 export async function renameFolder(folderId: string, name: string) {
+  const folder = await db.folders.get(folderId);
+
+  if (!folder || folder.name === name) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", [db.folders, db.syncDirtyEntries], async () => {
     await db.folders.update(folderId, {
@@ -1197,6 +1249,12 @@ export async function renameFolder(folderId: string, name: string) {
 }
 
 export async function updateFolderColor(folderId: string, color: string) {
+  const folder = await db.folders.get(folderId);
+
+  if (!folder || folder.color === color) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", [db.folders, db.syncDirtyEntries], async () => {
     await db.folders.update(folderId, {
@@ -1490,6 +1548,36 @@ export async function updateNoteMeta(
       ? nextFolder?.projectId ?? patch.projectId ?? existingNote?.projectId
       : patch.projectId ?? existingNote?.projectId;
 
+  if (!existingNote) {
+    return;
+  }
+
+  const nextValues = {
+    title: patch.title ?? existingNote.title,
+    projectId: nextProjectId,
+    folderId: patch.folderId !== undefined ? patch.folderId : existingNote.folderId,
+    color: patch.color ?? existingNote.color,
+    tagIds: patch.tagIds ?? existingNote.tagIds,
+    pinned: patch.pinned ?? existingNote.pinned,
+    favorite: patch.favorite ?? existingNote.favorite,
+    archived: patch.archived ?? existingNote.archived,
+    trashedAt: patch.trashedAt !== undefined ? patch.trashedAt : existingNote.trashedAt
+  };
+
+  if (
+    existingNote.title === nextValues.title &&
+    existingNote.projectId === nextValues.projectId &&
+    existingNote.folderId === nextValues.folderId &&
+    existingNote.color === nextValues.color &&
+    !hasStableValueChanged(existingNote.tagIds, nextValues.tagIds) &&
+    existingNote.pinned === nextValues.pinned &&
+    existingNote.favorite === nextValues.favorite &&
+    existingNote.archived === nextValues.archived &&
+    existingNote.trashedAt === nextValues.trashedAt
+  ) {
+    return;
+  }
+
   const timestamp = now();
   await db.transaction("rw", db.notes, db.syncDirtyEntries, async () => {
     await db.notes.update(noteId, {
@@ -1510,8 +1598,23 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
 
   const timestamp = now();
   await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
+    const existingNote = await db.notes.get(noteId);
+
+    if (!existingNote) {
+      return;
+    }
+
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const staleAssets = noteAssets.filter((asset) => !activeAssetIds.has(asset.id));
+
+    const contentChanged =
+      hasStableValueChanged(normalizeNoteContent(existingNote.content), normalizedContent) ||
+      existingNote.plainText !== plainText ||
+      existingNote.excerpt !== excerpt;
+
+    if (!contentChanged && staleAssets.length === 0) {
+      return;
+    }
 
     if (staleAssets.length > 0) {
       staleAssets.forEach((asset) => {
@@ -1532,7 +1635,7 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
       plainText,
       excerpt,
       updatedAt: timestamp,
-      syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
+      syncState: nextSyncState(existingNote.syncState)
     });
     await putSyncDirtyEntry("note", noteId, timestamp);
   });
@@ -1592,9 +1695,16 @@ export async function saveCanvasContent(
 
   const timestamp = now();
   await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
+    const existingNote = await db.notes.get(noteId);
+
+    if (!existingNote) {
+      return;
+    }
+
     const noteAssets = await db.assets.where("noteId").equals(noteId).toArray();
     const assetsById = new Map(noteAssets.map((asset) => [asset.id, asset]));
     const staleAssets = noteAssets.filter((asset) => !activeFileIds.has(asset.id));
+    let assetMutationCount = 0;
 
     if (staleAssets.length > 0) {
       staleAssets.forEach((asset) => {
@@ -1608,6 +1718,7 @@ export async function saveCanvasContent(
 
       await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
       await Promise.all(staleAssets.map((asset) => putSyncTombstone("asset", asset.id)));
+      assetMutationCount += staleAssets.length;
     }
 
     for (const fileId of activeFileIds) {
@@ -1643,6 +1754,16 @@ export async function saveCanvasContent(
 
       await db.assets.put(nextAsset);
       await putSyncDirtyEntry("asset", nextAsset.id, timestamp);
+      assetMutationCount += 1;
+    }
+
+    const sceneChanged =
+      hasStableValueChanged(existingNote.canvasContent ?? { elements: [], appState: null }, normalizedContent) ||
+      existingNote.plainText !== plainText ||
+      existingNote.excerpt !== excerpt;
+
+    if (!sceneChanged && assetMutationCount === 0) {
+      return;
     }
 
     await db.notes.update(noteId, {
@@ -1650,7 +1771,7 @@ export async function saveCanvasContent(
       plainText,
       excerpt,
       updatedAt: timestamp,
-      syncState: nextSyncState((await db.notes.get(noteId))?.syncState)
+      syncState: nextSyncState(existingNote.syncState)
     });
     await putSyncDirtyEntry("note", noteId, timestamp);
   });

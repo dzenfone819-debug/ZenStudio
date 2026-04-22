@@ -15,6 +15,7 @@ import {
   createNote,
   createTag,
   db,
+  ensureLocalVaultSettingsRecord,
   ensureSeedData,
   inspectFolderRemoval,
   moveNoteToTrash,
@@ -67,14 +68,17 @@ import {
   resolveUniqueLocalVaultName,
   setStoredActiveLocalVaultId,
   syncLocalVaultGuidsWithBindings,
+  type LocalVaultKind,
   updateLocalVaultProfile
 } from "./lib/localVaults";
 import {
+  connectGoogleDriveAccount,
   deleteHostedVault,
   deleteGoogleDriveVault,
   deletePersonalServerVault,
   importRemoteVaultIntoLocalVault,
   migrateRemoteVaultEncryption,
+  primeRemoteVaultEncryptionMetadata,
   issueGoogleDriveVaultToken,
   issueHostedVaultToken,
   issuePersonalServerVaultToken,
@@ -172,12 +176,19 @@ export default function App() {
     tone: "success" | "error";
     text: string;
   } | null>(null);
+  const [syncTransportIndicator, setSyncTransportIndicator] = useState<{
+    localVaultId: string;
+    tone: "default" | "success" | "warning" | "error";
+    text: string;
+    title: string;
+  } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [isDocumentVisible, setIsDocumentVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState !== "hidden"
   );
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const autoSyncTimerRef = useRef<number | null>(null);
+  const syncTransportTimerRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const syncRerunRequestedRef = useRef(false);
   const bootSyncKeyRef = useRef<string | null>(null);
@@ -243,10 +254,7 @@ export default function App() {
 
       const entries = await Promise.all(
         ids.map(async (localVaultId) => {
-          const vaultSettings =
-            localVaultId === activeLocalVaultId && settings
-              ? settings
-              : await readLocalVaultSettings(localVaultId);
+          const vaultSettings = await readLocalVaultSettings(localVaultId);
 
           return [localVaultId, buildVaultEncryptionSummary(localVaultId, vaultSettings)] as const;
         })
@@ -257,7 +265,41 @@ export default function App() {
         ...Object.fromEntries(entries)
       }));
     },
-    [activeLocalVaultId, buildVaultEncryptionSummary, localVaults, settings]
+    [buildVaultEncryptionSummary, localVaults]
+  );
+
+  const syncVaultKindsFromEncryptionState = useCallback(
+    async (targetLocalVaultIds?: string[]) => {
+      const registryVaults = listLocalVaultProfiles();
+      const ids =
+        targetLocalVaultIds && targetLocalVaultIds.length > 0
+          ? [...new Set(targetLocalVaultIds)]
+          : registryVaults.map((vault) => vault.id);
+      let changed = false;
+
+      for (const localVaultId of ids) {
+        const vault = registryVaults.find((entry) => entry.id === localVaultId) ?? null;
+
+        if (!vault) {
+          continue;
+        }
+
+        const vaultSettings = await readLocalVaultSettings(localVaultId);
+        const nextKind: LocalVaultKind = vaultSettings?.encryptionEnabled === true ? "private" : "regular";
+
+        if (nextKind !== vault.vaultKind) {
+          updateLocalVaultProfile(localVaultId, {
+            vaultKind: nextKind
+          });
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        setLocalVaults(listLocalVaultProfiles());
+      }
+    },
+    []
   );
 
   useEffect(() => {
@@ -299,26 +341,38 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
-    void refreshVaultEncryptionSummaries().catch(() => {
+    void refreshVaultEncryptionSummaries()
+      .then(() => syncVaultKindsFromEncryptionState())
+      .catch(() => {
       if (!cancelled) {
         setVaultEncryptionById((current) => current);
       }
-    });
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [refreshVaultEncryptionSummaries]);
+  }, [refreshVaultEncryptionSummaries, syncVaultKindsFromEncryptionState]);
 
   useEffect(() => {
-    if (!settings) {
-      return;
-    }
+    let cancelled = false;
 
-    setVaultEncryptionById((current) => ({
-      ...current,
-      [activeLocalVaultId]: buildVaultEncryptionSummary(activeLocalVaultId, settings)
-    }));
+    void readLocalVaultSettings(activeLocalVaultId)
+      .then((vaultSettings) => {
+        if (cancelled) {
+          return;
+        }
+
+        setVaultEncryptionById((current) => ({
+          ...current,
+          [activeLocalVaultId]: buildVaultEncryptionSummary(activeLocalVaultId, vaultSettings)
+        }));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeLocalVaultId, buildVaultEncryptionSummary, settings]);
 
   useEffect(() => {
@@ -537,14 +591,31 @@ export default function App() {
     }
 
     if (activeVaultBinding.lastError) {
-      const message =
-        activeVaultBinding.lastError === "UNAUTHORIZED"
-          ? pendingCount > 0
-            ? t("sync.statusAuthRequiredPending", { count: pendingCount })
-            : t("sync.statusAuthRequired")
-          : pendingCount > 0
-            ? t("sync.statusUnavailablePending", { count: pendingCount })
-            : t("sync.statusUnavailable");
+      const isAuthError = activeVaultBinding.lastError === "UNAUTHORIZED";
+      const isUnavailableError =
+        activeVaultBinding.lastError === "SERVER_UNAVAILABLE" ||
+        activeVaultBinding.lastError === "HTTP_404";
+      let message: string;
+
+      if (isAuthError) {
+        if (pendingCount > 0) {
+          message = t("sync.statusAuthRequiredPending", { count: pendingCount });
+        } else {
+          message = t("sync.statusAuthRequired");
+        }
+      } else if (isUnavailableError) {
+        if (pendingCount > 0) {
+          message = t("sync.statusUnavailablePending", { count: pendingCount });
+        } else {
+          message = t("sync.statusUnavailable");
+        }
+      } else {
+        if (pendingCount > 0) {
+          message = t("sync.statusErrorPending", { count: pendingCount });
+        } else {
+          message = t("sync.statusError");
+        }
+      }
 
       return {
         tone: "error" as const,
@@ -603,6 +674,7 @@ export default function App() {
         return {
           id: vault.id,
           name: vault.name,
+          vaultKind: vault.vaultKind,
           statusLabel: !binding
             ? t("settings.statusUnbound")
             : binding.lastError === "VAULT_ENCRYPTION_LOCKED"
@@ -638,6 +710,17 @@ export default function App() {
         };
       }),
     [localVaults, syncBindingsByVaultId, syncConnectionsById, t, vaultEncryptionById]
+  );
+  const activeSyncTransportChip = useMemo(
+    () =>
+      syncTransportIndicator && syncTransportIndicator.localVaultId === activeLocalVaultId
+        ? {
+            tone: syncTransportIndicator.tone,
+            text: syncTransportIndicator.text,
+            title: syncTransportIndicator.title
+          }
+        : null,
+    [activeLocalVaultId, syncTransportIndicator]
   );
 
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
@@ -693,6 +776,87 @@ export default function App() {
       autoSyncTimerRef.current = null;
     }
   }, []);
+
+  const showSyncTransportIndicator = useCallback(
+    (
+      localVaultId: string,
+      syncMode: "delta" | "encrypted-delta" | "snapshot" | "encrypted-snapshot"
+    ) => {
+      if (syncTransportTimerRef.current !== null) {
+        window.clearTimeout(syncTransportTimerRef.current);
+        syncTransportTimerRef.current = null;
+      }
+
+      const indicator =
+        syncMode === "encrypted-delta"
+          ? {
+              tone: "success" as const,
+              text: t("sync.transportEncryptedDelta"),
+              title: t("sync.transportEncryptedDeltaTitle")
+            }
+          : syncMode === "delta"
+            ? {
+                tone: "success" as const,
+                text: t("sync.transportDelta"),
+                title: t("sync.transportDeltaTitle")
+              }
+            : syncMode === "encrypted-snapshot"
+              ? {
+                  tone: "default" as const,
+                  text: t("sync.transportEncryptedSnapshot"),
+                  title: t("sync.transportEncryptedSnapshotTitle")
+                }
+              : {
+                  tone: "default" as const,
+                  text: t("sync.transportSnapshot"),
+                  title: t("sync.transportSnapshotTitle")
+                };
+
+      setSyncTransportIndicator({
+        localVaultId,
+        ...indicator
+      });
+
+      syncTransportTimerRef.current = window.setTimeout(() => {
+        setSyncTransportIndicator((current) =>
+          current?.localVaultId === localVaultId ? null : current
+        );
+        syncTransportTimerRef.current = null;
+      }, 3600);
+    },
+    [t]
+  );
+
+  const refreshGoogleDriveConnectionSilently = useCallback(
+    async (connection: SyncConnection) => {
+      if (connection.provider !== "googleDrive") {
+        return null;
+      }
+
+      try {
+        const result = await connectGoogleDriveAccount({
+          loginHint: connection.userEmail || undefined,
+          silent: true,
+          prompt: "none"
+        });
+
+        const nextConnection = updateSyncConnection(connection.id, {
+          sessionToken: result.accessToken,
+          tokenExpiresAt: result.expiresAt,
+          userId: result.userId,
+          userName: result.userName,
+          userEmail: result.userEmail,
+          label: result.userEmail || result.userName || connection.label
+        });
+
+        refreshSyncRegistryState();
+        return nextConnection;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
 
   const runBoundVaultSync = useCallback(
     async (
@@ -757,25 +921,60 @@ export default function App() {
       refreshSyncRegistryState();
 
       try {
-      const result = await runConfiguredSync(
-          {
-            provider: connection.provider,
-            serverUrl: connection.serverUrl,
-            vaultId: binding.remoteVaultId,
-            token: connection.provider === "googleDrive" ? connection.sessionToken : binding.syncToken,
-            localVaultId
-          },
-          {
-            localVaultId: isActiveVaultSync ? undefined : localVaultId,
-            localPendingCount: isActiveVaultSync ? activeVaultPendingSync.total : undefined,
-            onStatusChange: (status) => {
-              updateSyncBindingState(localVaultId, {
-                syncStatus: status
-              });
-              refreshSyncRegistryState();
+        let targetConnection = connection;
+        const runSyncCycle = async (candidate: SyncConnection) =>
+          runConfiguredSync(
+            {
+              provider: candidate.provider,
+              serverUrl: candidate.serverUrl,
+              vaultId: binding.remoteVaultId,
+              token: candidate.provider === "googleDrive" ? candidate.sessionToken : binding.syncToken,
+              localVaultId
+            },
+            {
+              localVaultId: isActiveVaultSync ? undefined : localVaultId,
+              localPendingCount: isActiveVaultSync ? activeVaultPendingSync.total : undefined,
+              onStatusChange: (status) => {
+                updateSyncBindingState(localVaultId, {
+                  syncStatus: status
+                });
+                refreshSyncRegistryState();
+              }
             }
+          );
+
+        if (
+          targetConnection.provider === "googleDrive" &&
+          targetConnection.tokenExpiresAt &&
+          targetConnection.tokenExpiresAt <= Date.now() + 15_000
+        ) {
+          const refreshedConnection = await refreshGoogleDriveConnectionSilently(targetConnection);
+
+          if (refreshedConnection) {
+            targetConnection = refreshedConnection;
           }
-        );
+        }
+
+        let result;
+
+        try {
+          result = await runSyncCycle(targetConnection);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "SYNC_FAILED";
+
+          if (targetConnection.provider !== "googleDrive" || errorMessage !== "GOOGLE_DRIVE_AUTH_REQUIRED") {
+            throw error;
+          }
+
+          const refreshedConnection = await refreshGoogleDriveConnectionSilently(targetConnection);
+
+          if (!refreshedConnection) {
+            throw error;
+          }
+
+          targetConnection = refreshedConnection;
+          result = await runSyncCycle(targetConnection);
+        }
 
         const completedAt = Date.now();
         lastRemoteRefreshAtRef.current[localVaultId] = completedAt;
@@ -786,6 +985,7 @@ export default function App() {
           lastError: null
         });
         refreshSyncRegistryState();
+        showSyncTransportIndicator(localVaultId, result.syncMode);
 
         if (showFeedback) {
           setSyncFeedback({
@@ -829,6 +1029,8 @@ export default function App() {
       activeVaultPendingSync.total,
       clearScheduledAutoSync,
       online,
+      refreshGoogleDriveConnectionSilently,
+      showSyncTransportIndicator,
       syncBindingsByVaultId,
       syncConnectionsById,
       t,
@@ -885,6 +1087,10 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearScheduledAutoSync();
+      if (syncTransportTimerRef.current !== null) {
+        window.clearTimeout(syncTransportTimerRef.current);
+        syncTransportTimerRef.current = null;
+      }
     };
   }, [clearScheduledAutoSync]);
 
@@ -1340,7 +1546,10 @@ export default function App() {
   };
 
   const getVaultDescriptor = (localVaultId: string) => {
-    const vault = localVaults.find((entry) => entry.id === localVaultId) ?? null;
+    const vault =
+      localVaults.find((entry) => entry.id === localVaultId) ??
+      listLocalVaultProfiles().find((entry) => entry.id === localVaultId) ??
+      null;
 
     if (!vault) {
       throw new Error("LOCAL_VAULT_NOT_FOUND");
@@ -1350,6 +1559,7 @@ export default function App() {
       localVaultId: vault.id,
       vaultGuid: vault.vaultGuid,
       name: vault.name,
+      vaultKind: vault.vaultKind,
       schemaVersion: 1
     };
   };
@@ -1408,10 +1618,43 @@ export default function App() {
     localVaultId: string;
     passphrase: string;
   }) => {
-    const descriptor = await createEncryptionDescriptor(
-      input.passphrase,
-      getVaultDescriptor(input.localVaultId)
-    );
+    const remoteTarget = resolveRemoteEncryptionMigrationTarget(input.localVaultId);
+    let descriptor: SyncEncryptionDescriptor | null = null;
+    let revision: string | null = null;
+    let completedAt: number | null = null;
+
+    if (remoteTarget) {
+      const migrated = await withLocalVaultDatabase(input.localVaultId, async (database) =>
+        migrateRemoteVaultEncryption(
+          remoteTarget.remote,
+          {
+            mode: "enable",
+            passphrase: input.passphrase
+          },
+          database
+        )
+      );
+
+      descriptor = migrated.descriptor;
+      revision = migrated.revision;
+      completedAt = Date.now();
+      updateSyncBindingState(input.localVaultId, {
+        syncStatus: "idle",
+        lastError: null,
+        lastSyncAt: completedAt,
+        syncCursor: migrated.revision
+      });
+      refreshSyncRegistryState();
+    } else {
+      descriptor = await createEncryptionDescriptor(
+        input.passphrase,
+        getVaultDescriptor(input.localVaultId)
+      );
+    }
+
+    if (!descriptor) {
+      throw new Error("SYNC_FAILED");
+    }
 
     await patchVaultSettings(input.localVaultId, {
       encryptionEnabled: true,
@@ -1421,14 +1664,23 @@ export default function App() {
       encryptionKeyId: descriptor.keyId,
       encryptionSalt: descriptor.salt,
       encryptionKeyCheck: descriptor.keyCheck,
-      encryptionUpdatedAt: Date.now()
+      encryptionUpdatedAt: Date.now(),
+      ...(completedAt !== null
+        ? {
+            lastSyncAt: completedAt,
+            syncCursor: revision,
+            syncStatus: "idle" as const
+          }
+        : {})
     });
 
     unlockVaultEncryptionSession(input.localVaultId, input.passphrase);
     await refreshVaultEncryptionSummaries([input.localVaultId]);
     setSyncFeedback({
       tone: "success",
-      text: t("sync.vaultEncryptionEnabled")
+      text: remoteTarget
+        ? t("sync.vaultEncryptionEnabledAndMigrated")
+        : t("sync.vaultEncryptionEnabled")
     });
   };
 
@@ -1436,7 +1688,29 @@ export default function App() {
     localVaultId: string;
     passphrase: string;
   }) => {
-    const vaultSettings = await readVaultSettings(input.localVaultId);
+    let vaultSettings = await readLocalVaultSettings(input.localVaultId);
+
+    if (!vaultSettings?.encryptionEnabled || !vaultSettings.encryptionSalt || !vaultSettings.encryptionKeyId) {
+      const binding = syncBindingsByVaultId.get(input.localVaultId) ?? null;
+      const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
+
+      if (binding && connection) {
+        await ensureLocalVaultSettingsRecord(input.localVaultId, {
+          language: (settings?.language ?? (i18n.language === "ru" ? "ru" : "en")) as AppLanguage
+        });
+
+        await primeRemoteVaultEncryptionMetadata({
+          provider: connection.provider,
+          localVaultId: input.localVaultId,
+          serverUrl: connection.serverUrl,
+          remoteVaultId: binding.remoteVaultId,
+          syncToken: connection.provider === "googleDrive" ? connection.sessionToken : binding.syncToken
+        });
+
+        vaultSettings = await readLocalVaultSettings(input.localVaultId);
+      }
+    }
+
     const descriptor = buildEncryptionDescriptorFromSettings(vaultSettings, "locked");
 
     await verifyEncryptionPassphrase(
@@ -1670,12 +1944,72 @@ export default function App() {
     resetUiForVaultSwitch();
   };
 
-  const handleCreateLocalVaultForSettings = (name: string) => {
-    const createdVault = createLocalVaultProfile(name, {
-      activate: false
+  const createPrivateVaultLocally = async (
+    localVaultId: string,
+    passphrase: string
+  ) => {
+    if (!passphrase.trim()) {
+      throw new Error("VAULT_ENCRYPTION_PASSPHRASE_REQUIRED");
+    }
+
+    if (passphrase.trim().length < 8) {
+      throw new Error("VAULT_ENCRYPTION_PASSPHRASE_TOO_SHORT");
+    }
+
+    await ensureLocalVaultSettingsRecord(localVaultId, {
+      language: (settings?.language ?? (i18n.language === "ru" ? "ru" : "en")) as AppLanguage
     });
+
+    const descriptor = await createEncryptionDescriptor(passphrase.trim(), getVaultDescriptor(localVaultId));
+
+    await patchLocalVaultSettings(localVaultId, {
+      encryptionEnabled: true,
+      encryptionVersion: descriptor.version,
+      encryptionKdf: descriptor.kdf,
+      encryptionIterations: descriptor.iterations,
+      encryptionKeyId: descriptor.keyId,
+      encryptionSalt: descriptor.salt,
+      encryptionKeyCheck: descriptor.keyCheck,
+      encryptionUpdatedAt: Date.now(),
+      syncStatus: "idle"
+    });
+
+    unlockVaultEncryptionSession(localVaultId, passphrase.trim());
+  };
+
+  const handleCreateLocalVault = async (input: {
+    name: string;
+    vaultKind: LocalVaultKind;
+    passphrase?: string;
+    activate?: boolean;
+  }) => {
+    const createdVault = createLocalVaultProfile(input.name, {
+      activate: false,
+      vaultKind: input.vaultKind
+    });
+
+    try {
+      if (input.vaultKind === "private") {
+        await createPrivateVaultLocally(createdVault.id, input.passphrase ?? "");
+        await refreshVaultEncryptionSummaries([createdVault.id]);
+        await syncVaultKindsFromEncryptionState([createdVault.id]);
+      }
+    } catch (error) {
+      removeLocalVaultProfile(createdVault.id);
+      await deleteLocalVaultDatabase(createdVault.id);
+      setLocalVaults(listLocalVaultProfiles());
+      setSelectedSyncVaultId(activeLocalVaultId);
+      throw error;
+    }
+
     setLocalVaults(listLocalVaultProfiles());
-    setSelectedSyncVaultId(createdVault.id);
+
+    if (input.activate) {
+      activateLocalVault(createdVault.id);
+    } else {
+      setSelectedSyncVaultId(createdVault.id);
+    }
+
     return createdVault.id;
   };
 
@@ -1958,6 +2292,7 @@ export default function App() {
     connectionId: string;
     remoteVaultId: string;
     remoteVaultName: string;
+    remoteVaultKind?: LocalVaultKind;
     openAfterImport?: boolean;
   }): Promise<RemoteVaultImportResult> => {
     const remoteVaultId = input.remoteVaultId.trim();
@@ -1987,7 +2322,11 @@ export default function App() {
       nameAdjusted = uniqueName !== remoteVaultName;
       targetLocalVault = createLocalVaultProfile(uniqueName, {
         activate: false,
-        vaultGuid: remoteVaultId
+        vaultGuid: remoteVaultId,
+        vaultKind: input.remoteVaultKind ?? "regular"
+      });
+      await ensureLocalVaultSettingsRecord(targetLocalVault.id, {
+        language: (settings?.language ?? (i18n.language === "ru" ? "ru" : "en")) as AppLanguage
       });
       setLocalVaults(listLocalVaultProfiles());
       setSelectedSyncVaultId(targetLocalVault.id);
@@ -2005,8 +2344,17 @@ export default function App() {
         importedRevision = imported.revision;
         importedAt = Date.now();
         await refreshVaultEncryptionSummaries([targetLocalVault.id]);
+        await syncVaultKindsFromEncryptionState([targetLocalVault.id]);
+        if (imported.vaultKind === "private" && targetLocalVault.vaultKind !== "private") {
+          updateLocalVaultProfile(targetLocalVault.id, {
+            vaultKind: "private"
+          });
+          targetLocalVault = getLocalVaultProfileByGuid(remoteVaultId) ?? targetLocalVault;
+          setLocalVaults(listLocalVaultProfiles());
+        }
       } catch (error) {
         await refreshVaultEncryptionSummaries([targetLocalVault.id]);
+        await syncVaultKindsFromEncryptionState([targetLocalVault.id]);
 
         if (error instanceof Error && error.message === "VAULT_ENCRYPTION_LOCKED") {
           disposition = "pendingUnlock";
@@ -2014,6 +2362,16 @@ export default function App() {
           throw error;
         }
       }
+    }
+
+    if (targetLocalVault && input.remoteVaultKind === "private" && targetLocalVault.vaultKind !== "private") {
+      const targetLocalVaultId = targetLocalVault.id;
+      updateLocalVaultProfile(targetLocalVault.id, {
+        vaultKind: "private"
+      });
+      targetLocalVault =
+        listLocalVaultProfiles().find((vault) => vault.id === targetLocalVaultId) ?? targetLocalVault;
+      setLocalVaults(listLocalVaultProfiles());
     }
 
     await applyVaultBinding(
@@ -2305,7 +2663,7 @@ export default function App() {
             syncFeedback={syncFeedback}
             onLanguageChange={(language) => void handleChangeLanguage(language)}
             onSelectLocalVault={(localVaultId) => setSelectedSyncVaultId(localVaultId)}
-            onCreateLocalVault={(name) => handleCreateLocalVaultForSettings(name)}
+            onCreateLocalVault={(input) => handleCreateLocalVault(input)}
             onRenameLocalVault={(localVaultId, name) =>
               handleRenameLocalVault(localVaultId, name)
             }
@@ -2333,9 +2691,16 @@ export default function App() {
         onClose={() => undefined}
         onCloseEditor={() => setOrbitalEditorNoteId(null)}
         syncStatusChip={activeVaultSyncChip}
+        syncTransportChip={activeSyncTransportChip}
         activeLocalVaultId={activeLocalVaultId}
         localVaultOptions={localVaultSwitcherItems}
         onSelectLocalVault={(localVaultId) => activateLocalVault(localVaultId)}
+        onCreateLocalVault={(input) =>
+          handleCreateLocalVault({
+            ...input,
+            activate: true
+          })
+        }
         onCreateProject={handleCreateProjectNode}
         onRenameProject={(projectId, name) => void handleRenameProject(projectId, name)}
         onUpdateProjectPosition={(projectId, x, y) =>

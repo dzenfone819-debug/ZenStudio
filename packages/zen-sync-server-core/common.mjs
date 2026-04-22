@@ -40,6 +40,29 @@ export function isEncryptedEnvelope(envelope) {
   );
 }
 
+export function normalizeEncryptedPayload(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const payload = value;
+  const version = typeof payload.version === "number" ? payload.version : 1;
+  const cipher = payload.cipher === "aes-gcm-256" ? payload.cipher : null;
+  const iv = typeof payload.iv === "string" ? payload.iv.trim() : "";
+  const ciphertext = typeof payload.ciphertext === "string" ? payload.ciphertext.trim() : "";
+
+  if (!cipher || !iv || !ciphertext) {
+    return null;
+  }
+
+  return {
+    version,
+    cipher,
+    iv,
+    ciphertext
+  };
+}
+
 export function createEmptyChangeSet(deviceId = "server") {
   return {
     deviceId,

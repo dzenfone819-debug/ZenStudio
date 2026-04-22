@@ -101,6 +101,7 @@ export interface GoogleDriveRemoteVaultRecord {
   id: string;
   name: string;
   fileId: string;
+  vaultKind: "regular" | "private";
   updatedAt: number;
   revision: string | null;
 }
@@ -185,6 +186,7 @@ function buildVaultDescriptor(vaultId: string, vaultName: string): SyncVaultDesc
     localVaultId: null,
     vaultGuid: vaultId,
     name: vaultName,
+    vaultKind: "regular",
     schemaVersion: 1
   };
 }
@@ -344,9 +346,12 @@ function requestGoogleDriveAccessToken(options?: {
   clientId?: string;
   prompt?: string;
   loginHint?: string;
+  silent?: boolean;
 }) {
   const google = getGoogleIdentityApi();
   const clientId = ensureClientId(options?.clientId);
+  const silent = options?.silent === true;
+  const prompt = options?.prompt ?? (silent ? "none" : "consent select_account");
 
   if (!google?.accounts?.oauth2) {
     throw new Error("GOOGLE_OAUTH_NOT_READY");
@@ -357,17 +362,22 @@ function requestGoogleDriveAccessToken(options?: {
       client_id: clientId,
       scope: GOOGLE_DRIVE_APP_DATA_SCOPE,
       include_granted_scopes: true,
-      prompt: options?.prompt ?? "consent select_account",
+      prompt,
       login_hint: options?.loginHint,
       callback: (response) => {
         if (response.error) {
-          reject(new Error(response.error));
+          reject(new Error(silent ? "GOOGLE_DRIVE_AUTH_REQUIRED" : response.error));
           return;
         }
 
         resolve(response);
       },
       error_callback: (error) => {
+        if (silent) {
+          reject(new Error("GOOGLE_DRIVE_AUTH_REQUIRED"));
+          return;
+        }
+
         if (error.type === "popup_closed") {
           reject(new Error("GOOGLE_OAUTH_POPUP_CLOSED"));
           return;
@@ -388,7 +398,7 @@ function requestGoogleDriveAccessToken(options?: {
     }
 
     tokenClient.requestAccessToken({
-      prompt: options?.prompt ?? "consent select_account",
+      prompt,
       login_hint: options?.loginHint
     });
   });
@@ -579,7 +589,12 @@ async function readGoogleDriveManifestState(accessToken: string): Promise<Google
     manifest: {
       ...createDefaultManifest(),
       ...manifest,
-      vaults: Array.isArray(manifest.vaults) ? manifest.vaults : []
+      vaults: Array.isArray(manifest.vaults)
+        ? manifest.vaults.map((entry) => ({
+            ...entry,
+            vaultKind: entry?.vaultKind === "private" ? "private" : "regular"
+          }))
+        : []
     },
     files
   };
@@ -618,6 +633,7 @@ function normalizeRemoteVaultRecord(record: GoogleDriveRemoteVaultRecord): SyncR
   return {
     id: record.id,
     name: record.name,
+    vaultKind: record.vaultKind,
     createdAt: record.updatedAt,
     updatedAt: record.updatedAt,
     lastRevision: record.revision ?? null,
@@ -639,6 +655,7 @@ async function parseVaultFileForCatalog(accessToken: string, file: GoogleDriveFi
       id: derivedId,
       name: derivedId,
       fileId: file.id,
+      vaultKind: "regular",
       updatedAt: normalizeDriveTimestamp(file.modifiedTime),
       revision: null
     } satisfies GoogleDriveRemoteVaultRecord;
@@ -661,6 +678,7 @@ async function parseVaultFileForCatalog(accessToken: string, file: GoogleDriveFi
       id: vaultId,
       name: vaultName,
       fileId: file.id,
+      vaultKind: envelope.metadata?.payloadMode === "encrypted" ? "private" : "regular",
       updatedAt: normalizeDriveTimestamp(file.modifiedTime),
       revision: envelope.revision ?? null
     } satisfies GoogleDriveRemoteVaultRecord;
@@ -671,6 +689,7 @@ async function parseVaultFileForCatalog(accessToken: string, file: GoogleDriveFi
       id: derivedId,
       name: sanitizeText(blob.metadata?.vault?.name, derivedId),
       fileId: file.id,
+      vaultKind: blob.metadata?.payloadMode === "encrypted" ? "private" : "regular",
       updatedAt: normalizeDriveTimestamp(file.modifiedTime),
       revision: blob.revision ?? null
     } satisfies GoogleDriveRemoteVaultRecord;
@@ -707,7 +726,13 @@ async function resolveGoogleDriveCatalog(accessToken: string) {
     resolvedRecords.length !== state.manifest.vaults.length ||
     resolvedRecords.some((record) => {
       const current = manifestById.get(record.id);
-      return !current || current.fileId !== record.fileId || current.name !== record.name || current.revision !== record.revision;
+      return (
+        !current ||
+        current.fileId !== record.fileId ||
+        current.name !== record.name ||
+        current.vaultKind !== record.vaultKind ||
+        current.revision !== record.revision
+      );
     });
 
   if (manifestNeedsUpdate) {
@@ -752,6 +777,8 @@ function normalizeEnvelopePayload(
 export async function connectGoogleDriveAccount(options?: {
   clientId?: string;
   loginHint?: string;
+  prompt?: string;
+  silent?: boolean;
 }) {
   if (!googleDriveOAuthReady()) {
     await prepareGoogleDriveOAuth();
@@ -759,7 +786,9 @@ export async function connectGoogleDriveAccount(options?: {
 
   const token = await requestGoogleDriveAccessToken({
     clientId: options?.clientId,
-    loginHint: options?.loginHint
+    loginHint: options?.loginHint,
+    prompt: options?.prompt,
+    silent: options?.silent
   });
 
   if (!token.access_token) {
@@ -817,6 +846,7 @@ export async function createGoogleDriveRemoteVault(
     id: vaultId,
     name: vaultName,
     fileId: sanitizeText(created.id),
+    vaultKind: "regular",
     updatedAt: normalizeDriveTimestamp(created.modifiedTime),
     revision: blob.envelope.revision ?? null
   };
@@ -898,6 +928,7 @@ export async function saveGoogleDriveRemoteEnvelope(
     id: input.vaultId,
     name: sanitizeText(input.vaultName, input.vaultId),
     fileId: sanitizeText(response.id, existing?.fileId ?? ""),
+    vaultKind: input.envelope.metadata?.payloadMode === "encrypted" ? "private" : "regular",
     updatedAt: normalizeDriveTimestamp(response.modifiedTime),
     revision: input.envelope.revision ?? null
   };

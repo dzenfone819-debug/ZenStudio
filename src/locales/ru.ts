@@ -246,9 +246,19 @@ const ru = {
     statusOfflinePending: "Оффлайн · ожидает: {{count}}",
     statusUnavailable: "Сервер недоступен",
     statusUnavailablePending: "Сервер недоступен · ожидает: {{count}}",
+    statusError: "Ошибка sync",
+    statusErrorPending: "Ошибка sync · ожидает: {{count}}",
     statusAuthRequired: "Нужен вход",
     statusAuthRequiredPending: "Нужен вход · ожидает: {{count}}",
     statusSyncedAt: "Синхронизировано {{time}}",
+    transportDelta: "Delta",
+    transportEncryptedDelta: "Encrypted delta",
+    transportSnapshot: "Snapshot",
+    transportEncryptedSnapshot: "Encrypted snapshot",
+    transportDeltaTitle: "Быстрая синхронизация по delta",
+    transportEncryptedDeltaTitle: "Быстрая зашифрованная синхронизация по delta",
+    transportSnapshotTitle: "Полная синхронизация снапшотом",
+    transportEncryptedSnapshotTitle: "Полная зашифрованная синхронизация снапшотом",
     urlRequired: "Сначала укажи URL self-hosted сервера.",
     vaultRequired: "Сначала укажи ID vault.",
     tokenRequired: "Сначала укажи токен self-hosted сервера.",
@@ -258,7 +268,7 @@ const ru = {
     googleDriveClientIdRequired:
       "Для Google Drive в этой сборке сначала задай VITE_GOOGLE_DRIVE_CLIENT_ID.",
     googleDriveAuthRequired:
-      "Google Drive требует новую авторизацию. Переподключи способ синхронизации Google Drive.",
+      "Сессия Google Drive истекла. Обнови авторизацию, чтобы снова загружать remote vault.",
     googleDriveConnected: "Google Drive подключен.",
     googleDrivePopupClosed: "Окно входа Google было закрыто до завершения авторизации.",
     googleDrivePopupFailed: "Не удалось открыть окно входа Google.",
@@ -286,6 +296,8 @@ const ru = {
     selfHostedManageFailed:
       "Операция управления self-hosted сервером не удалась. Проверь URL сервера, management token и состояние vault.",
     vaultEncryptionEnabled: "Шифрование vault включено для этого устройства и sync-профиля.",
+    vaultEncryptionEnabledAndMigrated:
+      "Шифрование vault включено, а удаленный snapshot переведен в зашифрованный sync-режим.",
     vaultEncryptionUnlocked: "Шифрование vault разблокировано на этом устройстве.",
     vaultEncryptionLocked: "Шифрование vault заблокировано на этом устройстве.",
     vaultEncryptionPassphraseRequired: "Сначала введи passphrase этого vault.",
@@ -393,8 +405,18 @@ const ru = {
       "После завершения миграции remote sync для этого vault перестанет использовать шифрование. Локальный unlock-доступ на этом устройстве тоже будет очищен.",
     createVaultTitle: "Создать vault",
     renameVaultTitle: "Переименовать vault",
+    createVaultTypeLabel: "Тип vault",
+    createVaultNameRequired: "Введи имя нового vault.",
+    vaultKindRegular: "Обычный",
+    vaultKindPrivate: "Приватный",
     createVaultDescription:
       "Дай новому локальному vault понятное имя. У него будет собственное локальное IndexedDB пространство на этом устройстве.",
+    createVaultRegularDescription:
+      "Обычный local-first vault без обязательного client-side шифрования для sync.",
+    createVaultPrivateDescription:
+      "Всегда использует client-side encrypted sync и отдельно разблокируется на каждом устройстве.",
+    createVaultPrivateHint:
+      "Приватные vault всегда отправляют данные в зашифрованном виде при любом способе sync. Сохрани passphrase надежно: восстановить его мы не сможем.",
     renameVaultDescription:
       "Обнови имя локального vault без изменения его удаленной sync-идентичности.",
     connectionCatalogTitle: "Добавить способ sync",
@@ -406,6 +428,7 @@ const ru = {
     selfHostedConnectionDescription: "Single-user personal server с поддержкой нескольких vault.",
     googleDriveConnectionTitle: "Подключить Google Drive",
     googleDriveConnectionDescription: "Синхронизация через скрытую appDataFolder внутри твоего Google-аккаунта.",
+    googleDriveReconnect: "Обновить Google Drive auth",
     googleDriveClientMissing:
       "Сначала задай Google OAuth client ID, и после этого этот способ можно будет подключить.",
     googleDriveModalDescription:

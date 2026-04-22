@@ -244,9 +244,19 @@ const en = {
     statusOfflinePending: "Offline · {{count}} pending",
     statusUnavailable: "Server unavailable",
     statusUnavailablePending: "Server unavailable · {{count}} pending",
+    statusError: "Sync error",
+    statusErrorPending: "Sync error · {{count}} pending",
     statusAuthRequired: "Auth required",
     statusAuthRequiredPending: "Auth required · {{count}} pending",
     statusSyncedAt: "Synced {{time}}",
+    transportDelta: "Delta",
+    transportEncryptedDelta: "Encrypted delta",
+    transportSnapshot: "Snapshot",
+    transportEncryptedSnapshot: "Encrypted snapshot",
+    transportDeltaTitle: "Fast delta sync",
+    transportEncryptedDeltaTitle: "Fast encrypted delta sync",
+    transportSnapshotTitle: "Full snapshot sync",
+    transportEncryptedSnapshotTitle: "Full encrypted snapshot sync",
     urlRequired: "Enter the self-hosted server URL first.",
     vaultRequired: "Enter the self-hosted vault ID first.",
     tokenRequired: "Enter the self-hosted server token first.",
@@ -256,7 +266,7 @@ const en = {
     googleDriveClientIdRequired:
       "Set VITE_GOOGLE_DRIVE_CLIENT_ID before connecting Google Drive in this build.",
     googleDriveAuthRequired:
-      "Google Drive needs a fresh authorization session. Reconnect the Google Drive method.",
+      "Google Drive session expired. Refresh the authorization to continue loading remote vaults.",
     googleDriveConnected: "Google Drive connected.",
     googleDrivePopupClosed: "Google sign-in was closed before access was granted.",
     googleDrivePopupFailed: "The Google sign-in window could not be opened.",
@@ -284,6 +294,8 @@ const en = {
     selfHostedManageFailed:
       "Self-hosted management action failed. Check the server URL, management token, and vault state.",
     vaultEncryptionEnabled: "Vault encryption enabled for this device and sync profile.",
+    vaultEncryptionEnabledAndMigrated:
+      "Vault encryption enabled and the remote snapshot was migrated into encrypted sync.",
     vaultEncryptionUnlocked: "Vault encryption unlocked on this device.",
     vaultEncryptionLocked: "Vault encryption locked on this device.",
     vaultEncryptionPassphraseRequired: "Enter the vault passphrase first.",
@@ -391,8 +403,18 @@ const en = {
       "Remote sync for this vault will stop using encryption after the migration completes. Local unlocked access on this device will also be cleared.",
     createVaultTitle: "Create vault",
     renameVaultTitle: "Rename vault",
+    createVaultTypeLabel: "Vault type",
+    createVaultNameRequired: "Enter a name for the new vault.",
+    vaultKindRegular: "Regular",
+    vaultKindPrivate: "Private",
     createVaultDescription:
       "Give the new local vault a clear name. It will receive its own local IndexedDB space on this device.",
+    createVaultRegularDescription:
+      "Standard local-first vault without client-side encrypted sync requirements.",
+    createVaultPrivateDescription:
+      "Always uses client-side encrypted sync and unlocks separately on each device.",
+    createVaultPrivateHint:
+      "Private vaults keep remote content encrypted for every sync method. Save the passphrase carefully because we cannot recover it for you.",
     renameVaultDescription:
       "Update the local vault name without changing the remote sync identity behind it.",
     connectionCatalogTitle: "Add sync method",
@@ -404,6 +426,7 @@ const en = {
     selfHostedConnectionDescription: "Single-user personal server with multi-vault support.",
     googleDriveConnectionTitle: "Connect Google Drive",
     googleDriveConnectionDescription: "Hidden appDataFolder sync inside your Google account.",
+    googleDriveReconnect: "Refresh Google Drive auth",
     googleDriveClientMissing: "Set the Google OAuth client ID first to enable this method.",
     googleDriveModalDescription:
       "Authorize Zen Studio in your browser and we will store each remote vault inside Google Drive appDataFolder.",

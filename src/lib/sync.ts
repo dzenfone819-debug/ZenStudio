@@ -59,6 +59,7 @@ import type {
   SyncConnectionProvider,
   SyncChangeFeed,
   SyncChangeSet,
+  SyncEncryptedPayload,
   SyncEncryptionDescriptor,
   SyncEntityKind,
   SyncPayloadMode,
@@ -88,6 +89,7 @@ type SnapshotEntityState<T> = {
 type SyncExecutionResult = {
   revision: string;
   stats: SyncRunStats;
+  syncMode: "delta" | "encrypted-delta" | "snapshot" | "encrypted-snapshot";
 };
 
 type SyncMutationState<T> = {
@@ -159,6 +161,7 @@ function buildRemoteVaultDescriptor(remote: RemoteSyncConfig): SyncVaultDescript
     localVaultId: remote.localVaultId ?? localVaultProfile?.id ?? null,
     vaultGuid: localVaultProfile?.vaultGuid ?? remote.vaultId ?? null,
     name: remote.localVaultName ?? localVaultProfile?.name ?? null,
+    vaultKind: localVaultProfile?.vaultKind ?? "regular",
     schemaVersion: 1
   };
 }
@@ -269,9 +272,15 @@ async function createOutgoingRemoteEnvelope(
     ...snapshot,
     exportedAt: Date.now()
   };
+  const localVaultProfile = remote.localVaultId ? getLocalVaultProfile(remote.localVaultId) : null;
+  const inferredVaultKind =
+    localVaultProfile?.vaultKind ??
+    (existingEnvelope?.metadata?.payloadMode === "encrypted" || settings.encryptionEnabled
+      ? "private"
+      : "regular");
   const payloadMode =
     options?.forcePayloadMode ??
-    (settings.encryptionEnabled ? ("encrypted" as const) : ("plain" as const));
+    (inferredVaultKind === "private" ? ("encrypted" as const) : ("plain" as const));
 
   if (payloadMode === "plain") {
     const existingMetadata =
@@ -382,6 +391,7 @@ function createNextSyncEnvelope(snapshot: SyncSnapshot, existing: SyncEnvelope |
             localVaultId: null,
             vaultGuid: null,
             name: null,
+            vaultKind: "regular",
             schemaVersion: 1
           }
         : null
@@ -478,6 +488,108 @@ function countChangeSetEntries(changeSet: SyncChangeSet) {
     changeSet.assets.length +
     changeSet.tombstones.length
   );
+}
+
+function normalizeChangeSetPayload(
+  payload: Partial<SyncChangeSet> | null | undefined,
+  fallbackDeviceId = "server"
+): SyncChangeSet {
+  if (!payload || typeof payload !== "object") {
+    return createEmptyChangeSet(fallbackDeviceId);
+  }
+
+  return {
+    deviceId: typeof payload.deviceId === "string" ? payload.deviceId : fallbackDeviceId,
+    exportedAt: typeof payload.exportedAt === "number" ? payload.exportedAt : Date.now(),
+    projects: Array.isArray(payload.projects) ? payload.projects.filter(Boolean) : [],
+    folders: Array.isArray(payload.folders) ? payload.folders.filter(Boolean) : [],
+    tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [],
+    notes: Array.isArray(payload.notes) ? payload.notes.filter(Boolean) : [],
+    assets: Array.isArray(payload.assets) ? payload.assets.filter(Boolean) : [],
+    tombstones: Array.isArray(payload.tombstones) ? payload.tombstones.filter(Boolean) : []
+  };
+}
+
+function applyChangeSetIntoMaps(
+  maps: {
+    project: Map<string, Project>;
+    folder: Map<string, Folder>;
+    tag: Map<string, Tag>;
+    note: Map<string, SyncedNoteRecord>;
+    asset: Map<string, SyncedAssetRecord>;
+    tombstones: Map<string, SyncTombstone>;
+  },
+  changeSet: SyncChangeSet
+) {
+  const applyRecords = <T extends { id: string }>(
+    entityType: SyncEntityKind,
+    target: Map<string, T>,
+    records: readonly T[]
+  ) => {
+    records.forEach((record) => {
+      target.set(record.id, record);
+      maps.tombstones.delete(getEntityKey(entityType, record.id));
+    });
+  };
+
+  applyRecords("project", maps.project, changeSet.projects);
+  applyRecords("folder", maps.folder, changeSet.folders);
+  applyRecords("tag", maps.tag, changeSet.tags);
+  applyRecords("note", maps.note, changeSet.notes);
+  applyRecords("asset", maps.asset, changeSet.assets);
+
+  changeSet.tombstones.forEach((tombstone) => {
+    switch (tombstone.entityType) {
+      case "project":
+        maps.project.delete(tombstone.entityId);
+        break;
+      case "folder":
+        maps.folder.delete(tombstone.entityId);
+        break;
+      case "tag":
+        maps.tag.delete(tombstone.entityId);
+        break;
+      case "note":
+        maps.note.delete(tombstone.entityId);
+        break;
+      case "asset":
+        maps.asset.delete(tombstone.entityId);
+        break;
+    }
+
+    maps.tombstones.set(tombstone.key, tombstone);
+  });
+}
+
+function collapseChangeSetBatches(changeSets: readonly SyncChangeSet[]) {
+  const maps = {
+    project: new Map<string, Project>(),
+    folder: new Map<string, Folder>(),
+    tag: new Map<string, Tag>(),
+    note: new Map<string, SyncedNoteRecord>(),
+    asset: new Map<string, SyncedAssetRecord>(),
+    tombstones: new Map<string, SyncTombstone>()
+  };
+  let deviceId = "server";
+  let exportedAt = 0;
+
+  changeSets.forEach((rawChangeSet) => {
+    const changeSet = normalizeChangeSetPayload(rawChangeSet, deviceId);
+    deviceId = changeSet.deviceId || deviceId;
+    exportedAt = Math.max(exportedAt, changeSet.exportedAt || 0);
+    applyChangeSetIntoMaps(maps, changeSet);
+  });
+
+  return {
+    deviceId,
+    exportedAt,
+    projects: sortById([...maps.project.values()]),
+    folders: sortById([...maps.folder.values()]),
+    tags: sortById([...maps.tag.values()]),
+    notes: sortById([...maps.note.values()]),
+    assets: sortById([...maps.asset.values()]),
+    tombstones: sortTombstones([...maps.tombstones.values()])
+  } satisfies SyncChangeSet;
 }
 
 function buildRecordChangeSetFromSnapshot(snapshot: SyncSnapshot, shadows: readonly SyncShadow[]) {
@@ -1221,6 +1333,8 @@ export async function prepareGoogleDriveOAuth() {
 export async function connectGoogleDriveAccount(options?: {
   clientId?: string;
   loginHint?: string;
+  prompt?: string;
+  silent?: boolean;
 }) {
   return connectGoogleDriveAccountViaOAuth(options);
 }
@@ -1488,6 +1602,7 @@ export async function importRemoteVaultIntoLocalVault(input: {
 
   return {
     revision: envelope.revision,
+    vaultKind: envelope.metadata?.payloadMode === "encrypted" ? "private" : "regular",
     importedBodies:
       envelope.snapshot.projects.length +
       envelope.snapshot.folders.length +
@@ -1495,6 +1610,43 @@ export async function importRemoteVaultIntoLocalVault(input: {
       envelope.snapshot.notes.length +
       envelope.snapshot.assets.length
   };
+}
+
+export async function primeRemoteVaultEncryptionMetadata(input: {
+  provider: SyncConnectionProvider;
+  localVaultId: string;
+  serverUrl: string;
+  remoteVaultId: string;
+  syncToken: string;
+}) {
+  const rawEnvelope =
+    input.provider === "googleDrive"
+      ? await loadGoogleDriveRemoteEnvelope(input.syncToken, input.remoteVaultId)
+      : await pullSelfHostedEnvelope(input.serverUrl, input.remoteVaultId, input.syncToken);
+
+  try {
+    const envelope = await withLocalVaultDatabase(input.localVaultId, async (database) =>
+      resolveRemoteEnvelopeRecord(
+        rawEnvelope,
+        {
+          provider: input.provider,
+          serverUrl: input.serverUrl,
+          vaultId: input.remoteVaultId,
+          token: input.syncToken,
+          localVaultId: input.localVaultId
+        },
+        database
+      )
+    );
+
+    return envelope.metadata?.payloadMode === "encrypted" ? "private" : "regular";
+  } catch (error) {
+    if (error instanceof Error && error.message === "VAULT_ENCRYPTION_LOCKED") {
+      return "private" as const;
+    }
+
+    throw error;
+  }
 }
 
 async function pullSelfHostedChanges(
@@ -1525,6 +1677,65 @@ async function pushSelfHostedChanges(
       body: JSON.stringify({
         baseRevision,
         changes
+      })
+    });
+  } catch (error) {
+    throw new Error(normalizeRequestError(error));
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { revision?: string | null; error?: string }
+    | null;
+
+  if (response.status === 409) {
+    return {
+      conflict: true,
+      revision:
+        payload && typeof payload === "object" && "revision" in payload
+          ? payload.revision ?? null
+          : null
+    };
+  }
+
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && typeof payload.error === "string"
+        ? payload.error
+        : `HTTP_${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    conflict: false,
+    revision:
+      payload && typeof payload === "object" && typeof payload.revision === "string"
+        ? payload.revision
+        : null
+  };
+}
+
+async function pushSelfHostedEncryptedChanges(
+  serverUrl: string,
+  vaultId: string,
+  token: string,
+  baseRevision: string | null,
+  input: {
+    encryptedChanges: SyncEncryptedPayload;
+    encryptedSnapshot: SyncEncryptedPayload;
+    metadata: SyncEnvelopeMetadata;
+  }
+) {
+  let response: Response;
+
+  try {
+    response = await fetch(buildVaultChangesUrl(serverUrl, vaultId), {
+      method: "POST",
+      headers: createBearerHeaders(token, true),
+      body: JSON.stringify({
+        baseRevision,
+        encryptedChanges: input.encryptedChanges,
+        encryptedSnapshot: input.encryptedSnapshot,
+        metadata: input.metadata
       })
     });
   } catch (error) {
@@ -1653,9 +1864,76 @@ async function saveRemoteEnvelopeRecord(
   );
 }
 
+function resolveVaultPassphraseOrThrow(remote: Pick<RemoteSyncConfig, "localVaultId">) {
+  const localVaultId = remote.localVaultId?.trim() ?? "";
+  const passphrase = localVaultId ? getVaultEncryptionSessionPassphrase(localVaultId) : null;
+
+  if (!passphrase) {
+    throw new Error("VAULT_ENCRYPTION_LOCKED");
+  }
+
+  return passphrase;
+}
+
+async function decryptEncryptedChangeBatches(
+  encryptedChanges: readonly SyncEncryptedPayload[],
+  metadata: SyncEnvelopeMetadata | null | undefined,
+  remote: RemoteSyncConfig,
+  settings: AppSettings
+) {
+  if (encryptedChanges.length === 0) {
+    return [] as SyncChangeSet[];
+  }
+
+  if (metadata?.payloadMode !== "encrypted" || !metadata.encryption) {
+    throw new Error("ENCRYPTED_SYNC_NOT_IMPLEMENTED");
+  }
+
+  const passphrase = resolveVaultPassphraseOrThrow(remote);
+  const descriptor = metadata.encryption;
+  const vaultDescriptor = metadata.vault ?? buildRemoteVaultDescriptor(remote);
+
+  if (!settings.encryptionEnabled) {
+    throw new Error("VAULT_ENCRYPTION_LOCKED");
+  }
+
+  return Promise.all(
+    encryptedChanges.map(async (payload) =>
+      normalizeChangeSetPayload(
+        await decryptSyncPayload<SyncChangeSet>(payload, passphrase, descriptor, vaultDescriptor),
+        remote.localVaultId ?? "server"
+      )
+    )
+  );
+}
+
+async function encryptChangeSetBatch(
+  changeSet: SyncChangeSet,
+  remote: RemoteSyncConfig,
+  settings: AppSettings
+) {
+  const passphrase = resolveVaultPassphraseOrThrow(remote);
+  const descriptor = buildEncryptionDescriptorFromSettings(settings);
+  const vaultDescriptor = buildRemoteVaultDescriptor(remote);
+
+  const encryptedChanges = await encryptSyncPayload(changeSet, passphrase, {
+    vault: vaultDescriptor,
+    descriptor
+  });
+
+  return {
+    descriptor: encryptedChanges.descriptor,
+    encryptedChanges: encryptedChanges.payload
+  };
+}
+
 export async function migrateRemoteVaultEncryption(
   remote: RemoteSyncConfig,
   input:
+    | {
+        mode: "enable";
+        passphrase: string;
+      }
     | {
         mode: "changePassphrase";
         currentPassphrase: string;
@@ -1685,15 +1963,19 @@ export async function migrateRemoteVaultEncryption(
       remote,
       database,
       {
-        passphraseOverride: input.currentPassphrase,
-        hydrateFromMetadata: false
+        passphraseOverride:
+          input.mode === "enable" ? null : input.currentPassphrase,
+        hydrateFromMetadata: input.mode !== "enable"
       }
     );
     const merged = mergeSnapshots(localSnapshot, remoteEnvelope.snapshot, shadows);
     const nextDescriptor =
-      input.mode === "changePassphrase"
-        ? await createEncryptionDescriptor(input.nextPassphrase, buildRemoteVaultDescriptor(remote))
-        : null;
+      input.mode === "disable"
+        ? null
+        : await createEncryptionDescriptor(
+            input.mode === "enable" ? input.passphrase : input.nextPassphrase,
+            buildRemoteVaultDescriptor(remote)
+          );
     const nextEnvelope = await createOutgoingRemoteEnvelope(
       merged.snapshot,
       rawRemoteEnvelope,
@@ -1701,7 +1983,12 @@ export async function migrateRemoteVaultEncryption(
       settings,
       {
         forcePayloadMode: input.mode === "disable" ? "plain" : "encrypted",
-        passphraseOverride: input.mode === "changePassphrase" ? input.nextPassphrase : null,
+        passphraseOverride:
+          input.mode === "enable"
+            ? input.passphrase
+            : input.mode === "changePassphrase"
+              ? input.nextPassphrase
+              : null,
         descriptorOverride: nextDescriptor
       }
     );
@@ -2556,12 +2843,13 @@ async function runSnapshotSyncCycle(
   options?: {
     localVaultId?: string | null;
     localVaultName?: string | null;
+    provider?: "selfHosted" | "hosted";
   },
   providedEnvelope?: RemoteEnvelopeRecord | null,
   database: ZenNotesDatabase = db
 ) {
   const remoteConfig = {
-    provider: "selfHosted" as const,
+    provider: options?.provider ?? "selfHosted",
     serverUrl,
     vaultId,
     token,
@@ -2610,7 +2898,11 @@ async function runSnapshotSyncCycle(
 
   return {
     revision: pushed.envelope.revision ?? "",
-    stats: merged.stats
+    stats: merged.stats,
+    syncMode:
+      nextEnvelope.metadata?.payloadMode === "encrypted"
+        ? "encrypted-snapshot"
+        : "snapshot"
   } satisfies SyncExecutionResult;
 }
 
@@ -2676,7 +2968,11 @@ async function runGoogleDriveSyncCycle(
 
   return {
     revision: nextEnvelope.revision ?? "",
-    stats: merged.stats
+    stats: merged.stats,
+    syncMode:
+      nextEnvelope.metadata?.payloadMode === "encrypted"
+        ? "encrypted-snapshot"
+        : "snapshot"
   } satisfies SyncExecutionResult;
 }
 
@@ -2686,10 +2982,13 @@ async function runDeltaSyncCycle(
   token: string,
   options?: {
     localPendingCount?: number;
+    localVaultId?: string | null;
+    localVaultName?: string | null;
+    provider?: "selfHosted" | "hosted";
   },
   database: ZenNotesDatabase = db
 ) {
-  const [settings, shadows] = await Promise.all([
+  let [settings, shadows] = await Promise.all([
     database.settings.get("app"),
     database.syncShadows.toArray()
   ]);
@@ -2698,13 +2997,18 @@ async function runDeltaSyncCycle(
     throw new Error("SETTINGS_MISSING");
   }
 
-  if (settings.encryptionEnabled) {
-    return null;
-  }
-
   if (!settings.syncCursor || shadows.length === 0) {
     return null;
   }
+
+  const remoteConfig = {
+    provider: options?.provider ?? "selfHosted",
+    serverUrl,
+    vaultId,
+    token,
+    localVaultId: options?.localVaultId ?? null,
+    localVaultName: options?.localVaultName ?? null
+  } satisfies RemoteSyncConfig;
 
   let remoteFeed: SyncChangeFeed;
 
@@ -2719,7 +3023,8 @@ async function runDeltaSyncCycle(
   }
 
   if (remoteFeed.metadata?.payloadMode === "encrypted") {
-    return null;
+    await hydrateVaultEncryptionFromMetadata(remoteFeed.metadata, database);
+    settings = (await database.settings.get("app")) ?? settings;
   }
 
   if (remoteFeed.mode === "snapshot") {
@@ -2728,7 +3033,11 @@ async function runDeltaSyncCycle(
         serverUrl,
         vaultId,
         token,
-        undefined,
+        {
+          localVaultId: remoteConfig.localVaultId ?? null,
+          localVaultName: remoteConfig.localVaultName ?? null,
+          provider: remoteConfig.provider
+        },
         {
           revision: remoteFeed.revision,
           snapshot: remoteFeed.snapshot,
@@ -2741,7 +3050,20 @@ async function runDeltaSyncCycle(
     return null;
   }
 
-  const remoteChanges = remoteFeed.changes ?? createEmptyChangeSet("server");
+  const isEncryptedDeltaFeed =
+    remoteFeed.metadata?.payloadMode === "encrypted" ||
+    Array.isArray(remoteFeed.encryptedChanges);
+  const remoteChanges =
+    isEncryptedDeltaFeed
+      ? collapseChangeSetBatches(
+          await decryptEncryptedChangeBatches(
+            remoteFeed.encryptedChanges ?? [],
+            remoteFeed.metadata ?? null,
+            remoteConfig,
+            settings
+          )
+        )
+      : normalizeChangeSetPayload(remoteFeed.changes, "server");
   const localPendingCount =
     typeof options?.localPendingCount === "number" ? Math.max(0, options.localPendingCount) : null;
 
@@ -2766,7 +3088,8 @@ async function runDeltaSyncCycle(
         pulled: countChangeSetEntries(remoteChanges),
         pushed: 0,
         conflicts: 0
-      }
+      },
+      syncMode: isEncryptedDeltaFeed ? "encrypted-delta" : "delta"
     } satisfies SyncExecutionResult;
   }
 
@@ -2778,13 +3101,41 @@ async function runDeltaSyncCycle(
   let finalRevision = remoteFeed.revision ?? settings.syncCursor;
 
   if (!isChangeSetEmpty(merged.outgoingChanges)) {
-    const pushed = await pushSelfHostedChanges(
-      serverUrl,
-      vaultId,
-      token,
-      remoteFeed.revision,
-      merged.outgoingChanges
-    );
+    const pushed =
+      isEncryptedDeltaFeed
+        ? await (async () => {
+            const { descriptor, encryptedChanges } = await encryptChangeSetBatch(
+              merged.outgoingChanges,
+              remoteConfig,
+              settings
+            );
+            const passphrase = resolveVaultPassphraseOrThrow(remoteConfig);
+            const encryptedSnapshot = await encryptSyncPayload(merged.snapshot, passphrase, {
+              vault: buildRemoteVaultDescriptor(remoteConfig),
+              descriptor
+            });
+
+            return pushSelfHostedEncryptedChanges(serverUrl, vaultId, token, remoteFeed.revision, {
+              encryptedChanges,
+              encryptedSnapshot: encryptedSnapshot.payload,
+              metadata: {
+                schemaVersion: 1,
+                payloadMode: "encrypted",
+                vault: buildRemoteVaultDescriptor(remoteConfig),
+                encryption: {
+                  ...descriptor,
+                  state: "locked"
+                }
+              }
+            });
+          })()
+        : await pushSelfHostedChanges(
+            serverUrl,
+            vaultId,
+            token,
+            remoteFeed.revision,
+            merged.outgoingChanges
+          );
 
     if (pushed.conflict) {
       return "retry" as const;
@@ -2807,7 +3158,8 @@ async function runDeltaSyncCycle(
 
   return {
     revision: finalRevision ?? "",
-    stats: merged.stats
+    stats: merged.stats,
+    syncMode: isEncryptedDeltaFeed ? "encrypted-delta" : "delta"
   } satisfies SyncExecutionResult;
 }
 
@@ -2867,7 +3219,10 @@ async function runConfiguredSyncInternal(
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const deltaResult = await runDeltaSyncCycle(serverUrl, vaultId, token, {
-        localPendingCount: options?.localPendingCount
+        localPendingCount: options?.localPendingCount,
+        localVaultId: remote.localVaultId ?? null,
+        localVaultName: remote.localVaultName ?? null,
+        provider: remote.provider === "hosted" ? "hosted" : "selfHosted"
       }, database);
 
       if (deltaResult === "retry") {
@@ -2885,7 +3240,8 @@ async function runConfiguredSyncInternal(
         token,
         {
           localVaultId: remote.localVaultId ?? null,
-          localVaultName: remote.localVaultName ?? null
+          localVaultName: remote.localVaultName ?? null,
+          provider: remote.provider === "hosted" ? "hosted" : "selfHosted"
         },
         undefined,
         database

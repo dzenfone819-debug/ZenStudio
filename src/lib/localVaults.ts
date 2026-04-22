@@ -1,10 +1,13 @@
 import Dexie from "dexie";
 import type { SyncVaultBinding } from "../types";
 
+export type LocalVaultKind = "regular" | "private";
+
 export interface LocalVaultProfile {
   id: string;
   vaultGuid: string;
   name: string;
+  vaultKind: LocalVaultKind;
   createdAt: number;
   updatedAt: number;
 }
@@ -33,6 +36,10 @@ function sanitizeVaultGuid(value: string) {
   return value.trim().slice(0, 120);
 }
 
+function sanitizeVaultKind(value: unknown): LocalVaultKind {
+  return value === "private" ? "private" : "regular";
+}
+
 function createVaultGuid() {
   return crypto.randomUUID();
 }
@@ -44,6 +51,7 @@ function createDefaultVaultProfile(): LocalVaultProfile {
     id: DEFAULT_LOCAL_VAULT_ID,
     vaultGuid: createVaultGuid(),
     name: "Main vault",
+    vaultKind: "regular",
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -85,6 +93,7 @@ function normalizeRegistryState(value: unknown): LocalVaultRegistryState {
             id,
             vaultGuid,
             name,
+            vaultKind: sanitizeVaultKind(vault.vaultKind),
             createdAt: typeof vault.createdAt === "number" ? vault.createdAt : now(),
             updatedAt: typeof vault.updatedAt === "number" ? vault.updatedAt : now()
           } satisfies LocalVaultProfile;
@@ -227,6 +236,7 @@ export function createLocalVaultProfile(
     activate?: boolean;
     localVaultId?: string;
     vaultGuid?: string;
+    vaultKind?: LocalVaultKind;
   }
 ) {
   const registry = getLocalVaultRegistry();
@@ -251,6 +261,7 @@ export function createLocalVaultProfile(
     id: localVaultId,
     vaultGuid,
     name: normalizedName,
+    vaultKind: options?.vaultKind ?? "regular",
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -286,13 +297,15 @@ export function renameLocalVaultProfile(localVaultId: string, name: string) {
 
 export function updateLocalVaultProfile(
   localVaultId: string,
-  patch: Partial<Pick<LocalVaultProfile, "name" | "vaultGuid">>
+  patch: Partial<Pick<LocalVaultProfile, "name" | "vaultGuid" | "vaultKind">>
 ) {
   const registry = getLocalVaultRegistry();
   const normalizedName =
     typeof patch.name === "string" ? sanitizeLocalVaultName(patch.name) : null;
   const normalizedVaultGuid =
     typeof patch.vaultGuid === "string" ? sanitizeVaultGuid(patch.vaultGuid) : null;
+  const normalizedVaultKind =
+    patch.vaultKind === undefined ? null : sanitizeVaultKind(patch.vaultKind);
 
   if (normalizedName !== null && !normalizedName) {
     throw new Error("LOCAL_VAULT_NAME_REQUIRED");
@@ -312,6 +325,7 @@ export function updateLocalVaultProfile(
           ...vault,
           name: normalizedName ?? vault.name,
           vaultGuid: normalizedVaultGuid ?? vault.vaultGuid,
+          vaultKind: normalizedVaultKind ?? vault.vaultKind,
           updatedAt: timestamp
         }
       : vault

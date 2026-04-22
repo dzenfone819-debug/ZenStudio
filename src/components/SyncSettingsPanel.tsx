@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LocalVaultProfile } from "../lib/localVaults";
+import type { LocalVaultKind, LocalVaultProfile } from "../lib/localVaults";
 import {
   connectGoogleDriveAccount,
   createHostedVault,
@@ -57,7 +57,11 @@ interface SyncSettingsPanelProps {
   syncFeedback?: SyncFeedbackState;
   onBack: () => void;
   onSelectLocalVault: (localVaultId: string) => void;
-  onCreateLocalVault: (name: string) => string | Promise<string>;
+  onCreateLocalVault: (input: {
+    name: string;
+    vaultKind: LocalVaultKind;
+    passphrase?: string;
+  }) => string | Promise<string>;
   onRenameLocalVault: (localVaultId: string, name: string) => void;
   onDeleteLocalVault: (
     localVaultId: string,
@@ -92,6 +96,7 @@ interface SyncSettingsPanelProps {
     connectionId: string;
     remoteVaultId: string;
     remoteVaultName: string;
+    remoteVaultKind?: LocalVaultKind;
     openAfterImport?: boolean;
   }) => Promise<RemoteVaultImportResult>;
   onDeleteRemoteVault: (input: {
@@ -384,6 +389,10 @@ function translateSyncManagerError(message: string, t: ReturnType<typeof useTran
       return t("sync.vaultEncryptionDisabled");
     case "VAULT_ENCRYPTION_LOCKED":
       return t("sync.vaultEncryptionSyncLocked");
+    case "VAULT_ENCRYPTION_PASSPHRASE_REQUIRED":
+      return t("sync.vaultEncryptionPassphraseRequired");
+    case "VAULT_ENCRYPTION_PASSPHRASE_TOO_SHORT":
+      return t("sync.vaultEncryptionPassphraseTooShort");
     case "VAULT_ENCRYPTION_REMOTE_SYNC_REQUIRED":
       return t("sync.vaultEncryptionRemoteMigrationRequired");
     case "UNAUTHORIZED":
@@ -403,6 +412,8 @@ function translateSyncManagerError(message: string, t: ReturnType<typeof useTran
       return t("sync.hostedEmailExists");
     case "PASSWORD_TOO_SHORT":
       return t("sync.hostedPasswordTooShort");
+    case "LOCAL_VAULT_NAME_REQUIRED":
+      return t("settings.createVaultNameRequired");
     case "VAULT_NOT_FOUND":
       return t("sync.vaultNotFound");
     case "LAST_VAULT_REQUIRED":
@@ -495,6 +506,9 @@ export default function SyncSettingsPanel({
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [internalFeedback, setInternalFeedback] = useState<SyncFeedbackState>(null);
   const [vaultNameDraft, setVaultNameDraft] = useState("");
+  const [vaultKindDraft, setVaultKindDraft] = useState<LocalVaultKind>("regular");
+  const [vaultPassphraseDraft, setVaultPassphraseDraft] = useState("");
+  const [vaultPassphraseConfirmDraft, setVaultPassphraseConfirmDraft] = useState("");
   const [selfHostedLabelDraft, setSelfHostedLabelDraft] = useState("");
   const [selfHostedUrlDraft, setSelfHostedUrlDraft] = useState("");
   const [selfHostedManagementTokenDraft, setSelfHostedManagementTokenDraft] = useState("");
@@ -555,6 +569,7 @@ export default function SyncSettingsPanel({
       entries: Array<{
         id: string;
         name: string;
+        vaultKind?: LocalVaultKind;
         createdAt: number;
         updatedAt: number;
         lastRevision: string | null;
@@ -568,6 +583,7 @@ export default function SyncSettingsPanel({
             ({
               id: entry.id,
               name: entry.name,
+              vaultKind: entry.vaultKind ?? "regular",
               createdAt: entry.createdAt,
               updatedAt: entry.updatedAt,
               lastRevision: entry.lastRevision ?? null,
@@ -599,12 +615,48 @@ export default function SyncSettingsPanel({
       }));
 
       try {
-        const remoteVaults =
-          connection.provider === "hosted"
-            ? normalizeRemoteVaultEntries((await loadHostedAccountOverview(connection.serverUrl, connection.sessionToken)).vaults)
-            : connection.provider === "googleDrive"
-              ? normalizeRemoteVaultEntries((await loadGoogleDriveVaults(connection.sessionToken)).vaults)
-              : normalizeRemoteVaultEntries((await loadPersonalServerVaults(connection.serverUrl, connection.managementToken)).vaults);
+        let targetConnection = connection;
+        const fetchRemoteVaults = async (candidate: SyncConnection) =>
+          candidate.provider === "hosted"
+            ? normalizeRemoteVaultEntries(
+                (await loadHostedAccountOverview(candidate.serverUrl, candidate.sessionToken)).vaults
+              )
+            : candidate.provider === "googleDrive"
+              ? normalizeRemoteVaultEntries((await loadGoogleDriveVaults(candidate.sessionToken)).vaults)
+              : normalizeRemoteVaultEntries(
+                  (await loadPersonalServerVaults(candidate.serverUrl, candidate.managementToken)).vaults
+                );
+
+        if (
+          targetConnection.provider === "googleDrive" &&
+          targetConnection.tokenExpiresAt &&
+          targetConnection.tokenExpiresAt <= Date.now() + 15_000
+        ) {
+          try {
+            targetConnection = await reauthorizeGoogleDriveConnection(targetConnection, {
+              silent: true
+            });
+          } catch {
+            // The explicit auth flow remains available from the refresh action and inline error state.
+          }
+        }
+
+        let remoteVaults: RemoteVaultCatalogEntry[];
+
+        try {
+          remoteVaults = await fetchRemoteVaults(targetConnection);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "SYNC_FAILED";
+
+          if (targetConnection.provider === "googleDrive" && message === "GOOGLE_DRIVE_AUTH_REQUIRED") {
+            targetConnection = await reauthorizeGoogleDriveConnection(targetConnection, {
+              silent: true
+            });
+            remoteVaults = await fetchRemoteVaults(targetConnection);
+          } else {
+            throw error;
+          }
+        }
 
         setRemoteVaultsByConnectionId((current) => ({
           ...current,
@@ -959,7 +1011,7 @@ export default function SyncSettingsPanel({
       syncConnections.map(async (connection) => {
         try {
           const remoteVaults = await loadRemoteVaultCatalog(connection, {
-            silent: false
+            silent: true
           });
 
           if (cancelled) {
@@ -1004,6 +1056,10 @@ export default function SyncSettingsPanel({
     setPanelModal(null);
     setConfirmState(null);
     pendingVaultEncryptionContinuationRef.current = null;
+    setVaultNameDraft("");
+    setVaultKindDraft("regular");
+    setVaultPassphraseDraft("");
+    setVaultPassphraseConfirmDraft("");
     setEncryptionPassphraseDraft("");
     setEncryptionPassphraseConfirmDraft("");
     setEncryptionNextPassphraseDraft("");
@@ -1032,12 +1088,39 @@ export default function SyncSettingsPanel({
       return;
     }
 
-    const nextVaultId = await Promise.resolve(onCreateLocalVault(normalizedName));
-    if (nextVaultId) {
-      onSelectLocalVault(nextVaultId);
+    if (vaultKindDraft === "private") {
+      if (!vaultPassphraseDraft.trim()) {
+        showFeedback("error", t("sync.vaultEncryptionPassphraseRequired"));
+        return;
+      }
+
+      if (vaultPassphraseDraft.trim().length < 8) {
+        showFeedback("error", t("sync.vaultEncryptionPassphraseTooShort"));
+        return;
+      }
+
+      if (vaultPassphraseDraft.trim() !== vaultPassphraseConfirmDraft.trim()) {
+        showFeedback("error", t("sync.vaultEncryptionPassphraseMismatch"));
+        return;
+      }
     }
-    setVaultNameDraft("");
-    closeModal();
+
+    try {
+      const nextVaultId = await Promise.resolve(
+        onCreateLocalVault({
+          name: normalizedName,
+          vaultKind: vaultKindDraft,
+          passphrase: vaultKindDraft === "private" ? vaultPassphraseDraft.trim() : undefined
+        })
+      );
+      if (nextVaultId) {
+        onSelectLocalVault(nextVaultId);
+      }
+      closeModal();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "SYNC_FAILED";
+      showFeedback("error", translateSyncManagerError(message, t));
+    }
   };
 
   const handleRenameVault = () => {
@@ -1164,14 +1247,21 @@ export default function SyncSettingsPanel({
     }
   };
 
-  const reauthorizeGoogleDriveConnection = async (connection: SyncConnection) => {
+  async function reauthorizeGoogleDriveConnection(
+    connection: SyncConnection,
+    options?: {
+      silent?: boolean;
+    }
+  ) {
     if (connection.provider !== "googleDrive") {
       return connection;
     }
 
     const result = await connectGoogleDriveAccount({
       clientId: googleDriveClientId,
-      loginHint: connection.userEmail || undefined
+      loginHint: connection.userEmail || undefined,
+      silent: options?.silent,
+      prompt: options?.silent ? "none" : undefined
     });
 
     onUpdateConnection(connection.id, {
@@ -1193,7 +1283,7 @@ export default function SyncSettingsPanel({
       label: result.userEmail || result.userName || connection.label,
       updatedAt: Date.now()
     } satisfies SyncConnection;
-  };
+  }
 
   const performVaultBinding = async (
     vault: LocalVaultProfile,
@@ -1286,6 +1376,7 @@ export default function SyncSettingsPanel({
           connectionId: connection.id,
           remoteVaultId: remoteVault.id,
           remoteVaultName: remoteVault.name,
+          remoteVaultKind: remoteVault.vaultKind,
           openAfterImport: options?.openAfterImport
         });
 
@@ -1301,7 +1392,8 @@ export default function SyncSettingsPanel({
               buildVaultProfileFallback(
                 result.localVaultId,
                 remoteVault.id,
-                result.localVaultName
+                result.localVaultName,
+                remoteVault.vaultKind
               ),
             {
               view: "unlock",
@@ -1422,6 +1514,7 @@ export default function SyncSettingsPanel({
             connectionId: connection.id,
             remoteVaultId: remoteVault.id,
             remoteVaultName: remoteVault.name,
+            remoteVaultKind: remoteVault.vaultKind,
             openAfterImport: false
           });
 
@@ -1450,7 +1543,8 @@ export default function SyncSettingsPanel({
               buildVaultProfileFallback(
                 pendingUnlockResult.localVaultId,
                 pendingUnlockResult.remoteVault.id,
-                pendingUnlockResult.localVaultName
+                pendingUnlockResult.localVaultName,
+                pendingUnlockResult.remoteVault.vaultKind
               ),
             {
               view: "unlock",
@@ -1648,6 +1742,7 @@ export default function SyncSettingsPanel({
           {
             id: binding.remoteVaultId,
             name: binding.remoteVaultName,
+            vaultKind: vault.vaultKind,
             createdAt: 0,
             updatedAt: 0,
             lastRevision: binding.syncCursor,
@@ -1809,6 +1904,9 @@ export default function SyncSettingsPanel({
 
   const openCreateVaultModal = () => {
     setVaultNameDraft("");
+    setVaultKindDraft("regular");
+    setVaultPassphraseDraft("");
+    setVaultPassphraseConfirmDraft("");
     setPanelModal({
       kind: "createVault"
     });
@@ -1833,11 +1931,13 @@ export default function SyncSettingsPanel({
   const buildVaultProfileFallback = (
     vaultId: string,
     vaultGuid: string,
-    name: string
+    name: string,
+    vaultKind: LocalVaultKind = "regular"
   ): LocalVaultProfile => ({
     id: vaultId,
     vaultGuid,
     name,
+    vaultKind,
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
@@ -1850,6 +1950,10 @@ export default function SyncSettingsPanel({
       continuationAction?: (() => Promise<void>) | null;
     }
   ) => {
+    if (vault.vaultKind !== "private") {
+      return;
+    }
+
     setEncryptionPassphraseDraft("");
     setEncryptionPassphraseConfirmDraft("");
     setEncryptionNextPassphraseDraft("");
@@ -2133,6 +2237,8 @@ export default function SyncSettingsPanel({
                 const binding = bindingsByVaultId.get(vault.id) ?? null;
                 const bindingConnection = binding ? connectionsById.get(binding.connectionId) ?? null : null;
                 const encryption = resolveVaultEncryptionSummary(vault);
+                const privateEncryptionVisible =
+                  vault.vaultKind === "private" && encryption.state !== "disabled";
                 const needsUnlock =
                   (binding?.lastError === "VAULT_ENCRYPTION_LOCKED" || encryption.state === "locked") &&
                   encryption.enabled;
@@ -2157,7 +2263,16 @@ export default function SyncSettingsPanel({
                       <div className="sync-settings-card-copy">
                         <div className="sync-settings-chip-row sync-settings-chip-row-card">
                           {isActive ? <span className="sync-settings-chip is-accent">{t("sync.localVaultActive")}</span> : null}
-                          {encryption.enabled ? (
+                          {vault.vaultKind === "private" ? (
+                            <span className="sync-settings-chip is-private">
+                              {t("settings.vaultKindPrivate")}
+                            </span>
+                          ) : (
+                            <span className="sync-settings-chip is-default">
+                              {t("settings.vaultKindRegular")}
+                            </span>
+                          )}
+                          {privateEncryptionVisible ? (
                             <span
                               className={`sync-settings-chip ${
                                 encryption.state === "ready" ? "is-encrypted-ready" : "is-encrypted-locked"
@@ -2191,7 +2306,7 @@ export default function SyncSettingsPanel({
                           >
                             <VaultGlyph />
                           </span>
-                          {encryption.enabled ? (
+                          {privateEncryptionVisible ? (
                             <span
                               className={`sync-settings-encryption-badge ${
                                 encryption.state === "ready" ? "is-ready" : "is-locked"
@@ -2202,7 +2317,7 @@ export default function SyncSettingsPanel({
                                   : t("settings.vaultEncryptionLocked")
                               }
                             >
-                              <LockGlyph unlocked={encryption.state === "ready"} />
+                              <LockGlyph />
                             </span>
                           ) : null}
                           <strong>{vault.name}</strong>
@@ -2214,7 +2329,7 @@ export default function SyncSettingsPanel({
                               })
                             : t("sync.localVaultUnbound")}
                         </span>
-                        {binding ? (
+                          {binding ? (
                           <span className="sync-settings-card-submeta">
                             {binding.remoteVaultName} · {formatTime(binding.lastSyncAt, i18n.language)}
                           </span>
@@ -2223,27 +2338,27 @@ export default function SyncSettingsPanel({
                     </div>
 
                     <div className="sync-settings-card-actions">
-                      <button
-                        type="button"
-                        className={`sync-settings-icon-button ${
-                          encryption.enabled && encryption.state === "ready" ? "is-encryption-ready" : ""
-                        }`}
-                        title={
-                          encryption.enabled
-                            ? encryption.state === "ready"
+                      {privateEncryptionVisible ? (
+                        <button
+                          type="button"
+                          className={`sync-settings-icon-button ${
+                            encryption.state === "ready" ? "is-encryption-ready" : ""
+                          }`}
+                          title={
+                            encryption.state === "ready"
                               ? t("settings.manageVaultEncryption")
                               : t("settings.unlockVaultEncryption")
-                            : t("settings.enableVaultEncryption")
-                        }
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openVaultEncryptionModal(vault, {
-                            view: encryption.state === "locked" ? "unlock" : "default"
-                          });
-                        }}
-                      >
-                        <LockGlyph unlocked={encryption.state === "ready"} />
-                      </button>
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openVaultEncryptionModal(vault, {
+                              view: encryption.state === "locked" ? "unlock" : "default"
+                            });
+                          }}
+                        >
+                          <LockGlyph />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="sync-settings-icon-button sync-settings-link-handle"
@@ -2516,6 +2631,35 @@ export default function SyncSettingsPanel({
                               <div className="sync-settings-remote-empty is-error">
                                 <strong>{t("settings.remoteVaultLoadFailed")}</strong>
                                 <span>{remoteError}</span>
+                                {connection.provider === "googleDrive" &&
+                                availability === "authError" ? (
+                                  <button
+                                    type="button"
+                                    className="sync-settings-inline-action"
+                                    disabled={busyKey !== null}
+                                    onClick={() => {
+                                      void (async () => {
+                                        try {
+                                          setBusyKey(`reauth:${connection.id}`);
+                                          const nextConnection = await reauthorizeGoogleDriveConnection(connection);
+                                          await loadRemoteVaultCatalog(nextConnection, {
+                                            silent: false
+                                          });
+                                        } catch (error) {
+                                          const message =
+                                            error instanceof Error ? error.message : "SYNC_FAILED";
+                                          showFeedback("error", translateSyncManagerError(message, t));
+                                        } finally {
+                                          setBusyKey((current) =>
+                                            current === `reauth:${connection.id}` ? null : current
+                                          );
+                                        }
+                                      })();
+                                    }}
+                                  >
+                                    {t("settings.googleDriveReconnect")}
+                                  </button>
+                                ) : null}
                               </div>
                             ) : null}
 
@@ -2546,6 +2690,15 @@ export default function SyncSettingsPanel({
                                     <article key={remoteVault.id} className="sync-settings-remote-card">
                                       <div className="sync-settings-remote-card-copy">
                                         <div className="sync-settings-chip-row sync-settings-chip-row-card">
+                                          <span
+                                            className={`sync-settings-chip ${
+                                              remoteVault.vaultKind === "private" ? "is-private" : "is-neutral"
+                                            }`}
+                                          >
+                                            {remoteVault.vaultKind === "private"
+                                              ? t("settings.vaultKindPrivate")
+                                              : t("settings.vaultKindRegular")}
+                                          </span>
                                           {isLinkedHere ? (
                                             <span className="sync-settings-chip is-ready">
                                               {t("settings.remoteVaultLinkedHere")}
@@ -2830,6 +2983,28 @@ export default function SyncSettingsPanel({
                     ? t("settings.createVaultDescription")
                     : t("settings.renameVaultDescription")}
                 </p>
+                {panelModal.kind === "createVault" ? (
+                  <div className="sync-settings-vault-kind-picker" role="radiogroup" aria-label={t("settings.createVaultTypeLabel")}>
+                    <button
+                      type="button"
+                      className={`sync-settings-vault-kind-card ${vaultKindDraft === "regular" ? "is-selected" : ""}`}
+                      aria-pressed={vaultKindDraft === "regular"}
+                      onClick={() => setVaultKindDraft("regular")}
+                    >
+                      <span className="sync-settings-vault-kind-title">{t("settings.vaultKindRegular")}</span>
+                      <span className="sync-settings-vault-kind-copy">{t("settings.createVaultRegularDescription")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`sync-settings-vault-kind-card ${vaultKindDraft === "private" ? "is-selected" : ""}`}
+                      aria-pressed={vaultKindDraft === "private"}
+                      onClick={() => setVaultKindDraft("private")}
+                    >
+                      <span className="sync-settings-vault-kind-title">{t("settings.vaultKindPrivate")}</span>
+                      <span className="sync-settings-vault-kind-copy">{t("settings.createVaultPrivateDescription")}</span>
+                    </button>
+                  </div>
+                ) : null}
                 <input
                   className="sync-settings-input"
                   value={vaultNameDraft}
@@ -2837,6 +3012,27 @@ export default function SyncSettingsPanel({
                   placeholder={t("sync.localVaultCreatePlaceholder")}
                   autoFocus
                 />
+                {panelModal.kind === "createVault" && vaultKindDraft === "private" ? (
+                  <>
+                    <input
+                      className="sync-settings-input"
+                      type="password"
+                      value={vaultPassphraseDraft}
+                      onChange={(event) => setVaultPassphraseDraft(event.target.value)}
+                      placeholder={t("settings.vaultEncryptionPassphrase")}
+                    />
+                    <input
+                      className="sync-settings-input"
+                      type="password"
+                      value={vaultPassphraseConfirmDraft}
+                      onChange={(event) => setVaultPassphraseConfirmDraft(event.target.value)}
+                      placeholder={t("settings.vaultEncryptionConfirmPassphrase")}
+                    />
+                    <span className="sync-settings-note-copy">
+                      {t("settings.createVaultPrivateHint")}
+                    </span>
+                  </>
+                ) : null}
                 <div className="sync-settings-modal-actions">
                   <button type="button" className="sync-settings-inline-action" onClick={closeModal}>
                     {t("dialog.cancel")}
@@ -3045,22 +3241,6 @@ export default function SyncSettingsPanel({
                               }
                             >
                               {t("settings.vaultEncryptionChangePassphrase")}
-                            </button>
-                            <button
-                              type="button"
-                              className="sync-settings-inline-action is-danger"
-                              onClick={() =>
-                                setPanelModal((current) =>
-                                  current && current.kind === "vaultEncryption"
-                                    ? {
-                                        ...current,
-                                        view: "disable"
-                                      }
-                                    : current
-                                )
-                              }
-                            >
-                              {t("settings.vaultEncryptionDisable")}
                             </button>
                             <button
                               type="button"

@@ -11,6 +11,7 @@ export type SyncStatus = "disabled" | "idle" | "syncing" | "error";
 export type ConflictStrategy = "duplicate";
 export type SyncEntityKind = "project" | "folder" | "tag" | "note" | "asset";
 export type SyncPayloadMode = "plain" | "encrypted";
+export type SyncVaultKind = "regular" | "private";
 export type SyncEncryptionState = "disabled" | "ready" | "locked";
 export type SyncEncryptionKdf = "pbkdf2-sha256";
 export type SyncEncryptionCipher = "aes-gcm-256";
@@ -156,6 +157,7 @@ export interface VaultEncryptionSummary {
 export interface SyncRemoteVault {
   id: string;
   name: string;
+  vaultKind: SyncVaultKind;
   createdAt: number;
   updatedAt: number;
   lastRevision: string | null;
@@ -223,6 +225,7 @@ export interface HostedAccountVault {
   name: string;
   ownerUserId: string | null;
   ownerName: string | null;
+  vaultKind: SyncVaultKind;
   createdAt: number;
   updatedAt: number;
   lastRevision: string | null;
@@ -291,6 +294,7 @@ export interface SyncVaultDescriptor {
   localVaultId: string | null;
   vaultGuid: string | null;
   name: string | null;
+  vaultKind: SyncVaultKind;
   schemaVersion: number;
 }
 
@@ -357,6 +361,7 @@ export interface SyncChangeFeed {
   revision: string | null;
   baseRevision: string | null;
   changes: SyncChangeSet | null;
+  encryptedChanges: SyncEncryptedPayload[] | null;
   snapshot: SyncSnapshot | null;
   metadata?: SyncEnvelopeMetadata | null;
 }

@@ -95,6 +95,22 @@
   color: #ffd0d6;
 }
 
+.orbital-sync-transport-pill {
+  animation: orbital-sync-transport-enter 240ms ease;
+}
+
+@keyframes orbital-sync-transport-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .orbital-overlay .orbital-topbar-minimal .status-chip {
   min-height: 28px;
   padding: 5px 9px;

@@ -23,6 +23,7 @@ import {
   DEFAULT_NOTE_COLOR,
   DEFAULT_PROJECT_COLOR
 } from "../lib/palette";
+import type { LocalVaultKind } from "../lib/localVaults";
 import { getCanvasMetrics } from "../lib/canvas";
 import { buildFolderPathMap, formatTimestamp } from "../lib/notes";
 import type { AppLanguage, Asset, Folder, Note, Project, Tag } from "../types";
@@ -48,6 +49,11 @@ interface OrbitalMapViewProps {
     text: string;
     title?: string;
   };
+  syncTransportChip?: {
+    tone: "default" | "success" | "warning" | "error";
+    text: string;
+    title?: string;
+  } | null;
   editorOpen: boolean;
   editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
@@ -57,6 +63,11 @@ interface OrbitalMapViewProps {
   showClose?: boolean;
   onClose: () => void;
   onSelectLocalVault: (localVaultId: string) => void;
+  onCreateLocalVault?: (input: {
+    name: string;
+    vaultKind: LocalVaultKind;
+    passphrase?: string;
+  }) => string | void | Promise<string | void>;
   onCloseEditor: () => void;
   onCreateProject: (x: number, y: number) => Promise<Project>;
   onRenameProject: (projectId: string, name: string) => Promise<void> | void;
@@ -1666,6 +1677,7 @@ export default function OrbitalMapView({
   activeLocalVaultId,
   localVaultOptions,
   syncStatusChip,
+  syncTransportChip,
   editorOpen,
   editorMode = null,
   editorSlot,
@@ -1675,6 +1687,7 @@ export default function OrbitalMapView({
   showClose = true,
   onClose,
   onSelectLocalVault,
+  onCreateLocalVault,
   onCloseEditor,
   onCreateProject,
   onRenameProject,
@@ -4633,6 +4646,7 @@ export default function OrbitalMapView({
               items={localVaultOptions}
               activeVaultId={activeLocalVaultId}
               onSelect={onSelectLocalVault}
+              onCreate={onCreateLocalVault}
             />
             {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
             {syncStatusChip ? (
@@ -4641,6 +4655,14 @@ export default function OrbitalMapView({
                 title={syncStatusChip.title ?? syncStatusChip.text}
               >
                 {syncStatusChip.text}
+              </span>
+            ) : null}
+            {syncTransportChip ? (
+              <span
+                className={`orbital-context-pill orbital-sync-pill orbital-sync-transport-pill is-${syncTransportChip.tone}`}
+                title={syncTransportChip.title ?? syncTransportChip.text}
+              >
+                {syncTransportChip.text}
               </span>
             ) : null}
             {autoFocusEnabled ? <span className="status-chip accent">{labels.autoFocus}</span> : null}

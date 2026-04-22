@@ -23,6 +23,7 @@ import {
   handleOptimisticSyncRoute,
   isChangeSetEmpty,
   isEncryptedEnvelope,
+  normalizeEncryptedPayload,
   normalizeChangeSet,
   normalizeStoredEnvelope,
   now,
@@ -74,6 +75,10 @@ function isValidEmail(email) {
 function sanitizeDisplayName(rawValue, fallbackValue) {
   const candidate = String(rawValue ?? "").trim().slice(0, 120);
   return candidate || fallbackValue;
+}
+
+function normalizeVaultKind(value) {
+  return value === "private" ? "private" : "regular";
 }
 
 function hashPassword(password) {
@@ -272,6 +277,7 @@ async function readRegistry() {
               id,
               name,
               ownerUserId: typeof vault.ownerUserId === "string" ? sanitizeUserId(vault.ownerUserId) || null : null,
+              vaultKind: normalizeVaultKind(vault.vaultKind),
               createdAt: typeof vault.createdAt === "number" ? vault.createdAt : now(),
               updatedAt: typeof vault.updatedAt === "number" ? vault.updatedAt : now(),
               lastRevision: typeof vault.lastRevision === "string" ? vault.lastRevision : null,
@@ -320,10 +326,11 @@ async function readVaultJournal(vaultId) {
             ? entry.baseRevision ?? null
             : null,
         createdAt: typeof entry.createdAt === "number" ? entry.createdAt : now(),
-        changes: normalizeChangeSet(entry.changes, "server")
+        changes: entry.encryptedChanges ? null : normalizeChangeSet(entry.changes, "server"),
+        encryptedChanges: normalizeEncryptedPayload(entry.encryptedChanges)
       };
     })
-    .filter((entry) => entry && entry.revision);
+    .filter((entry) => entry && entry.revision && (entry.changes || entry.encryptedChanges));
 }
 
 async function writeVaultJournal(vaultId, journal) {
@@ -362,6 +369,7 @@ async function migrateLegacySingleVault(registry) {
           id: defaultVaultId,
           name: "Default vault",
           ownerUserId: null,
+          vaultKind: "regular",
           createdAt: now(),
           updatedAt: now(),
           lastRevision: null,
@@ -460,9 +468,14 @@ function buildSnapshotFallbackFeed(envelope) {
     revision: envelope.revision,
     baseRevision: null,
     changes: null,
+    encryptedChanges: null,
     snapshot: isEncryptedEnvelope(envelope) ? null : envelope.snapshot,
     metadata: envelope.metadata ?? null
   };
+}
+
+function resolveEnvelopeVaultKind(envelope) {
+  return envelope?.metadata?.payloadMode === "encrypted" ? "private" : "regular";
 }
 
 function isAdminAuthorized(request) {
@@ -708,6 +721,7 @@ async function createVaultRecord(registry, payload) {
         id: vaultId,
         name,
         ownerUserId,
+        vaultKind: "regular",
         createdAt: now(),
         updatedAt: now(),
         lastRevision: null,
@@ -1397,11 +1411,6 @@ const server = createServer(async (request, response) => {
       const currentEnvelope = await readVaultEnvelope(changesVaultId);
 
       if (request.method === "GET") {
-        if (currentEnvelope.metadata?.payloadMode === "encrypted") {
-          sendJson(response, 200, buildSnapshotFallbackFeed(currentEnvelope));
-          return;
-        }
-
         const sinceRevision = url.searchParams.get("since")?.trim() ?? "";
 
         if (!sinceRevision || !currentEnvelope.revision) {
@@ -1414,8 +1423,14 @@ const server = createServer(async (request, response) => {
             mode: "delta",
             revision: currentEnvelope.revision,
             baseRevision: sinceRevision,
-            changes: createEmptyChangeSet("server"),
-            snapshot: null
+            changes:
+              currentEnvelope.metadata?.payloadMode === "encrypted"
+                ? null
+                : createEmptyChangeSet("server"),
+            encryptedChanges:
+              currentEnvelope.metadata?.payloadMode === "encrypted" ? [] : null,
+            snapshot: null,
+            metadata: currentEnvelope.metadata ?? null
           });
           return;
         }
@@ -1428,11 +1443,32 @@ const server = createServer(async (request, response) => {
           return;
         }
 
+        if (currentEnvelope.metadata?.payloadMode === "encrypted") {
+          const batches = journal.slice(cursorIndex + 1).map((entry) => entry.encryptedChanges).filter(Boolean);
+
+          if (batches.length !== journal.slice(cursorIndex + 1).length) {
+            sendJson(response, 200, buildSnapshotFallbackFeed(currentEnvelope));
+            return;
+          }
+
+          sendJson(response, 200, {
+            mode: "delta",
+            revision: currentEnvelope.revision,
+            baseRevision: sinceRevision,
+            changes: null,
+            encryptedChanges: batches,
+            snapshot: null,
+            metadata: currentEnvelope.metadata ?? null
+          });
+          return;
+        }
+
         sendJson(response, 200, {
           mode: "delta",
           revision: currentEnvelope.revision,
           baseRevision: sinceRevision,
           changes: collapseChangeSets(journal.slice(cursorIndex + 1).map((entry) => entry.changes)),
+          encryptedChanges: null,
           snapshot: null
         });
         return;
@@ -1445,9 +1481,74 @@ const server = createServer(async (request, response) => {
           : null;
       const rawChanges =
         payload && typeof payload === "object" && "changes" in payload ? payload.changes : null;
+      const encryptedChanges =
+        payload && typeof payload === "object" && "encryptedChanges" in payload
+          ? normalizeEncryptedPayload(payload.encryptedChanges)
+          : null;
+      const encryptedSnapshot =
+        payload && typeof payload === "object" && "encryptedSnapshot" in payload
+          ? normalizeEncryptedPayload(payload.encryptedSnapshot)
+          : null;
+      const metadata =
+        payload && typeof payload === "object" && payload.metadata && typeof payload.metadata === "object"
+          ? {
+              schemaVersion:
+                typeof payload.metadata.schemaVersion === "number" ? payload.metadata.schemaVersion : 1,
+              payloadMode: payload.metadata.payloadMode === "encrypted" ? "encrypted" : "plain",
+              vault:
+                payload.metadata.vault && typeof payload.metadata.vault === "object"
+                  ? payload.metadata.vault
+                  : null,
+              encryption:
+                payload.metadata.encryption && typeof payload.metadata.encryption === "object"
+                  ? payload.metadata.encryption
+                  : null
+            }
+          : null;
       const changes = normalizeChangeSet(rawChanges, "server");
 
       if (currentEnvelope.metadata?.payloadMode === "encrypted") {
+        if (!encryptedChanges || !encryptedSnapshot || metadata?.payloadMode !== "encrypted") {
+          sendJson(response, 400, {
+            error: "ENCRYPTED_DELTA_PAYLOAD_REQUIRED"
+          });
+          return;
+        }
+
+        if (currentEnvelope.revision !== baseRevision) {
+          sendJson(response, 409, {
+            error: "SYNC_REVISION_CONFLICT",
+            revision: currentEnvelope.revision
+          });
+          return;
+        }
+
+        const nextEnvelope = {
+          revision: `rev-${Date.now()}-${randomUUID()}`,
+          encryptedSnapshot,
+          metadata
+        };
+
+        await writeVaultEnvelope(changesVaultId, nextEnvelope);
+        await appendVaultJournalEntry(changesVaultId, {
+          revision: nextEnvelope.revision,
+          baseRevision,
+          createdAt: now(),
+          encryptedChanges
+        });
+        await updateVaultMeta(registryWithUsage, changesVaultId, {
+          lastRevision: nextEnvelope.revision,
+          lastSyncAt: Date.now(),
+          vaultKind: "private"
+        });
+
+        sendJson(response, 200, {
+          revision: nextEnvelope.revision
+        });
+        return;
+      }
+
+      if (encryptedChanges || encryptedSnapshot || metadata?.payloadMode === "encrypted") {
         sendJson(response, 409, {
           error: "DELTA_SYNC_UNAVAILABLE",
           revision: currentEnvelope.revision
@@ -1492,7 +1593,8 @@ const server = createServer(async (request, response) => {
       });
       await updateVaultMeta(registryWithUsage, changesVaultId, {
         lastRevision: nextEnvelope.revision,
-        lastSyncAt: Date.now()
+        lastSyncAt: Date.now(),
+        vaultKind: "regular"
       });
 
       sendJson(response, 200, {
@@ -1532,7 +1634,8 @@ const server = createServer(async (request, response) => {
             await writeVaultJournal(stateVaultId, []);
             await updateVaultMeta(registryWithUsage, stateVaultId, {
               lastRevision: envelope.revision,
-              lastSyncAt: Date.now()
+              lastSyncAt: Date.now(),
+              vaultKind: resolveEnvelopeVaultKind(envelope)
             });
             return;
           }
@@ -1550,7 +1653,8 @@ const server = createServer(async (request, response) => {
 
           await updateVaultMeta(registryWithUsage, stateVaultId, {
             lastRevision: envelope.revision,
-            lastSyncAt: Date.now()
+            lastSyncAt: Date.now(),
+            vaultKind: resolveEnvelopeVaultKind(envelope)
           });
         }
       });

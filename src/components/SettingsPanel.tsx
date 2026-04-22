@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LocalVaultProfile } from "../lib/localVaults";
+import type { LocalVaultKind, LocalVaultProfile } from "../lib/localVaults";
 import type {
   AppLanguage,
   AppSettings,
@@ -30,7 +30,11 @@ interface SettingsPanelProps {
   syncFeedback?: SyncFeedbackState;
   onLanguageChange: (language: AppLanguage) => void;
   onSelectLocalVault: (localVaultId: string) => void;
-  onCreateLocalVault: (name: string) => string | Promise<string>;
+  onCreateLocalVault: (input: {
+    name: string;
+    vaultKind: LocalVaultKind;
+    passphrase?: string;
+  }) => string | Promise<string>;
   onRenameLocalVault: (localVaultId: string, name: string) => void;
   onDeleteLocalVault: (
     localVaultId: string,
@@ -65,6 +69,7 @@ interface SettingsPanelProps {
     connectionId: string;
     remoteVaultId: string;
     remoteVaultName: string;
+    remoteVaultKind?: LocalVaultKind;
     openAfterImport?: boolean;
   }) => Promise<RemoteVaultImportResult>;
   onDeleteRemoteVault: (input: {
