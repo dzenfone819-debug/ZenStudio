@@ -1,10 +1,14 @@
 import { createPlainSyncDescriptor } from "./e2ee";
 import type {
+  SyncChangeFeed,
+  SyncChangeSet,
   SyncConnection,
   SyncEnvelope,
+  SyncEncryptedPayload,
   SyncRemoteVault,
   SyncSecureEnvelope,
   SyncSnapshot,
+  SyncTombstone,
   SyncVaultDescriptor
 } from "../types";
 
@@ -16,10 +20,12 @@ export const GOOGLE_DRIVE_APP_DATA_SCOPE = "https://www.googleapis.com/auth/driv
 export const GOOGLE_DRIVE_APP_FOLDER = "appDataFolder";
 export const GOOGLE_DRIVE_MANIFEST_FILE = "zen-sync-manifest.json";
 export const GOOGLE_DRIVE_VAULT_PREFIX = "vault-";
+export const GOOGLE_DRIVE_VAULT_JOURNAL_SUFFIX = ".journal.json";
 export const GOOGLE_DRIVE_BINDING_TOKEN = "google-drive-session";
 const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 const GOOGLE_IDENTITY_LOAD_TIMEOUT_MS = 10_000;
 const GOOGLE_IDENTITY_POLL_INTERVAL_MS = 50;
+const GOOGLE_DRIVE_CHANGE_HISTORY_LIMIT = 240;
 
 type GoogleTokenResponse = {
   access_token?: string;
@@ -101,6 +107,7 @@ export interface GoogleDriveRemoteVaultRecord {
   id: string;
   name: string;
   fileId: string;
+  journalFileId?: string | null;
   vaultKind: "regular" | "private";
   updatedAt: number;
   revision: string | null;
@@ -120,6 +127,22 @@ export interface GoogleDriveVaultBlob {
   vaultId: string;
   updatedAt: number;
   envelope: SyncEnvelope | SyncSecureEnvelope;
+}
+
+interface GoogleDriveVaultJournalEntry {
+  revision: string;
+  baseRevision: string | null;
+  createdAt: number;
+  changes: SyncChangeSet | null;
+  encryptedChanges: SyncEncryptedPayload | null;
+}
+
+interface GoogleDriveVaultJournalBlob {
+  schemaVersion: 1;
+  provider: "googleDrive";
+  vaultId: string;
+  updatedAt: number;
+  entries: GoogleDriveVaultJournalEntry[];
 }
 
 export interface GoogleDriveAccountSession {
@@ -181,6 +204,163 @@ function sanitizeText(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() || fallback : fallback;
 }
 
+function createEmptyChangeSet(deviceId = "google-drive"): SyncChangeSet {
+  return {
+    deviceId,
+    exportedAt: 0,
+    projects: [],
+    folders: [],
+    tags: [],
+    notes: [],
+    assets: [],
+    tombstones: []
+  };
+}
+
+function normalizeEncryptedPayload(value: unknown): SyncEncryptedPayload | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const payload = value as Partial<SyncEncryptedPayload>;
+
+  if (
+    payload.version !== 1 ||
+    payload.cipher !== "aes-gcm-256" ||
+    typeof payload.iv !== "string" ||
+    !payload.iv.trim() ||
+    typeof payload.ciphertext !== "string" ||
+    !payload.ciphertext.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    cipher: "aes-gcm-256",
+    iv: payload.iv.trim(),
+    ciphertext: payload.ciphertext.trim()
+  };
+}
+
+function normalizeChangeSetPayload(
+  payload: Partial<SyncChangeSet> | null | undefined,
+  fallbackDeviceId = "google-drive"
+): SyncChangeSet {
+  if (!payload || typeof payload !== "object") {
+    return createEmptyChangeSet(fallbackDeviceId);
+  }
+
+  return {
+    deviceId: typeof payload.deviceId === "string" ? payload.deviceId : fallbackDeviceId,
+    exportedAt: typeof payload.exportedAt === "number" ? payload.exportedAt : now(),
+    projects: Array.isArray(payload.projects) ? payload.projects.filter(Boolean) : [],
+    folders: Array.isArray(payload.folders) ? payload.folders.filter(Boolean) : [],
+    tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [],
+    notes: Array.isArray(payload.notes) ? payload.notes.filter(Boolean) : [],
+    assets: Array.isArray(payload.assets) ? payload.assets.filter(Boolean) : [],
+    tombstones: Array.isArray(payload.tombstones) ? payload.tombstones.filter(Boolean) : []
+  };
+}
+
+function sortById<T extends { id: string }>(records: readonly T[]) {
+  return [...records].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function sortTombstones(records: readonly SyncTombstone[]) {
+  return [...records].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function getEntityKey(entityType: "project" | "folder" | "tag" | "note" | "asset", entityId: string) {
+  return `${entityType}:${entityId}`;
+}
+
+function applyChangeSetIntoMaps(
+  maps: {
+    project: Map<string, SyncChangeSet["projects"][number]>;
+    folder: Map<string, SyncChangeSet["folders"][number]>;
+    tag: Map<string, SyncChangeSet["tags"][number]>;
+    note: Map<string, SyncChangeSet["notes"][number]>;
+    asset: Map<string, SyncChangeSet["assets"][number]>;
+    tombstones: Map<string, SyncTombstone>;
+  },
+  changeSet: SyncChangeSet
+) {
+  const applyRecords = <T extends { id: string }>(
+    entityType: "project" | "folder" | "tag" | "note" | "asset",
+    target: Map<string, T>,
+    records: readonly T[]
+  ) => {
+    records.forEach((record) => {
+      target.set(record.id, record);
+      maps.tombstones.delete(getEntityKey(entityType, record.id));
+    });
+  };
+
+  applyRecords("project", maps.project, changeSet.projects);
+  applyRecords("folder", maps.folder, changeSet.folders);
+  applyRecords("tag", maps.tag, changeSet.tags);
+  applyRecords("note", maps.note, changeSet.notes);
+  applyRecords("asset", maps.asset, changeSet.assets);
+
+  changeSet.tombstones.forEach((tombstone) => {
+    switch (tombstone.entityType) {
+      case "project":
+        maps.project.delete(tombstone.entityId);
+        break;
+      case "folder":
+        maps.folder.delete(tombstone.entityId);
+        break;
+      case "tag":
+        maps.tag.delete(tombstone.entityId);
+        break;
+      case "note":
+        maps.note.delete(tombstone.entityId);
+        break;
+      case "asset":
+        maps.asset.delete(tombstone.entityId);
+        break;
+    }
+
+    maps.tombstones.set(tombstone.key, tombstone);
+  });
+}
+
+function collapseChangeSetBatches(changeSets: readonly SyncChangeSet[]) {
+  const maps = {
+    project: new Map<string, SyncChangeSet["projects"][number]>(),
+    folder: new Map<string, SyncChangeSet["folders"][number]>(),
+    tag: new Map<string, SyncChangeSet["tags"][number]>(),
+    note: new Map<string, SyncChangeSet["notes"][number]>(),
+    asset: new Map<string, SyncChangeSet["assets"][number]>(),
+    tombstones: new Map<string, SyncTombstone>()
+  };
+  let deviceId = "google-drive";
+  let exportedAt = 0;
+
+  changeSets.forEach((rawChangeSet) => {
+    const changeSet = normalizeChangeSetPayload(rawChangeSet, deviceId);
+    deviceId = changeSet.deviceId || deviceId;
+    exportedAt = Math.max(exportedAt, changeSet.exportedAt || 0);
+    applyChangeSetIntoMaps(maps, changeSet);
+  });
+
+  return {
+    deviceId,
+    exportedAt,
+    projects: sortById([...maps.project.values()]),
+    folders: sortById([...maps.folder.values()]),
+    tags: sortById([...maps.tag.values()]),
+    notes: sortById([...maps.note.values()]),
+    assets: sortById([...maps.asset.values()]),
+    tombstones: sortTombstones([...maps.tombstones.values()])
+  } satisfies SyncChangeSet;
+}
+
+function pruneJournalEntries(entries: readonly GoogleDriveVaultJournalEntry[]) {
+  return entries.slice(-GOOGLE_DRIVE_CHANGE_HISTORY_LIMIT);
+}
+
 function buildVaultDescriptor(vaultId: string, vaultName: string): SyncVaultDescriptor {
   return {
     localVaultId: null,
@@ -218,6 +398,24 @@ function createDefaultVaultBlob(vaultId: string, vaultName: string): GoogleDrive
     updatedAt: now(),
     envelope: createEmptyGoogleDriveEnvelope(vaultId, vaultName)
   };
+}
+
+function createDefaultVaultJournalBlob(vaultId: string): GoogleDriveVaultJournalBlob {
+  return {
+    schemaVersion: 1,
+    provider: "googleDrive",
+    vaultId,
+    updatedAt: now(),
+    entries: []
+  };
+}
+
+function buildGoogleDriveVaultStateFileName(vaultId: string) {
+  return `${GOOGLE_DRIVE_VAULT_PREFIX}${vaultId}.json`;
+}
+
+function buildGoogleDriveVaultJournalFileName(vaultId: string) {
+  return `${GOOGLE_DRIVE_VAULT_PREFIX}${vaultId}${GOOGLE_DRIVE_VAULT_JOURNAL_SUFFIX}`;
 }
 
 function escapeQueryValue(value: string) {
@@ -592,6 +790,7 @@ async function readGoogleDriveManifestState(accessToken: string): Promise<Google
       vaults: Array.isArray(manifest.vaults)
         ? manifest.vaults.map((entry) => ({
             ...entry,
+            journalFileId: sanitizeText(entry?.journalFileId, "") || null,
             vaultKind: entry?.vaultKind === "private" ? "private" : "regular"
           }))
         : []
@@ -622,11 +821,28 @@ async function writeGoogleDriveManifest(accessToken: string, state: GoogleDriveM
 }
 
 function deriveVaultIdFromFileName(fileName: string) {
-  if (!fileName.startsWith(GOOGLE_DRIVE_VAULT_PREFIX) || !fileName.endsWith(".json")) {
+  if (
+    !fileName.startsWith(GOOGLE_DRIVE_VAULT_PREFIX) ||
+    !fileName.endsWith(".json") ||
+    fileName.endsWith(GOOGLE_DRIVE_VAULT_JOURNAL_SUFFIX)
+  ) {
     return null;
   }
 
   return fileName.slice(GOOGLE_DRIVE_VAULT_PREFIX.length, -".json".length).trim() || null;
+}
+
+function deriveVaultIdFromJournalFileName(fileName: string) {
+  if (
+    !fileName.startsWith(GOOGLE_DRIVE_VAULT_PREFIX) ||
+    !fileName.endsWith(GOOGLE_DRIVE_VAULT_JOURNAL_SUFFIX)
+  ) {
+    return null;
+  }
+
+  return fileName
+    .slice(GOOGLE_DRIVE_VAULT_PREFIX.length, -GOOGLE_DRIVE_VAULT_JOURNAL_SUFFIX.length)
+    .trim() || null;
 }
 
 function normalizeRemoteVaultRecord(record: GoogleDriveRemoteVaultRecord): SyncRemoteVault {
@@ -703,6 +919,11 @@ async function resolveGoogleDriveCatalog(accessToken: string) {
   const vaultFiles = state.files.filter(
     (file) => file.name !== GOOGLE_DRIVE_MANIFEST_FILE && deriveVaultIdFromFileName(file.name)
   );
+  const journalFilesByVaultId = new Map(
+    state.files
+      .map((file) => [deriveVaultIdFromJournalFileName(file.name), file] as const)
+      .filter((entry): entry is [string, GoogleDriveFileMeta] => Boolean(entry[0]))
+  );
   const manifestById = new Map(state.manifest.vaults.map((entry) => [entry.id, entry]));
   const resolvedRecords: GoogleDriveRemoteVaultRecord[] = [];
 
@@ -714,8 +935,13 @@ async function resolveGoogleDriveCatalog(accessToken: string) {
     }
 
     const manifestEntry = manifestById.get(parsed.id);
+    const journalMeta = journalFilesByVaultId.get(parsed.id) ?? null;
     resolvedRecords.push({
       ...parsed,
+      journalFileId:
+        sanitizeText(manifestEntry?.journalFileId, "") ||
+        sanitizeText(journalMeta?.id, "") ||
+        null,
       name: manifestEntry?.name || parsed.name,
       updatedAt: Math.max(parsed.updatedAt, manifestEntry?.updatedAt ?? 0),
       revision: manifestEntry?.revision ?? parsed.revision
@@ -729,6 +955,7 @@ async function resolveGoogleDriveCatalog(accessToken: string) {
       return (
         !current ||
         current.fileId !== record.fileId ||
+        (current.journalFileId ?? null) !== (record.journalFileId ?? null) ||
         current.name !== record.name ||
         current.vaultKind !== record.vaultKind ||
         current.revision !== record.revision
@@ -772,6 +999,134 @@ function normalizeEnvelopePayload(
   }
 
   return candidate as SyncEnvelope | SyncSecureEnvelope;
+}
+
+function isEncryptedEnvelope(
+  envelope: SyncEnvelope | SyncSecureEnvelope
+): envelope is SyncSecureEnvelope {
+  return Boolean(
+    envelope &&
+      typeof envelope === "object" &&
+      "encryptedSnapshot" in envelope &&
+      envelope.encryptedSnapshot
+  );
+}
+
+function buildSnapshotFallbackFeed(
+  envelope: SyncEnvelope | SyncSecureEnvelope
+): SyncChangeFeed {
+  return {
+    mode: "snapshot",
+    revision: envelope.revision ?? null,
+    baseRevision: null,
+    changes: null,
+    encryptedChanges: null,
+    snapshot: isEncryptedEnvelope(envelope) ? null : envelope.snapshot,
+    metadata: envelope.metadata ?? null
+  };
+}
+
+function normalizeJournalEntry(
+  entry: unknown,
+  fallbackDeviceId = "google-drive"
+): GoogleDriveVaultJournalEntry | null {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const payload = entry as Record<string, unknown>;
+  const revision = sanitizeText(payload.revision, "");
+
+  if (!revision) {
+    return null;
+  }
+
+  const changes = payload.encryptedChanges
+    ? null
+    : normalizeChangeSetPayload(payload.changes as Partial<SyncChangeSet> | null, fallbackDeviceId);
+  const encryptedChanges = normalizeEncryptedPayload(payload.encryptedChanges);
+
+  if (!changes && !encryptedChanges) {
+    return null;
+  }
+
+  return {
+    revision,
+    baseRevision:
+      typeof payload.baseRevision === "string" || payload.baseRevision === null
+        ? (payload.baseRevision ?? null)
+        : null,
+    createdAt: typeof payload.createdAt === "number" ? payload.createdAt : now(),
+    changes,
+    encryptedChanges
+  };
+}
+
+async function readGoogleDriveJournalState(
+  accessToken: string,
+  record: Pick<GoogleDriveRemoteVaultRecord, "id" | "journalFileId">
+) {
+  let journalFileId = sanitizeText(record.journalFileId, "") || null;
+
+  if (!journalFileId) {
+    const files = await listGoogleDriveAppDataFiles(accessToken);
+    const journalMeta =
+      files.find((file) => file.name === buildGoogleDriveVaultJournalFileName(record.id)) ?? null;
+    journalFileId = journalMeta?.id ?? null;
+  }
+
+  if (!journalFileId) {
+    return {
+      fileId: null,
+      blob: createDefaultVaultJournalBlob(record.id)
+    };
+  }
+
+  const payload = await readDriveFileJson<GoogleDriveVaultJournalBlob>(accessToken, journalFileId).catch(
+    () => null
+  );
+
+  if (!payload || payload.provider !== "googleDrive" || !Array.isArray(payload.entries)) {
+    return {
+      fileId: journalFileId,
+      blob: createDefaultVaultJournalBlob(record.id)
+    };
+  }
+
+  return {
+    fileId: journalFileId,
+    blob: {
+      schemaVersion: 1,
+      provider: "googleDrive" as const,
+      vaultId: sanitizeText(payload.vaultId, record.id) || record.id,
+      updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : now(),
+      entries: payload.entries
+        .map((entry) => normalizeJournalEntry(entry))
+        .filter((entry): entry is GoogleDriveVaultJournalEntry => Boolean(entry))
+    }
+  };
+}
+
+async function writeGoogleDriveJournalState(
+  accessToken: string,
+  record: Pick<GoogleDriveRemoteVaultRecord, "id" | "journalFileId">,
+  entries: readonly GoogleDriveVaultJournalEntry[]
+) {
+  const response = await uploadGoogleDriveJsonFile({
+    accessToken,
+    fileId: record.journalFileId ?? null,
+    name: buildGoogleDriveVaultJournalFileName(record.id),
+    parents: record.journalFileId ? undefined : [GOOGLE_DRIVE_APP_FOLDER],
+    payload: {
+      schemaVersion: 1,
+      provider: "googleDrive",
+      vaultId: record.id,
+      updatedAt: now(),
+      entries: pruneJournalEntries(entries)
+    } satisfies GoogleDriveVaultJournalBlob
+  });
+
+  return sanitizeText(response.id, record.journalFileId ?? "") || null;
 }
 
 export async function connectGoogleDriveAccount(options?: {
@@ -841,11 +1196,18 @@ export async function createGoogleDriveRemoteVault(
     parents: [GOOGLE_DRIVE_APP_FOLDER],
     payload: blob
   });
+  const journalCreated = await uploadGoogleDriveJsonFile({
+    accessToken,
+    name: buildGoogleDriveVaultJournalFileName(vaultId),
+    parents: [GOOGLE_DRIVE_APP_FOLDER],
+    payload: createDefaultVaultJournalBlob(vaultId)
+  });
   const state = await readGoogleDriveManifestState(accessToken);
   const record: GoogleDriveRemoteVaultRecord = {
     id: vaultId,
     name: vaultName,
     fileId: sanitizeText(created.id),
+    journalFileId: sanitizeText(journalCreated.id) || null,
     vaultKind: "regular",
     updatedAt: normalizeDriveTimestamp(created.modifiedTime),
     revision: blob.envelope.revision ?? null
@@ -874,6 +1236,13 @@ export async function deleteGoogleDriveRemoteVault(accessToken: string, vaultId:
     `${GOOGLE_DRIVE_FILES_BASE_URL}/${encodeURIComponent(record.fileId)}`,
     accessToken
   );
+
+  if (record.journalFileId) {
+    await googleDriveDeleteRequest(
+      `${GOOGLE_DRIVE_FILES_BASE_URL}/${encodeURIComponent(record.journalFileId)}`,
+      accessToken
+    );
+  }
 
   const state = await readGoogleDriveManifestState(accessToken);
   await writeGoogleDriveManifest(accessToken, {
@@ -920,14 +1289,23 @@ export async function saveGoogleDriveRemoteEnvelope(
   const response = await uploadGoogleDriveJsonFile({
     accessToken,
     fileId: existing?.fileId ?? null,
-    name: `${GOOGLE_DRIVE_VAULT_PREFIX}${input.vaultId}.json`,
+    name: buildGoogleDriveVaultStateFileName(input.vaultId),
     parents: existing ? undefined : [GOOGLE_DRIVE_APP_FOLDER],
     payload: blob
   });
+  const journalFileId = await writeGoogleDriveJournalState(
+    accessToken,
+    {
+      id: input.vaultId,
+      journalFileId: existing?.journalFileId ?? null
+    },
+    []
+  );
   const record: GoogleDriveRemoteVaultRecord = {
     id: input.vaultId,
     name: sanitizeText(input.vaultName, input.vaultId),
     fileId: sanitizeText(response.id, existing?.fileId ?? ""),
+    journalFileId,
     vaultKind: input.envelope.metadata?.payloadMode === "encrypted" ? "private" : "regular",
     updatedAt: normalizeDriveTimestamp(response.modifiedTime),
     revision: input.envelope.revision ?? null
@@ -944,6 +1322,174 @@ export async function saveGoogleDriveRemoteEnvelope(
   });
 
   return record;
+}
+
+export async function loadGoogleDriveRemoteChangeFeed(
+  accessToken: string,
+  vaultId: string,
+  sinceRevision: string
+) {
+  const record = await getRemoteVaultRecord(accessToken, vaultId);
+
+  if (!record) {
+    throw new Error("VAULT_NOT_FOUND");
+  }
+
+  const envelope = await loadGoogleDriveRemoteEnvelope(accessToken, vaultId);
+
+  if (!sinceRevision.trim() || !envelope.revision) {
+    return buildSnapshotFallbackFeed(envelope);
+  }
+
+  if (sinceRevision === envelope.revision) {
+    return {
+      mode: "delta",
+      revision: envelope.revision,
+      baseRevision: sinceRevision,
+      changes: envelope.metadata?.payloadMode === "encrypted" ? null : createEmptyChangeSet("google-drive"),
+      encryptedChanges: envelope.metadata?.payloadMode === "encrypted" ? [] : null,
+      snapshot: null,
+      metadata: envelope.metadata ?? null
+    } satisfies SyncChangeFeed;
+  }
+
+  const journalState = await readGoogleDriveJournalState(accessToken, record);
+  const journal = journalState.blob.entries;
+
+  if (journal.length > 0 && journal[journal.length - 1]?.revision !== envelope.revision) {
+    return buildSnapshotFallbackFeed(envelope);
+  }
+
+  const cursorIndex = journal.findIndex((entry) => entry.revision === sinceRevision);
+
+  if (cursorIndex === -1) {
+    return buildSnapshotFallbackFeed(envelope);
+  }
+
+  const slice = journal.slice(cursorIndex + 1);
+
+  if (envelope.metadata?.payloadMode === "encrypted") {
+    const batches = slice
+      .map((entry) => entry.encryptedChanges)
+      .filter((entry): entry is SyncEncryptedPayload => Boolean(entry));
+
+    if (batches.length !== slice.length) {
+      return buildSnapshotFallbackFeed(envelope);
+    }
+
+    return {
+      mode: "delta",
+      revision: envelope.revision,
+      baseRevision: sinceRevision,
+      changes: null,
+      encryptedChanges: batches,
+      snapshot: null,
+      metadata: envelope.metadata ?? null
+    } satisfies SyncChangeFeed;
+  }
+
+  return {
+    mode: "delta",
+    revision: envelope.revision,
+    baseRevision: sinceRevision,
+    changes: collapseChangeSetBatches(
+      slice
+        .map((entry) => entry.changes)
+        .filter((entry): entry is SyncChangeSet => Boolean(entry))
+    ),
+    encryptedChanges: null,
+    snapshot: null,
+    metadata: envelope.metadata ?? null
+  } satisfies SyncChangeFeed;
+}
+
+export async function pushGoogleDriveRemoteChanges(
+  accessToken: string,
+  input: {
+    vaultId: string;
+    vaultName: string;
+    baseRevision: string | null;
+    envelope: SyncEnvelope | SyncSecureEnvelope;
+    changes?: SyncChangeSet | null;
+    encryptedChanges?: SyncEncryptedPayload | null;
+  }
+) {
+  const record = await getRemoteVaultRecord(accessToken, input.vaultId);
+
+  if (!record) {
+    throw new Error("VAULT_NOT_FOUND");
+  }
+
+  const currentEnvelope = await loadGoogleDriveRemoteEnvelope(accessToken, input.vaultId);
+
+  if (currentEnvelope.revision !== input.baseRevision) {
+    return {
+      conflict: true as const,
+      revision: currentEnvelope.revision ?? null
+    };
+  }
+
+  const journalState = await readGoogleDriveJournalState(accessToken, record);
+  const nextJournal = [...journalState.blob.entries];
+
+  if (isEncryptedEnvelope(currentEnvelope)) {
+    if (!input.encryptedChanges || !isEncryptedEnvelope(input.envelope)) {
+      throw new Error("ENCRYPTED_DELTA_PAYLOAD_REQUIRED");
+    }
+
+    nextJournal.push({
+      revision: input.envelope.revision ?? `rev-${now()}-${crypto.randomUUID()}`,
+      baseRevision: input.baseRevision,
+      createdAt: now(),
+      changes: null,
+      encryptedChanges: input.encryptedChanges
+    });
+  } else {
+    const normalizedChanges = normalizeChangeSetPayload(input.changes, "google-drive");
+
+    nextJournal.push({
+      revision: input.envelope.revision ?? `rev-${now()}-${crypto.randomUUID()}`,
+      baseRevision: input.baseRevision,
+      createdAt: now(),
+      changes: normalizedChanges,
+      encryptedChanges: null
+    });
+  }
+
+  const stateRecord = await saveGoogleDriveRemoteEnvelope(accessToken, {
+    vaultId: input.vaultId,
+    vaultName: input.vaultName,
+    envelope: input.envelope
+  });
+  const journalFileId = await writeGoogleDriveJournalState(
+    accessToken,
+    {
+      id: input.vaultId,
+      journalFileId: stateRecord.journalFileId ?? record.journalFileId ?? null
+    },
+    nextJournal
+  );
+  const state = await readGoogleDriveManifestState(accessToken);
+
+  await writeGoogleDriveManifest(accessToken, {
+    ...state,
+    manifest: {
+      ...state.manifest,
+      updatedAt: now(),
+      vaults: [
+        ...state.manifest.vaults.filter((entry) => entry.id !== input.vaultId),
+        {
+          ...stateRecord,
+          journalFileId
+        }
+      ]
+    }
+  });
+
+  return {
+    conflict: false as const,
+    revision: input.envelope.revision ?? null
+  };
 }
 
 export function buildGoogleDriveConnectionLabel(session: Pick<GoogleDriveAccountSession, "userEmail" | "userName">) {

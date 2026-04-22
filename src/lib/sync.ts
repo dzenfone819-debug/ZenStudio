@@ -30,9 +30,11 @@ import {
   googleDriveOAuthReady as googleDriveOAuthReadyViaApi,
   isGoogleDriveConfigured,
   listGoogleDriveRemoteVaults,
+  loadGoogleDriveRemoteChangeFeed,
   loadGoogleDriveRemoteEnvelope,
   prepareGoogleDriveOAuth as prepareGoogleDriveOAuthViaApi,
   probeGoogleDriveConnection,
+  pushGoogleDriveRemoteChanges,
   saveGoogleDriveRemoteEnvelope
 } from "./googleDriveSync";
 import { getLocalVaultProfile, type LocalVaultProfile } from "./localVaults";
@@ -2913,6 +2915,7 @@ async function runGoogleDriveSyncCycle(
     localVaultId?: string | null;
     localVaultName?: string | null;
   },
+  providedEnvelope?: RemoteEnvelopeRecord | null,
   database: ZenNotesDatabase = db
 ) {
   const remoteConfig = {
@@ -2924,7 +2927,7 @@ async function runGoogleDriveSyncCycle(
     localVaultName: options?.localVaultName ?? null
   };
   const [rawRemoteEnvelope, localSnapshot, shadows] = await Promise.all([
-    loadGoogleDriveRemoteEnvelope(token, vaultId),
+    providedEnvelope ? Promise.resolve(providedEnvelope) : loadGoogleDriveRemoteEnvelope(token, vaultId),
     exportLocalSyncSnapshot(database),
     database.syncShadows.toArray()
   ]);
@@ -2973,6 +2976,218 @@ async function runGoogleDriveSyncCycle(
       nextEnvelope.metadata?.payloadMode === "encrypted"
         ? "encrypted-snapshot"
         : "snapshot"
+  } satisfies SyncExecutionResult;
+}
+
+async function runGoogleDriveDeltaSyncCycle(
+  vaultId: string,
+  token: string,
+  options?: {
+    localPendingCount?: number;
+    localVaultId?: string | null;
+    localVaultName?: string | null;
+  },
+  database: ZenNotesDatabase = db
+) {
+  let [settings, shadows] = await Promise.all([
+    database.settings.get("app"),
+    database.syncShadows.toArray()
+  ]);
+
+  if (!settings) {
+    throw new Error("SETTINGS_MISSING");
+  }
+
+  if (!settings.syncCursor || shadows.length === 0) {
+    return null;
+  }
+
+  const remoteConfig = {
+    provider: "googleDrive" as const,
+    serverUrl: GOOGLE_DRIVE_API_BASE_URL,
+    vaultId,
+    token,
+    localVaultId: options?.localVaultId ?? null,
+    localVaultName: options?.localVaultName ?? null
+  } satisfies RemoteSyncConfig;
+
+  let remoteFeed: SyncChangeFeed;
+
+  try {
+    remoteFeed = await loadGoogleDriveRemoteChangeFeed(token, vaultId, settings.syncCursor);
+  } catch (error) {
+    if (shouldFallbackToSnapshotSync(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (remoteFeed.metadata?.payloadMode === "encrypted") {
+    await hydrateVaultEncryptionFromMetadata(remoteFeed.metadata, database);
+    settings = (await database.settings.get("app")) ?? settings;
+  }
+
+  if (remoteFeed.mode === "snapshot") {
+    if (remoteFeed.snapshot) {
+      return runGoogleDriveSyncCycle(
+        vaultId,
+        token,
+        {
+          localVaultId: remoteConfig.localVaultId ?? null,
+          localVaultName: remoteConfig.localVaultName ?? null
+        },
+        {
+          revision: remoteFeed.revision,
+          snapshot: remoteFeed.snapshot,
+          metadata: remoteFeed.metadata ?? null
+        },
+        database
+      );
+    }
+
+    return null;
+  }
+
+  const isEncryptedDeltaFeed =
+    remoteFeed.metadata?.payloadMode === "encrypted" ||
+    Array.isArray(remoteFeed.encryptedChanges);
+  const remoteChanges =
+    isEncryptedDeltaFeed
+      ? collapseChangeSetBatches(
+          await decryptEncryptedChangeBatches(
+            remoteFeed.encryptedChanges ?? [],
+            remoteFeed.metadata ?? null,
+            remoteConfig,
+            settings
+          )
+        )
+      : normalizeChangeSetPayload(remoteFeed.changes, "google-drive");
+  const localPendingCount =
+    typeof options?.localPendingCount === "number" ? Math.max(0, options.localPendingCount) : null;
+
+  if (localPendingCount === 0) {
+    const finalRevision = remoteFeed.revision ?? settings.syncCursor;
+
+    if (!isChangeSetEmpty(remoteChanges)) {
+      await applySyncChangeSetToLocalData(remoteChanges, database);
+      await persistSyncShadowChanges(remoteChanges, finalRevision, database);
+      await clearSyncDirtyEntriesByKeys(collectChangeSetKeys(remoteChanges), database);
+    }
+
+    await database.settings.update("app", {
+      syncStatus: "idle",
+      lastSyncAt: Date.now(),
+      syncCursor: finalRevision
+    });
+
+    return {
+      revision: finalRevision ?? "",
+      stats: {
+        pulled: countChangeSetEntries(remoteChanges),
+        pushed: 0,
+        conflicts: 0
+      },
+      syncMode: isEncryptedDeltaFeed ? "encrypted-delta" : "delta"
+    } satisfies SyncExecutionResult;
+  }
+
+  const localSnapshot = await exportLocalSyncSnapshot(database);
+  const localChanges = buildRecordChangeSetFromSnapshot(localSnapshot, shadows);
+  const merged = mergeChangeSetsIntoSnapshot(localSnapshot, localChanges, remoteChanges, shadows);
+  const localDeltaToApply = buildChangeSetBetweenSnapshots(localSnapshot, merged.snapshot);
+  const shadowChanges = buildRecordChangeSetFromSnapshot(merged.snapshot, shadows);
+  let finalRevision = remoteFeed.revision ?? settings.syncCursor;
+  const localVaultProfile =
+    options?.localVaultId ? getLocalVaultProfile(options.localVaultId) : null;
+  const resolvedVaultName =
+    localVaultProfile?.name ?? remoteFeed.metadata?.vault?.name ?? options?.localVaultName ?? vaultId;
+
+  if (!isChangeSetEmpty(merged.outgoingChanges)) {
+    const pushed =
+      isEncryptedDeltaFeed
+        ? await (async () => {
+            const { descriptor, encryptedChanges } = await encryptChangeSetBatch(
+              merged.outgoingChanges,
+              remoteConfig,
+              settings
+            );
+            const passphrase = resolveVaultPassphraseOrThrow(remoteConfig);
+            const encryptedSnapshot = await encryptSyncPayload(merged.snapshot, passphrase, {
+              vault: buildRemoteVaultDescriptor({
+                ...remoteConfig,
+                localVaultName: resolvedVaultName
+              }),
+              descriptor
+            });
+            const revision = createSyncRevision();
+
+            return pushGoogleDriveRemoteChanges(token, {
+              vaultId,
+              vaultName: resolvedVaultName,
+              baseRevision: remoteFeed.revision,
+              encryptedChanges,
+              envelope: {
+                revision,
+                metadata: {
+                  schemaVersion: 1,
+                  payloadMode: "encrypted",
+                  vault: buildRemoteVaultDescriptor({
+                    ...remoteConfig,
+                    localVaultName: resolvedVaultName
+                  }),
+                  encryption: {
+                    ...descriptor,
+                    state: "locked"
+                  }
+                },
+                encryptedSnapshot: encryptedSnapshot.payload
+              }
+            });
+          })()
+        : await pushGoogleDriveRemoteChanges(token, {
+            vaultId,
+            vaultName: resolvedVaultName,
+            baseRevision: remoteFeed.revision,
+            changes: merged.outgoingChanges,
+            envelope: {
+              revision: createSyncRevision(),
+              snapshot: {
+                ...merged.snapshot,
+                exportedAt: Date.now()
+              },
+              metadata: createPlainSyncDescriptor(
+                buildRemoteVaultDescriptor({
+                  ...remoteConfig,
+                  localVaultName: resolvedVaultName
+                })
+              )
+            }
+          });
+
+    if (pushed.conflict) {
+      return "retry" as const;
+    }
+
+    finalRevision = pushed.revision ?? finalRevision;
+  }
+
+  if (!isChangeSetEmpty(localDeltaToApply)) {
+    await applySyncChangeSetToLocalData(localDeltaToApply, database);
+  }
+
+  await persistSyncShadowChanges(shadowChanges, finalRevision, database);
+  await clearSyncDirtyEntriesByKeys(collectChangeSetKeys(shadowChanges), database);
+  await database.settings.update("app", {
+    syncStatus: "idle",
+    lastSyncAt: Date.now(),
+    syncCursor: finalRevision
+  });
+
+  return {
+    revision: finalRevision ?? "",
+    stats: merged.stats,
+    syncMode: isEncryptedDeltaFeed ? "encrypted-delta" : "delta"
   } satisfies SyncExecutionResult;
 }
 
@@ -3203,18 +3418,43 @@ async function runConfiguredSyncInternal(
 
   try {
     if (remote.provider === "googleDrive") {
-      const result = await runGoogleDriveSyncCycle(
-        vaultId,
-        token,
-        {
-          localVaultId: remote.localVaultId ?? null,
-          localVaultName: remote.localVaultName ?? null
-        },
-        database
-      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const deltaResult = await runGoogleDriveDeltaSyncCycle(
+          vaultId,
+          token,
+          {
+            localPendingCount: options?.localPendingCount,
+            localVaultId: remote.localVaultId ?? null,
+            localVaultName: remote.localVaultName ?? null
+          },
+          database
+        );
 
-      await options?.onStatusChange?.("idle");
-      return result;
+        if (deltaResult === "retry") {
+          continue;
+        }
+
+        if (deltaResult) {
+          await options?.onStatusChange?.("idle");
+          return deltaResult;
+        }
+
+        const snapshotResult = await runGoogleDriveSyncCycle(
+          vaultId,
+          token,
+          {
+            localVaultId: remote.localVaultId ?? null,
+            localVaultName: remote.localVaultName ?? null
+          },
+          undefined,
+          database
+        );
+
+        await options?.onStatusChange?.("idle");
+        return snapshotResult;
+      }
+
+      throw new Error("SYNC_REVISION_CONFLICT");
     }
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
