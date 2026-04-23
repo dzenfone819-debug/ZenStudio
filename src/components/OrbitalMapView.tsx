@@ -1762,7 +1762,7 @@ export default function OrbitalMapView({
   const noteHoverPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const hoverPreviewCloseTimeoutRef = useRef<number | null>(null);
   const hoverPreviewSceneAnchorRef = useRef<SVGGElement | null>(null);
-  const folderDraftCardRef = useRef<HTMLDivElement | null>(null);
+  const folderDraftRowRef = useRef<HTMLDivElement | null>(null);
   const folderDraftInputRef = useRef<HTMLInputElement | null>(null);
   const inspectorPanelRef = useRef<HTMLElement | null>(null);
   const inspectorMenuListRef = useRef<HTMLDivElement | null>(null);
@@ -2581,7 +2581,7 @@ export default function OrbitalMapView({
     }
 
     const frameId = window.requestAnimationFrame(() => {
-      folderDraftCardRef.current?.scrollIntoView({
+      folderDraftRowRef.current?.scrollIntoView({
         block: "nearest",
         behavior: "smooth"
       });
@@ -2925,7 +2925,12 @@ export default function OrbitalMapView({
   const handleCreateFolder = async () => {
     const name = folderDraft.trim();
 
-    if (!name || !folderDraftProjectId) {
+    if (!folderDraftProjectId) {
+      return;
+    }
+
+    if (!name) {
+      resetFolderDraft();
       return;
     }
 
@@ -2936,13 +2941,10 @@ export default function OrbitalMapView({
         folderDraftColor,
         folderDraftProjectId
       );
-      setFolderDraft("");
+      resetFolderDraft();
       setFolderDraftError(null);
-      setFolderDraftColor(DEFAULT_FOLDER_COLOR);
-      setIsFolderDraftOpen(false);
-      setFolderDraftParentId(null);
-      setFolderDraftProjectId(null);
       setSelectedEntityId(`folder:${createdFolder.id}`);
+      setHierarchyFocusedEntityId(`folder:${createdFolder.id}`);
     } catch (error) {
       if (error instanceof Error && error.message === "FOLDER_DEPTH_LIMIT") {
         setFolderDraftError(labels.maxDepthReached);
@@ -2954,6 +2956,7 @@ export default function OrbitalMapView({
   };
 
   const handleCreateNote = async (folderId: string | null, projectId?: string) => {
+    resetFolderDraft();
     const createdNote = await onCreateNote(folderId, projectId);
     setSelectedEntityId(`note:${createdNote.id}`);
     setActiveProjectId(createdNote.projectId);
@@ -2961,6 +2964,7 @@ export default function OrbitalMapView({
   };
 
   const handleCreateCanvas = async (folderId: string | null, projectId?: string) => {
+    resetFolderDraft();
     const createdCanvas = await onCreateCanvas(folderId, projectId);
     setSelectedEntityId(`note:${createdCanvas.id}`);
     setActiveProjectId(createdCanvas.projectId);
@@ -3236,6 +3240,10 @@ export default function OrbitalMapView({
   };
 
   const openInspectorMenu = (menu: InspectorMenu) => {
+    if (menu !== "folders") {
+      resetFolderDraft();
+    }
+
     setInspectorMenu(menu);
     setInspectorQuery("");
   };
@@ -3257,6 +3265,15 @@ export default function OrbitalMapView({
     setActiveAssetFilters([]);
   };
 
+  const resetFolderDraft = () => {
+    setFolderDraft("");
+    setFolderDraftError(null);
+    setFolderDraftColor(DEFAULT_FOLDER_COLOR);
+    setIsFolderDraftOpen(false);
+    setFolderDraftParentId(null);
+    setFolderDraftProjectId(null);
+  };
+
   const beginFolderDraft = (parentId: string | null, projectId?: string) => {
     if (parentId) {
       const parentMeta = orbitalData.folderMeta.get(parentId);
@@ -3265,10 +3282,15 @@ export default function OrbitalMapView({
         setFolderDraftError(labels.maxDepthReached);
         setIsFolderDraftOpen(false);
         setFolderDraftParentId(null);
+        setFolderDraftProjectId(null);
         return;
       }
+
+      setCollapsedInspectorFolders((current) => current.filter((entry) => entry !== parentId));
     }
 
+    setInspectorMenu("folders");
+    setInspectorQuery("");
     setIsFolderDraftOpen(true);
     setFolderDraftParentId(parentId);
     setFolderDraftProjectId(
@@ -3279,6 +3301,13 @@ export default function OrbitalMapView({
       parentId ? orbitalData.folderById.get(parentId)?.color ?? DEFAULT_FOLDER_COLOR : DEFAULT_FOLDER_COLOR
     );
     setFolderDraftError(null);
+    setHierarchyFocusedEntityId(
+      parentId
+        ? `folder:${parentId}`
+        : projectId
+          ? getProjectEntityId(projectId)
+          : currentProjectEntityId
+    );
   };
 
   const selectedFolderMeta =
@@ -4361,13 +4390,78 @@ export default function OrbitalMapView({
     );
   }
 
+  function renderFolderDraftNode(depth: number) {
+    return (
+      <div className="orbital-tree-node" key={`folder-draft:${folderDraftParentId ?? folderDraftProjectId ?? "root"}`}>
+        <div className="orbital-tree-row" style={{ "--tree-depth": depth } as CSSProperties}>
+          <span className="orbital-tree-toggle-spacer" aria-hidden="true" />
+          <div
+            className="orbital-tree-item is-editing is-draft"
+            ref={folderDraftRowRef}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+          >
+            {renderInspectorItemIcon("folder", folderDraftColor)}
+            <span className="orbital-tree-item-main">
+              <input
+                ref={folderDraftInputRef}
+                value={folderDraft}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => {
+                  setFolderDraft(event.target.value);
+                  if (folderDraftError) {
+                    setFolderDraftError(null);
+                  }
+                }}
+                onBlur={() => {
+                  void handleCreateFolder();
+                }}
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    resetFolderDraft();
+                  }
+                }}
+                className="orbital-menu-inline-input"
+                placeholder={labels.folderNamePlaceholder}
+                aria-label={labels.folderNamePlaceholder}
+              />
+              <span className="orbital-tree-kind">{labels.folder}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderInspectorHierarchyNode(item: InspectorHierarchyItem, depth = 0): ReactNode {
-    const hasChildren = item.kind === "folder" && item.children.length > 0;
-    const isExpanded = hasChildren
-      ? normalizedInspectorQuery.length > 0 ||
-        selectedHierarchyExpandedFolderSet.has(item.id) ||
-        !collapsedInspectorFolderSet.has(item.id)
-      : false;
+    const hasChildren = item.kind !== "core" && item.children.length > 0;
+    const hasDraftChild =
+      isFolderDraftOpen &&
+      folderDraftProjectId === currentProjectId &&
+      ((item.kind === "core" &&
+        folderDraftParentId === null &&
+        item.project?.id === folderDraftProjectId) ||
+        (item.kind === "folder" && folderDraftParentId === item.id));
+    const isExpandable = item.kind === "folder" && (hasChildren || hasDraftChild);
+    const isExpanded =
+      item.kind === "core"
+        ? true
+        : isExpandable
+          ? hasDraftChild ||
+            normalizedInspectorQuery.length > 0 ||
+            selectedHierarchyExpandedFolderSet.has(item.id) ||
+            !collapsedInspectorFolderSet.has(item.id)
+          : false;
     const isSceneSelected = selectedEntityId === item.entityId;
     const isHierarchyFocused = hierarchyFocusedEntityId === item.entityId;
     const isActive =
@@ -4404,11 +4498,11 @@ export default function OrbitalMapView({
           className="orbital-tree-row"
           style={{ "--tree-depth": depth } as CSSProperties}
           role="treeitem"
-          aria-expanded={hasChildren ? isExpanded : undefined}
+          aria-expanded={isExpandable ? isExpanded : undefined}
           aria-selected={isActive}
           aria-level={depth + 1}
         >
-          {hasChildren ? (
+          {isExpandable ? (
             <button
               type="button"
               className={`orbital-tree-toggle ${isExpanded ? "is-expanded" : ""}`}
@@ -4548,9 +4642,11 @@ export default function OrbitalMapView({
           )}
         </div>
 
-        {(item.kind === "core" || (hasChildren && isExpanded)) && item.children.length > 0 ? (
+        {(item.kind === "core" || (isExpandable && isExpanded)) &&
+        (item.children.length > 0 || hasDraftChild) ? (
           <div className="orbital-tree-children" role="group">
             {item.children.map((child) => renderInspectorHierarchyNode(child, depth + 1))}
+            {hasDraftChild ? renderFolderDraftNode(depth + 1) : null}
           </div>
         ) : null}
       </div>
@@ -4858,7 +4954,6 @@ export default function OrbitalMapView({
           </div>
         </div>
 
-        {renderFolderDraftCard()}
         {renderFolderDraftErrorMessage()}
 
         <div
@@ -5041,71 +5136,6 @@ export default function OrbitalMapView({
         onUpdateNoteColor(contextMenuTarget.note.id, color);
       }
     : undefined;
-
-  function renderFolderDraftCard() {
-    if (!isFolderDraftOpen) {
-      return null;
-    }
-
-    return (
-      <div className="orbital-create-card" ref={folderDraftCardRef}>
-        <input
-          ref={folderDraftInputRef}
-          value={folderDraft}
-          onChange={(event) => setFolderDraft(event.target.value)}
-          className="micro-input full"
-          placeholder={labels.folderNamePlaceholder}
-        />
-        <div className="orbital-color-field">
-          <span className="orbital-color-label">{labels.chooseColor}</span>
-          <div className="color-swatch-grid compact">
-            {COLOR_PALETTE.map((colorOption) => (
-              <button
-                key={colorOption.id}
-                type="button"
-                className={`color-swatch compact ${folderDraftColor === colorOption.hex ? "is-active" : ""}`}
-                onClick={() => setFolderDraftColor(colorOption.hex)}
-                style={{ "--swatch-color": colorOption.hex } as CSSProperties}
-                aria-label={`${labels.chooseColor}: ${t(colorOption.labelKey)}`}
-                title={t(colorOption.labelKey)}
-              >
-                <span className="color-swatch-fill" />
-              </button>
-            ))}
-          </div>
-          <label className="orbital-custom-color-picker">
-            <span className="orbital-color-label">{labels.customColor}</span>
-            <span className="orbital-custom-color-control">
-              <input
-                type="color"
-                className="orbital-custom-color-input"
-                value={folderDraftColor}
-                onChange={(event) => setFolderDraftColor(event.target.value)}
-                aria-label={labels.customColor}
-              />
-              <span className="orbital-custom-color-value">{folderDraftColor.toUpperCase()}</span>
-            </span>
-          </label>
-        </div>
-        <div className="orbital-create-actions">
-          <button className="micro-action primary" onClick={() => void handleCreateFolder()}>
-            {labels.create}
-          </button>
-          <button
-            className="micro-action"
-            onClick={() => {
-              setFolderDraft("");
-              setIsFolderDraftOpen(false);
-              setFolderDraftParentId(null);
-              setFolderDraftProjectId(null);
-            }}
-          >
-            {labels.cancel}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   function renderFolderDraftErrorMessage() {
     if (isFolderDraftOpen || !folderDraftError) {
@@ -5733,7 +5763,6 @@ export default function OrbitalMapView({
             </>
           )}
 
-          {!(!selectedNode || shouldShowHierarchyInspector) ? renderFolderDraftCard() : null}
           {!(!selectedNode || shouldShowHierarchyInspector) ? renderFolderDraftErrorMessage() : null}
         </aside>
 

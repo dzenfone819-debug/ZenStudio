@@ -2679,8 +2679,7 @@ button {
   margin-top: 0;
 }
 
-.orbital-meta-card,
-.orbital-create-card {
+.orbital-meta-card {
   margin: 0 14px;
   padding: 14px;
   border-radius: 16px;
@@ -2835,12 +2834,6 @@ button {
 .orbital-danger-actions .toolbar-action {
   width: 100%;
   justify-content: center;
-}
-
-.orbital-create-card {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
 }
 
 .orbital-draft-error {

@@ -540,7 +540,7 @@ const en = {
   orbit: {
     open: "Open Orbit",
     title: "Orbital Mind Map",
-    subtitle: "Live vault system with folders, notes, and orbital motion.",
+    subtitle: "Live vault system with orbital motion.",
     close: "Close Orbit",
     pause: "Pause",
     resume: "Resume",
