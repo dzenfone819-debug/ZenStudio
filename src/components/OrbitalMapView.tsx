@@ -426,9 +426,16 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
+function isEntryFavorite(entry: { favorite?: boolean; pinned?: boolean }) {
+  return Boolean(entry.pinned || entry.favorite);
+}
+
 function noteSorter(left: Note, right: Note) {
-  if (left.favorite !== right.favorite) {
-    return left.favorite ? -1 : 1;
+  const leftFavorite = isEntryFavorite(left);
+  const rightFavorite = isEntryFavorite(right);
+
+  if (leftFavorite !== rightFavorite) {
+    return leftFavorite ? -1 : 1;
   }
 
   if (left.pinned !== right.pinned) {
@@ -439,31 +446,32 @@ function noteSorter(left: Note, right: Note) {
 }
 
 function getNoteMass(note: Note) {
+  const favoriteWeight = isEntryFavorite(note) ? 0.45 : 0;
+
   if (note.contentType === "canvas") {
     const metrics = getCanvasMetrics(note.canvasContent, { includePlainText: false });
     return (
       1.18 +
       metrics.activeElementCount / 18 +
       metrics.imageCount * 0.28 +
-      (note.favorite ? 0.45 : 0) +
-      (note.pinned ? 0.3 : 0)
+      favoriteWeight
     );
   }
 
-  return 1.08 + note.plainText.length / 240 + (note.favorite ? 0.45 : 0) + (note.pinned ? 0.3 : 0);
+  return 1.08 + note.plainText.length / 240 + favoriteWeight;
 }
 
 function getOrbitalEntryRadius(note: Note) {
   if (note.contentType === "canvas") {
     const metrics = getCanvasMetrics(note.canvasContent, { includePlainText: false });
     return clamp(
-      10 + Math.min(metrics.activeElementCount / 6, 7.2) + (note.pinned ? 1.2 : 0),
+      10 + Math.min(metrics.activeElementCount / 6, 7.2) + (isEntryFavorite(note) ? 1.2 : 0),
       10,
       18
     );
   }
 
-  return clamp(9 + Math.min(note.plainText.length / 180, 6.4) + (note.pinned ? 1.2 : 0), 9, 17);
+  return clamp(9 + Math.min(note.plainText.length / 180, 6.4) + (isEntryFavorite(note) ? 1.2 : 0), 9, 17);
 }
 
 function truncateLabel(value: string, maxLength: number) {
@@ -1124,8 +1132,7 @@ function buildAdaptiveVisibilitySet({
     let score =
       recencyScore +
       Math.min(160, note.plainText.length / 24) +
-      (note.pinned ? 760 : 0) +
-      (note.favorite ? 320 : 0) +
+      (isEntryFavorite(note) ? 760 : 0) +
       (note.contentType === "canvas" ? 120 : 0) +
       (isRootLevel ? 510 : 0);
 
@@ -2445,7 +2452,7 @@ export default function OrbitalMapView({
     const related = new Set<string>();
 
     orbitalData.noteById.forEach((note) => {
-      if (note.pinned) {
+      if (isEntryFavorite(note)) {
         related.add(`note:${note.id}`);
       }
     });
@@ -2466,7 +2473,7 @@ export default function OrbitalMapView({
     [currentProjectTagCounts, tagMap]
   );
   const pinnedCount = useMemo(
-    () => currentProjectNotes.filter((note) => note.pinned).length,
+    () => currentProjectNotes.filter((note) => isEntryFavorite(note)).length,
     [currentProjectNotes]
   );
   const stars = useMemo(
@@ -3590,7 +3597,7 @@ export default function OrbitalMapView({
     [currentProjectNotes, normalizedInspectorQuery]
   );
   const filteredPinnedMenu = useMemo(
-    () => filteredNotesMenu.filter((note) => note.pinned),
+    () => filteredNotesMenu.filter((note) => isEntryFavorite(note)),
     [filteredNotesMenu]
   );
   const filteredTagsMenu = useMemo(
@@ -3898,7 +3905,7 @@ export default function OrbitalMapView({
     note,
     label: getNoteInspectorTitle(note),
     color: note.color || DEFAULT_NOTE_COLOR,
-    pinned: note.pinned
+    pinned: isEntryFavorite(note)
   });
 
   const buildInspectorHierarchyContextTarget = (
@@ -3923,7 +3930,7 @@ export default function OrbitalMapView({
       note: item.note!,
       label: item.label,
       color: item.color,
-      pinned: item.note?.pinned ?? false
+      pinned: item.note ? isEntryFavorite(item.note) : false
     };
   };
 
@@ -4045,11 +4052,11 @@ export default function OrbitalMapView({
     actions.push(
       {
         id: "toggle-pin",
-        label: target.note.pinned ? t("note.unpin") : t("note.pin"),
-        icon: target.note.pinned ? "unpin" : "pin",
+        label: target.pinned ? t("note.unpin") : t("note.pin"),
+        icon: target.pinned ? "unpin" : "pin",
         onSelect: () => {
           closeInspectorContextMenu();
-          void onSetNotePinned(target.note.id, !target.note.pinned);
+          void onSetNotePinned(target.note.id, !target.pinned);
         }
       },
       {
@@ -5643,11 +5650,8 @@ export default function OrbitalMapView({
                               {selectedCanvasMetrics.activeElementCount} {labels.elementsStat}
                             </span>
                           ) : null}
-                          {selectedNode.note.favorite ? (
-                            <span className="orbital-selection-badge">{t("note.favorite")}</span>
-                          ) : null}
-                          {selectedNode.note.pinned ? (
-                            <span className="orbital-selection-badge">{t("note.pin")}</span>
+                          {isEntryFavorite(selectedNode.note) ? (
+                            <span className="orbital-selection-badge">{t("note.pinnedActive")}</span>
                           ) : null}
                           {selectedEntryIsCanvas && selectedCanvasMetrics && selectedCanvasMetrics.imageCount > 0 ? (
                             <span className="orbital-selection-meta-chip">
@@ -6163,15 +6167,7 @@ export default function OrbitalMapView({
                             className="orbital-note-core"
                             transform="rotate(45)"
                           />
-                          {node.favorite ? (
-                            <circle
-                              cx={node.radius * 0.92}
-                              cy={-node.radius * 0.92}
-                              r="3.2"
-                              className="orbital-favorite-signal"
-                            />
-                          ) : null}
-                          {node.pinned ? (
+                          {isEntryFavorite(node) ? (
                             <circle
                               cx={-node.radius * 0.92}
                               cy={node.radius * 0.92}
@@ -6299,16 +6295,8 @@ export default function OrbitalMapView({
               className={`orbital-editor-topbar ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
                 editorMode === "note" ? "is-note-mode" : ""
               }`}
+              aria-label={editorMode === "canvas" ? labels.openCanvas : labels.openNote}
             >
-              <div
-                className={`orbital-editor-topmeta ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
-                  editorMode === "note" ? "is-note-mode" : ""
-                }`}
-              >
-                <p className="panel-kicker">
-                  {editorMode === "canvas" ? labels.openCanvas : labels.openNote}
-                </p>
-              </div>
               <div
                 className={`orbital-editor-topactions ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${
                   editorMode === "note" ? "is-note-mode" : ""
@@ -6322,8 +6310,13 @@ export default function OrbitalMapView({
                     {isCanvasEditorFullscreen ? labels.exitFullscreen : labels.enterFullscreen}
                   </button>
                 ) : null}
-                <button className="toolbar-action danger" onClick={onCloseEditor}>
-                  {labels.closeEditor}
+                <button
+                  className="toolbar-action danger orbital-editor-close-action"
+                  onClick={onCloseEditor}
+                  aria-label={labels.closeEditor}
+                  title={labels.closeEditor}
+                >
+                  <span aria-hidden="true">×</span>
                 </button>
               </div>
             </div>

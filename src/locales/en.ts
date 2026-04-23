@@ -83,11 +83,12 @@ const en = {
     folder: "Folder",
     color: "Note color",
     tags: "Tags",
-    favorite: "Favorite",
-    unfavorite: "Unfavorite",
-    favoriteActive: "Favorite note",
-    pin: "Pin",
-    unpin: "Unpin",
+    favorite: "Add to favorites",
+    unfavorite: "Remove from favorites",
+    favoriteActive: "In favorites",
+    pin: "Add to favorites",
+    unpin: "Remove from favorites",
+    pinnedActive: "In favorites",
     archive: "Archive",
     unarchive: "Unarchive",
     restore: "Restore",
@@ -111,6 +112,20 @@ const en = {
     updated: "Updated",
     storage: "Storage",
     editorPlaceholder: "Start writing. Use / for tables, media, files, and blocks.",
+    markdownActions: "Markdown actions",
+    copyMarkdown: "Copy MD",
+    exportMarkdown: "Export MD",
+    importMarkdown: "Import MD",
+    importMarkdownTitle: "Replace current text?",
+    importMarkdownMessage:
+      "Importing {{fileName}} will replace every block in this note. Export Markdown first if you want to keep the current version.",
+    replaceWithMarkdown: "Replace",
+    markdownStatus: {
+      copied: "Markdown copied",
+      exported: "Markdown exported",
+      imported: "Markdown imported",
+      error: "Markdown action failed"
+    },
     showDetails: "Show details",
     hideDetails: "Hide details",
     emptyState: "Select or create a note to start writing.",
@@ -126,6 +141,16 @@ const en = {
     openCanvas: "Open canvas",
     enterFullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
+    exportActions: "Canvas export",
+    exportPng: "PNG",
+    exportSvg: "SVG",
+    exportJson: "JSON",
+    exportStatus: {
+      png: "PNG ready",
+      svg: "SVG ready",
+      json: "JSON ready",
+      error: "Export failed"
+    },
     emptyState: "Visual canvas with no text yet."
   },
   sync: {
@@ -596,7 +621,7 @@ const en = {
     foldersMenu: "Folders",
     tagsMenu: "Tags",
     filesMenu: "Files",
-    pinnedMenu: "Pinned",
+    pinnedMenu: "Favorites",
     projectsStat: "Systems",
     colorsMenu: "Colors",
     chooseColor: "Choose color",
@@ -624,7 +649,7 @@ const en = {
     folders: "Folders",
     tags: "Tags",
     assets: "Assets",
-    pinned: "Pinned"
+    pinned: "Favorites"
   },
   saveState: {
     idle: "Idle",

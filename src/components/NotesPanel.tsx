@@ -114,8 +114,9 @@ export default function NotesPanel({
                   <span className="note-card-date">{formatTimestamp(note.updatedAt, language)}</span>
                 </div>
                 <div className="note-card-flags">
-                  {note.favorite ? <span className="note-card-pin favorite">{t("note.favorite")}</span> : null}
-                  {note.pinned ? <span className="note-card-pin">{t("note.pin")}</span> : null}
+                  {note.pinned || note.favorite ? (
+                    <span className="note-card-pin favorite">{t("note.pinnedActive")}</span>
+                  ) : null}
                   {note.trashedAt ? <span className="note-card-pin danger">{t("filters.viewTrash")}</span> : null}
                 </div>
               </div>

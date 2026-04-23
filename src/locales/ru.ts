@@ -85,9 +85,10 @@ const ru = {
     tags: "Теги",
     favorite: "В избранное",
     unfavorite: "Убрать из избранного",
-    favoriteActive: "Избранная заметка",
-    pin: "Закрепить",
-    unpin: "Открепить",
+    favoriteActive: "В избранном",
+    pin: "В избранное",
+    unpin: "Убрать из избранного",
+    pinnedActive: "В избранном",
     archive: "В архив",
     unarchive: "Из архива",
     restore: "Восстановить",
@@ -111,6 +112,20 @@ const ru = {
     updated: "Обновлено",
     storage: "Хранилище",
     editorPlaceholder: "Начни писать. Используй / для таблиц, медиа, файлов и блоков.",
+    markdownActions: "Markdown действия",
+    copyMarkdown: "Копировать MD",
+    exportMarkdown: "Экспорт MD",
+    importMarkdown: "Импорт MD",
+    importMarkdownTitle: "Заменить текущий текст?",
+    importMarkdownMessage:
+      "Импорт файла {{fileName}} заменит все блоки в этой заметке. Экспортируй Markdown перед заменой, если нужно сохранить текущую версию.",
+    replaceWithMarkdown: "Заменить",
+    markdownStatus: {
+      copied: "Markdown скопирован",
+      exported: "Markdown экспортирован",
+      imported: "Markdown импортирован",
+      error: "Не удалось выполнить Markdown действие"
+    },
     showDetails: "Показать детали",
     hideDetails: "Скрыть детали",
     emptyState: "Выберите заметку или создайте новую, чтобы начать писать.",
@@ -126,6 +141,16 @@ const ru = {
     openCanvas: "Открыть канвас",
     enterFullscreen: "На весь экран",
     exitFullscreen: "Свернуть",
+    exportActions: "Экспорт канваса",
+    exportPng: "PNG",
+    exportSvg: "SVG",
+    exportJson: "JSON",
+    exportStatus: {
+      png: "PNG готов",
+      svg: "SVG готов",
+      json: "JSON готов",
+      error: "Экспорт не удался"
+    },
     emptyState: "В канвасе пока нет текстовых элементов."
   },
   sync: {
@@ -599,7 +624,7 @@ const ru = {
     foldersMenu: "Папки",
     tagsMenu: "Теги",
     filesMenu: "Файлы",
-    pinnedMenu: "Закреплено",
+    pinnedMenu: "Избранное",
     projectsStat: "Системы",
     colorsMenu: "Цвета",
     chooseColor: "Выбрать цвет",
@@ -627,7 +652,7 @@ const ru = {
     folders: "Папки",
     tags: "Теги",
     assets: "Файлы",
-    pinned: "Закреплено"
+    pinned: "Избранное"
   },
   saveState: {
     idle: "Ожидание",

@@ -27,7 +27,7 @@ export default function KnowledgeMap({
 }: KnowledgeMapProps) {
   const topFolders = folders.slice(0, 5);
   const topTags = tags.slice(0, 5);
-  const pinnedCount = notes.filter((note) => note.pinned).length;
+  const pinnedCount = notes.filter((note) => note.pinned || note.favorite).length;
 
   return (
     <section className="panel topology-panel orbit-preview-panel">

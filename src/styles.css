@@ -5591,3 +5591,153 @@ button {
     padding-inline: 12px;
   }
 }
+
+/* Seamless editor modal rail. The actual editor surface owns the visual chrome. */
+.orbital-editor-topbar {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  left: auto;
+  z-index: 6;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.orbital-editor-topbar.is-canvas-mode,
+.orbital-editor-topbar.is-note-mode {
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.orbital-editor-topmeta {
+  display: none;
+}
+
+.orbital-editor-topactions,
+.orbital-editor-topactions.is-canvas-mode,
+.orbital-editor-topactions.is-note-mode {
+  width: auto;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin-left: 0;
+  padding: 4px;
+  border-radius: 999px;
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.016)),
+    rgba(7, 9, 20, 0.72);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.orbital-editor-topactions .toolbar-action,
+.orbital-editor-topactions.is-canvas-mode .toolbar-action,
+.orbital-editor-topactions.is-note-mode .toolbar-action,
+.orbital-editor-topbar.is-canvas-mode .toolbar-action,
+.orbital-editor-topbar.is-note-mode .toolbar-action {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: rgba(147, 173, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.026);
+  color: var(--text);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.orbital-editor-topactions .toolbar-action:hover {
+  border-color: rgba(255, 224, 138, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.016)),
+    rgba(255, 224, 138, 0.07);
+}
+
+.orbital-editor-topactions .toolbar-action.danger {
+  border-color: rgba(255, 113, 113, 0.2);
+  color: color-mix(in srgb, var(--text) 82%, #ff7171 18%);
+}
+
+.orbital-editor-topactions .toolbar-action.danger:hover {
+  border-color: rgba(255, 113, 113, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.014)),
+    rgba(255, 113, 113, 0.075);
+}
+
+.orbital-editor-topactions .orbital-editor-close-action,
+.orbital-editor-topactions.is-canvas-mode .orbital-editor-close-action,
+.orbital-editor-topactions.is-note-mode .orbital-editor-close-action,
+.orbital-editor-topbar.is-canvas-mode .orbital-editor-close-action,
+.orbital-editor-topbar.is-note-mode .orbital-editor-close-action {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.orbital-editor-close-action span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
+@media (max-width: 720px) {
+  .orbital-editor-topbar {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+  }
+
+  .orbital-editor-topactions,
+  .orbital-editor-topactions.is-canvas-mode,
+  .orbital-editor-topactions.is-note-mode {
+    gap: 4px;
+    padding: 3px;
+  }
+
+  .orbital-editor-topactions .toolbar-action,
+  .orbital-editor-topactions.is-canvas-mode .toolbar-action,
+  .orbital-editor-topactions.is-note-mode .toolbar-action,
+  .orbital-editor-topbar.is-canvas-mode .toolbar-action,
+  .orbital-editor-topbar.is-note-mode .toolbar-action {
+    min-height: 26px;
+    padding-inline: 8px;
+    font-size: 0.64rem;
+  }
+
+  .orbital-editor-topactions .orbital-editor-close-action,
+  .orbital-editor-topactions.is-canvas-mode .orbital-editor-close-action,
+  .orbital-editor-topactions.is-note-mode .orbital-editor-close-action,
+  .orbital-editor-topbar.is-canvas-mode .orbital-editor-close-action,
+  .orbital-editor-topbar.is-note-mode .orbital-editor-close-action {
+    width: 26px;
+    min-width: 26px;
+    font-size: 1rem;
+  }
+}

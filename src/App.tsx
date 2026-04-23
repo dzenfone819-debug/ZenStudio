@@ -425,7 +425,7 @@ export default function App() {
         }
 
         if (viewMode === "favorites") {
-          return note.favorite;
+          return note.pinned || note.favorite;
         }
 
         return true;
@@ -440,8 +440,11 @@ export default function App() {
       .filter((note) => (selectedTagId ? note.tagIds.includes(selectedTagId) : true))
       .filter((note) => matchSearch(note, search, tagMap))
       .sort((left, right) => {
-        if (left.favorite !== right.favorite) {
-          return left.favorite ? -1 : 1;
+        const leftFavorite = left.pinned || left.favorite;
+        const rightFavorite = right.pinned || right.favorite;
+
+        if (leftFavorite !== rightFavorite) {
+          return leftFavorite ? -1 : 1;
         }
 
         if (left.pinned !== right.pinned) {
@@ -726,9 +729,9 @@ export default function App() {
   const selectedFolderName = selectedFolderId ? folderPathMap.get(selectedFolderId) ?? null : null;
   const selectedTagName = selectedTagId ? tagMap.get(selectedTagId)?.name ?? null : null;
   const totalVisibleNotes = notes.filter((note) => note.trashedAt === null).length;
-  const favoriteCount = notes.filter((note) => note.trashedAt === null && note.favorite).length;
+  const favoriteCount = notes.filter((note) => note.trashedAt === null && (note.pinned || note.favorite)).length;
   const trashCount = notes.filter((note) => note.trashedAt !== null).length;
-  const pinnedCount = notes.filter((note) => note.trashedAt === null && note.pinned).length;
+  const pinnedCount = favoriteCount;
   const viewModeLabel =
     viewMode === "favorites"
       ? t("filters.viewFavorites")
@@ -2589,12 +2592,8 @@ export default function App() {
                 onRestore={() => void handleRestoreNoteById(orbitalEditorEntry.id)}
                 onTogglePin={() =>
                   void handleUpdateNoteMeta(orbitalEditorEntry.id, {
-                    pinned: !orbitalEditorEntry.pinned
-                  })
-                }
-                onToggleFavorite={() =>
-                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
-                    favorite: !orbitalEditorEntry.favorite
+                    pinned: !(orbitalEditorEntry.pinned || orbitalEditorEntry.favorite),
+                    favorite: false
                   })
                 }
                 onContentChange={(content, files, fileNames, state) => {
@@ -2640,12 +2639,8 @@ export default function App() {
                 onRestore={() => void handleRestoreNoteById(orbitalEditorEntry.id)}
                 onTogglePin={() =>
                   void handleUpdateNoteMeta(orbitalEditorEntry.id, {
-                    pinned: !orbitalEditorEntry.pinned
-                  })
-                }
-                onToggleFavorite={() =>
-                  void handleUpdateNoteMeta(orbitalEditorEntry.id, {
-                    favorite: !orbitalEditorEntry.favorite
+                    pinned: !(orbitalEditorEntry.pinned || orbitalEditorEntry.favorite),
+                    favorite: false
                   })
                 }
                 onContentChange={(content, state) =>
@@ -2752,7 +2747,8 @@ export default function App() {
         }
         onSetNotePinned={(noteId, pinned) =>
           void handleUpdateNoteMeta(noteId, {
-            pinned
+            pinned,
+            favorite: false
           })
         }
         onDeleteNote={(noteId) => void handleDeleteNoteById(noteId)}

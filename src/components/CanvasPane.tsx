@@ -1,7 +1,14 @@
-import { Excalidraw } from "@excalidraw/excalidraw";
+import {
+  Excalidraw,
+  exportToBlob,
+  exportToSvg,
+  getNonDeletedElements,
+  serializeAsJSON
+} from "@excalidraw/excalidraw";
 import type {
   AppState as ExcalidrawAppState,
   BinaryFiles,
+  ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
   UIOptions
 } from "@excalidraw/excalidraw/types";
@@ -11,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import "@excalidraw/excalidraw/index.css";
 import "./CanvasPane.css";
+import FolderPicker from "./FolderPicker";
 import TagInputField from "./TagInputField";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import { flattenFolderOptions, formatTimestamp } from "../lib/notes";
@@ -37,7 +45,6 @@ interface CanvasPaneProps {
   onDelete: () => void;
   onRestore: () => void;
   onTogglePin: () => void;
-  onToggleFavorite: () => void;
   onContentChange: (
     content: CanvasContent,
     files: BinaryFiles,
@@ -47,6 +54,8 @@ interface CanvasPaneProps {
   onLoadFiles: () => Promise<BinaryFiles>;
   immersive?: boolean;
 }
+
+type CanvasExportStatus = "png" | "svg" | "json" | "error" | null;
 
 const EXCALIDRAW_UI_OPTIONS: Partial<UIOptions> = {
   canvasActions: {
@@ -74,7 +83,6 @@ export default function CanvasPane({
   onDelete,
   onRestore,
   onTogglePin,
-  onToggleFavorite,
   onContentChange,
   onLoadFiles,
   immersive = false
@@ -82,8 +90,11 @@ export default function CanvasPane({
   const { t } = useTranslation();
   const [titleDraft, setTitleDraft] = useState(note.title);
   const [activeSurface, setActiveSurface] = useState<"canvas" | "info">("canvas");
+  const [exportStatus, setExportStatus] = useState<CanvasExportStatus>(null);
+  const exportStatusTimeoutRef = useRef<number | null>(null);
   const titleTimeoutRef = useRef<number | null>(null);
   const contentTimeoutRef = useRef<number | null>(null);
+  const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const latestSceneRef = useRef<CanvasContent>(note.canvasContent ?? { elements: [], appState: null });
   const latestFilesRef = useRef<BinaryFiles>({});
   const latestFileNamesRef = useRef<Record<string, string>>({});
@@ -173,6 +184,108 @@ export default function CanvasPane({
     }, 220);
   };
 
+  const showExportStatus = (status: Exclude<CanvasExportStatus, null>) => {
+    setExportStatus(status);
+
+    if (exportStatusTimeoutRef.current) {
+      window.clearTimeout(exportStatusTimeoutRef.current);
+    }
+
+    exportStatusTimeoutRef.current = window.setTimeout(() => {
+      setExportStatus(null);
+      exportStatusTimeoutRef.current = null;
+    }, 2400);
+  };
+
+  const getCanvasFilename = (extension: "png" | "svg" | "excalidraw") => {
+    const safeTitle = (titleDraft.trim() || note.title || t("canvas.untitled"))
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+
+    return `${safeTitle || "canvas"}.${extension}`;
+  };
+
+  const downloadCanvasBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const getCurrentCanvasExportData = () => {
+    const api = excalidrawApiRef.current;
+    const elements = (api?.getSceneElements() ??
+      latestSceneRef.current.elements) as readonly ExcalidrawElement[];
+    const appState = (api?.getAppState() ??
+      latestSceneRef.current.appState ??
+      {}) as Partial<ExcalidrawAppState>;
+    const files = api?.getFiles() ?? latestFilesRef.current;
+
+    return {
+      elements: getNonDeletedElements(elements),
+      appState: {
+        ...appState,
+        name: titleDraft.trim() || note.title || t("canvas.untitled"),
+        exportBackground: true,
+        exportWithDarkMode: true,
+        viewBackgroundColor: "#080a16"
+      } as Partial<ExcalidrawAppState>,
+      files
+    };
+  };
+
+  const handleExportCanvas = async (format: "png" | "svg" | "json") => {
+    try {
+      const { elements, appState, files } = getCurrentCanvasExportData();
+
+      if (format === "json") {
+        const json = serializeAsJSON(elements, appState, files, "local");
+        downloadCanvasBlob(
+          new Blob([json], { type: "application/vnd.excalidraw+json;charset=utf-8" }),
+          getCanvasFilename("excalidraw")
+        );
+        showExportStatus("json");
+        return;
+      }
+
+      if (format === "svg") {
+        const svg = await exportToSvg({
+          elements,
+          appState,
+          files,
+          exportPadding: 16,
+          skipInliningFonts: true
+        });
+        const svgText = new XMLSerializer().serializeToString(svg);
+        downloadCanvasBlob(
+          new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }),
+          getCanvasFilename("svg")
+        );
+        showExportStatus("svg");
+        return;
+      }
+
+      const png = await exportToBlob({
+        elements,
+        appState,
+        files,
+        mimeType: "image/png",
+        exportPadding: 16
+      });
+      downloadCanvasBlob(png, getCanvasFilename("png"));
+      showExportStatus("png");
+    } catch {
+      showExportStatus("error");
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (titleTimeoutRef.current) {
@@ -187,6 +300,10 @@ export default function CanvasPane({
           latestFileNamesRef.current,
           "saved"
         );
+      }
+
+      if (exportStatusTimeoutRef.current) {
+        window.clearTimeout(exportStatusTimeoutRef.current);
       }
 
       if (latestTitleDraftRef.current !== latestStoredTitleRef.current) {
@@ -220,25 +337,56 @@ export default function CanvasPane({
           </div>
         </div>
 
-        <div
-          className="canvas-surface-switcher"
-          role="tablist"
-          aria-label={t("canvas.surfaceLabel")}
-        >
-          <button
-            type="button"
-            className={`canvas-surface-tab ${activeSurface === "canvas" ? "is-active" : ""}`}
-            onClick={() => setActiveSurface("canvas")}
+        <div className="canvas-pane-tools">
+          <div className="canvas-export-actions" aria-label={t("canvas.exportActions")}>
+            <button
+              type="button"
+              className="canvas-export-action"
+              onClick={() => void handleExportCanvas("png")}
+            >
+              {t("canvas.exportPng")}
+            </button>
+            <button
+              type="button"
+              className="canvas-export-action"
+              onClick={() => void handleExportCanvas("svg")}
+            >
+              {t("canvas.exportSvg")}
+            </button>
+            <button
+              type="button"
+              className="canvas-export-action"
+              onClick={() => void handleExportCanvas("json")}
+            >
+              {t("canvas.exportJson")}
+            </button>
+            {exportStatus ? (
+              <span className={`canvas-export-status is-${exportStatus}`}>
+                {t(`canvas.exportStatus.${exportStatus}`)}
+              </span>
+            ) : null}
+          </div>
+
+          <div
+            className="canvas-surface-switcher"
+            role="tablist"
+            aria-label={t("canvas.surfaceLabel")}
           >
-            {t("canvas.drawTab")}
-          </button>
-          <button
-            type="button"
-            className={`canvas-surface-tab ${activeSurface === "info" ? "is-active" : ""}`}
-            onClick={() => setActiveSurface("info")}
-          >
-            {t("canvas.infoTab")}
-          </button>
+            <button
+              type="button"
+              className={`canvas-surface-tab ${activeSurface === "canvas" ? "is-active" : ""}`}
+              onClick={() => setActiveSurface("canvas")}
+            >
+              {t("canvas.drawTab")}
+            </button>
+            <button
+              type="button"
+              className={`canvas-surface-tab ${activeSurface === "info" ? "is-active" : ""}`}
+              onClick={() => setActiveSurface("info")}
+            >
+              {t("canvas.infoTab")}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -248,6 +396,9 @@ export default function CanvasPane({
             <div className="canvas-stage-shell">
               <Excalidraw
                 key={note.id}
+                excalidrawAPI={(api) => {
+                  excalidrawApiRef.current = api;
+                }}
                 name={note.title}
                 langCode={language === "ru" ? "ru-RU" : "en"}
                 theme="dark"
@@ -277,22 +428,16 @@ export default function CanvasPane({
 
         <aside className={`canvas-sidepanel ${activeSurface === "canvas" ? "is-hidden-mobile" : ""}`}>
           <section className="canvas-detail-card">
-            <label className="canvas-detail-field">
+            <div className="canvas-detail-field">
               <span className="canvas-detail-label">{t("note.folder")}</span>
-              <select
-                value={note.folderId ?? ""}
-                onChange={(event) => onFolderChange(event.target.value || null)}
-                className="meta-select canvas-detail-select"
-              >
-                <option value="">{t("orbit.uncategorized")}</option>
-                {folderOptions.map((folder) => (
-                  <option value={folder.id} key={folder.id}>
-                    {"  ".repeat(folder.depth)}
-                    {folder.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <FolderPicker
+                options={folderOptions}
+                value={note.folderId}
+                emptyLabel={t("orbit.uncategorized")}
+                ariaLabel={t("note.folder")}
+                onChange={onFolderChange}
+              />
+            </div>
 
             <div className="canvas-detail-field">
               <span className="canvas-detail-label">{t("note.tags")}</span>
@@ -344,17 +489,10 @@ export default function CanvasPane({
             <div className="canvas-action-grid">
               <button
                 type="button"
-                className={`micro-action ${note.favorite ? "is-active" : ""}`}
-                onClick={onToggleFavorite}
-              >
-                {note.favorite ? t("note.unfavorite") : t("note.favorite")}
-              </button>
-              <button
-                type="button"
-                className={`micro-action ${note.pinned ? "is-active" : ""}`}
+                className={`micro-action ${note.pinned || note.favorite ? "is-active" : ""}`}
                 onClick={onTogglePin}
               >
-                {note.pinned ? t("note.unpin") : t("note.pin")}
+                {note.pinned || note.favorite ? t("note.unpin") : t("note.pin")}
               </button>
               {note.trashedAt ? (
                 <button type="button" className="micro-action" onClick={onRestore}>
