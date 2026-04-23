@@ -3398,6 +3398,8 @@ button {
 }
 
 .orbital-editor-scroll.is-canvas-mode {
+  flex: 1;
+  height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3559,6 +3561,8 @@ button {
 
 .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
   width: min(1480px, calc(100vw - 12px));
+  height: min(920px, calc(100vh - 24px));
+  height: min(920px, calc(100dvh - 24px));
   background:
     radial-gradient(circle at top, rgba(115, 247, 255, 0.05), transparent 24%),
     linear-gradient(180deg, rgba(10, 11, 28, 0.98), rgba(5, 7, 16, 0.995)),
@@ -3592,7 +3596,12 @@ button {
   border: 0;
   border-left: 0;
   border-right: 0;
+  background: #080a16;
   box-shadow: none;
+}
+
+.orbital-modal-window.orbital-editor-modal-window.is-canvas-fullscreen .orbital-editor-topbar {
+  display: none;
 }
 
 .orbital-editor-topbar.is-canvas-mode {

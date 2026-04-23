@@ -1742,6 +1742,30 @@ export default function OrbitalMapView({
   const [isOrbitInteractionActive, setIsOrbitInteractionActive] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
   const [activeColorFilters, setActiveColorFilters] = useState<string[]>([]);
+  const editorModalRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleCanvasEditorFullscreen = async () => {
+    if (typeof document === "undefined") {
+      setIsCanvasEditorFullscreen((current) => !current);
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        setIsCanvasEditorFullscreen(false);
+        return;
+      }
+
+      if (editorModalRef.current?.requestFullscreen) {
+        await editorModalRef.current.requestFullscreen();
+      }
+
+      setIsCanvasEditorFullscreen(true);
+    } catch {
+      setIsCanvasEditorFullscreen((current) => !current);
+    }
+  };
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeFolderFilters, setActiveFolderFilters] = useState<string[]>([]);
   const [activeNoteFilters, setActiveNoteFilters] = useState<string[]>([]);
@@ -2746,7 +2770,7 @@ export default function OrbitalMapView({
         !isEditableTarget(event.target)
       ) {
         event.preventDefault();
-        setIsCanvasEditorFullscreen((current) => !current);
+        void toggleCanvasEditorFullscreen();
         return;
       }
 
@@ -2754,7 +2778,7 @@ export default function OrbitalMapView({
         if (activeModal) {
           setActiveModal(null);
         } else if (editorOpen && editorMode === "canvas" && isCanvasEditorFullscreen) {
-          setIsCanvasEditorFullscreen(false);
+          void toggleCanvasEditorFullscreen();
         } else if (editorOpen) {
           onCloseEditor();
         } else if (selectedEntityId) {
@@ -2778,6 +2802,33 @@ export default function OrbitalMapView({
     onCloseEditor,
     selectedEntityId
   ]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+
+    const handleFullscreenChange = () => {
+      setIsCanvasEditorFullscreen(document.fullscreenElement === editorModalRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || editorOpen) {
+      return;
+    }
+
+    if (document.fullscreenElement === editorModalRef.current) {
+      void document.exitFullscreen();
+    }
+
+    setIsCanvasEditorFullscreen(false);
+  }, [editorOpen]);
 
   const handleCenterSelection = () => {
     if (orbitalData.projects.length === 0) {
@@ -6285,6 +6336,7 @@ export default function OrbitalMapView({
             onClick={onCloseEditor}
           />
           <div
+            ref={editorModalRef}
             className={`orbital-modal-window orbital-editor-modal-window ${
               editorMode === "canvas" ? "is-canvas-mode" : ""
             } ${editorMode === "note" ? "is-note-mode" : ""} ${
@@ -6305,7 +6357,7 @@ export default function OrbitalMapView({
                 {editorMode === "canvas" ? (
                   <button
                     className="toolbar-action orbital-toolbar-action"
-                    onClick={() => setIsCanvasEditorFullscreen((current) => !current)}
+                    onClick={() => void toggleCanvasEditorFullscreen()}
                   >
                     {isCanvasEditorFullscreen ? labels.exitFullscreen : labels.enterFullscreen}
                   </button>
