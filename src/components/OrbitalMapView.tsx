@@ -4769,91 +4769,93 @@ export default function OrbitalMapView({
   const inspectorMenuBody =
     effectiveInspectorMenu === "overview" ? null : (
       <>
-        <div className="orbital-inspector-header orbital-inspector-header-subview">
-          <button
-            className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-menu-back"
-            onClick={handleInspectorBack}
-            aria-label={labels.back}
-            title={labels.back}
-          >
-            ←
-          </button>
-          <div className="orbital-inspector-heading orbital-inspector-heading-subview">
-            <h2 className="panel-title orbital-inspector-title">{inspectorMenuTitle}</h2>
+        <div className="orbital-inspector-subview-top">
+          <div className="orbital-inspector-header orbital-inspector-header-subview">
+            <button
+              className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-menu-back"
+              onClick={handleInspectorBack}
+              aria-label={labels.back}
+              title={labels.back}
+            >
+              ←
+            </button>
+            <div className="orbital-inspector-heading orbital-inspector-heading-subview">
+              <h2 className="panel-title orbital-inspector-title">{inspectorMenuTitle}</h2>
+            </div>
+            <div className="orbital-inspector-header-actions">
+              {showInspectorHierarchyQuickActions ? (
+                <div className="orbital-inspector-quickactions" aria-label={labels.create}>
+                  <button
+                    type="button"
+                    className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
+                    onClick={() => {
+                      if (!inspectorQuickCreateTargets.folder) {
+                        return;
+                      }
+
+                      beginFolderDraft(
+                        inspectorQuickCreateTargets.folder.parentId,
+                        inspectorQuickCreateTargets.folder.projectId
+                      );
+                    }}
+                    disabled={!inspectorQuickCreateTargets.folder}
+                    aria-label={inspectorFolderActionTitle}
+                    title={inspectorFolderActionTitle}
+                  >
+                    {renderInspectorCreateActionIcon("folder")}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
+                    onClick={() => {
+                      if (!inspectorQuickCreateTargets.note) {
+                        return;
+                      }
+
+                      void handleCreateNote(
+                        inspectorQuickCreateTargets.note.folderId,
+                        inspectorQuickCreateTargets.note.projectId
+                      );
+                    }}
+                    aria-label={labels.addNote}
+                    title={labels.addNote}
+                  >
+                    {renderInspectorCreateActionIcon("note")}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
+                    onClick={() => {
+                      if (!inspectorQuickCreateTargets.canvas) {
+                        return;
+                      }
+
+                      void handleCreateCanvas(
+                        inspectorQuickCreateTargets.canvas.folderId,
+                        inspectorQuickCreateTargets.canvas.projectId
+                      );
+                    }}
+                    aria-label={labels.addCanvas}
+                    title={labels.addCanvas}
+                  >
+                    {renderInspectorCreateActionIcon("canvas")}
+                  </button>
+                </div>
+              ) : null}
+              <span className="orbital-inline-count">{inspectorMenuCount}</span>
+            </div>
           </div>
-          <div className="orbital-inspector-header-actions">
-            {showInspectorHierarchyQuickActions ? (
-              <div className="orbital-inspector-quickactions" aria-label={labels.create}>
-                <button
-                  type="button"
-                  className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
-                  onClick={() => {
-                    if (!inspectorQuickCreateTargets.folder) {
-                      return;
-                    }
 
-                    beginFolderDraft(
-                      inspectorQuickCreateTargets.folder.parentId,
-                      inspectorQuickCreateTargets.folder.projectId
-                    );
-                  }}
-                  disabled={!inspectorQuickCreateTargets.folder}
-                  aria-label={inspectorFolderActionTitle}
-                  title={inspectorFolderActionTitle}
-                >
-                  {renderInspectorCreateActionIcon("folder")}
-                </button>
-                <button
-                  type="button"
-                  className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
-                  onClick={() => {
-                    if (!inspectorQuickCreateTargets.note) {
-                      return;
-                    }
-
-                    void handleCreateNote(
-                      inspectorQuickCreateTargets.note.folderId,
-                      inspectorQuickCreateTargets.note.projectId
-                    );
-                  }}
-                  aria-label={labels.addNote}
-                  title={labels.addNote}
-                >
-                  {renderInspectorCreateActionIcon("note")}
-                </button>
-                <button
-                  type="button"
-                  className="toolbar-action orbital-toolbar-action orbital-icon-action orbital-inspector-create-action"
-                  onClick={() => {
-                    if (!inspectorQuickCreateTargets.canvas) {
-                      return;
-                    }
-
-                    void handleCreateCanvas(
-                      inspectorQuickCreateTargets.canvas.folderId,
-                      inspectorQuickCreateTargets.canvas.projectId
-                    );
-                  }}
-                  aria-label={labels.addCanvas}
-                  title={labels.addCanvas}
-                >
-                  {renderInspectorCreateActionIcon("canvas")}
-                </button>
-              </div>
-            ) : null}
-            <span className="orbital-inline-count">{inspectorMenuCount}</span>
+          <div className="orbital-inspector-search">
+            <label className="orbital-searchbar" aria-label={labels.searchPlaceholder}>
+              <span className="orbital-searchbar-mark">Q</span>
+              <input
+                value={inspectorQuery}
+                onChange={(event) => setInspectorQuery(event.target.value)}
+                placeholder={labels.searchPlaceholder}
+              />
+            </label>
           </div>
-        </div>
-
-        <div className="orbital-inspector-search">
-          <label className="orbital-searchbar" aria-label={labels.searchPlaceholder}>
-            <span className="orbital-searchbar-mark">Q</span>
-            <input
-              value={inspectorQuery}
-              onChange={(event) => setInspectorQuery(event.target.value)}
-              placeholder={labels.searchPlaceholder}
-            />
-          </label>
         </div>
 
         {renderFolderDraftCard()}

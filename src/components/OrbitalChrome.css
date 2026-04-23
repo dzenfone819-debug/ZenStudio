@@ -211,6 +211,16 @@
   padding-top: 0;
 }
 
+.orbital-overlay .orbital-inspector-subview-top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding-bottom: 10px;
+  background:
+    linear-gradient(180deg, rgba(12, 15, 29, 0.98) 0%, rgba(12, 15, 29, 0.95) 78%, rgba(12, 15, 29, 0));
+  backdrop-filter: blur(14px);
+}
+
 .orbital-inspector-heading {
   min-width: 0;
   display: grid;
