@@ -1718,7 +1718,6 @@ export default function OrbitalMapView({
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
-  const [focusModeOverride, setFocusModeOverride] = useState<boolean | null>(null);
   const [isFolderDraftOpen, setIsFolderDraftOpen] = useState(false);
   const [folderDraftParentId, setFolderDraftParentId] = useState<string | null>(null);
   const [folderDraftProjectId, setFolderDraftProjectId] = useState<string | null>(null);
@@ -1909,7 +1908,7 @@ export default function OrbitalMapView({
     related.delete(selectedEntityId);
     return related;
   }, [selectedEntityId, orbitalData]);
-  const isPriorityFocusMode = focusModeOverride === true;
+  const isPriorityFocusMode = false;
   const searchMatchedEntityIds = useMemo(() => {
     const matches = new Set<string>();
 
@@ -2774,13 +2773,22 @@ export default function OrbitalMapView({
   ]);
 
   const handleCenterSelection = () => {
-    if (!anchorNode) {
+    if (orbitalData.projects.length === 0) {
       return;
     }
 
+    const center = orbitalData.projects.reduce(
+      (result, project) => ({
+        x: result.x + project.x,
+        y: result.y + project.y
+      }),
+      { x: 0, y: 0 }
+    );
+    const divisor = orbitalData.projects.length;
+
     animateCameraTo({
-      x: -anchorNode.x,
-      y: -anchorNode.y
+      x: -(center.x / divisor),
+      y: -(center.y / divisor)
     });
   };
 
@@ -4736,6 +4744,27 @@ export default function OrbitalMapView({
     centerOnProject(project.id, 760);
   };
   const coreFlareRotation = (timeMs * 0.0045) % 360;
+  const overviewStateChips = [
+    {
+      id: "index",
+      label: `${activeProjectIndex >= 0 ? activeProjectIndex + 1 : 0}/${orbitalData.projects.length}`,
+      tone: "default" as const
+    },
+    {
+      id: "visible",
+      label: `${labels.visibleBodies}: ${visibleBodies}`,
+      tone: "success" as const
+    },
+    ...(hiddenBodies > 0
+      ? [
+          {
+            id: "hidden",
+            label: `${labels.hiddenBodies}: ${hiddenBodies}`,
+            tone: "warning" as const
+          }
+        ]
+      : []),
+  ];
   const overviewBody = (
     <>
       <div className="orbital-inspector-header orbital-inspector-header-overview">
@@ -4748,12 +4777,9 @@ export default function OrbitalMapView({
           )}
         </div>
         <div className="orbital-inspector-header-actions">
-          <span className="orbital-inline-count">
-            {activeProjectIndex >= 0 ? activeProjectIndex + 1 : 0}/{orbitalData.projects.length}
-          </span>
           <button
             type="button"
-            className="toolbar-action orbital-toolbar-action orbital-icon-action accent"
+            className="toolbar-action orbital-toolbar-action orbital-icon-action accent orbital-overview-addsystem"
             onClick={() => void handleCreateProject()}
             aria-label={labels.addProject}
             title={labels.addProject}
@@ -4763,8 +4789,19 @@ export default function OrbitalMapView({
         </div>
       </div>
 
+      <div className="orbital-overview-chiprow">
+        {overviewStateChips.map((chip) => (
+          <span
+            key={chip.id}
+            className={`orbital-overview-chip orbital-overview-chip-${chip.tone}`}
+          >
+            {chip.label}
+          </span>
+        ))}
+      </div>
+
       <div
-        className="orbital-overview-switcher"
+        className="orbital-overview-switcher orbital-overview-systemcard"
         style={{ "--preview-accent": currentProject?.color ?? DEFAULT_PROJECT_COLOR } as CSSProperties}
       >
         <button
@@ -4853,13 +4890,40 @@ export default function OrbitalMapView({
             className="orbital-overview-link"
             onClick={() => openInspectorMenu(entry.menu)}
           >
-            <span className="orbital-overview-link-label">{entry.label}</span>
+            <span className="orbital-overview-link-main">
+              <span className="orbital-overview-link-icon">
+                {renderInspectorItemIcon(
+                  entry.menu === "notes"
+                    ? "note"
+                    : entry.menu === "folders"
+                      ? "folder"
+                      : entry.menu === "tags"
+                        ? "tag"
+                        : entry.menu === "files"
+                          ? "file"
+                          : entry.menu === "colors"
+                            ? "color"
+                            : "note",
+                  entry.menu === "folders"
+                    ? DEFAULT_FOLDER_COLOR
+                    : entry.menu === "colors"
+                      ? currentProject?.color ?? DEFAULT_PROJECT_COLOR
+                      : entry.menu === "pinned"
+                        ? "#ffd57e"
+                        : DEFAULT_NOTE_COLOR
+                )}
+              </span>
+              <span className="orbital-overview-link-copy">
+                <span className="orbital-overview-link-label">{entry.label}</span>
+                <span className="orbital-overview-link-meta">
+                  {currentProject?.name ?? labels.overview}
+                </span>
+              </span>
+            </span>
             <strong className="orbital-overview-link-count">{entry.count}</strong>
           </button>
         ))}
       </div>
-
-      <p className="orbital-hints orbital-hints-quiet">{labels.hints}</p>
     </>
   );
   const inspectorMenuBody =
@@ -5155,78 +5219,86 @@ export default function OrbitalMapView({
     >
       <div className="orbital-backdrop" aria-hidden="true" />
 
-      <header className="orbital-topbar orbital-topbar-minimal">
-        <div className="orbital-topbar-brand">
-          <div className="orbital-title-stack orbital-topbar-copy">
-            <p className="panel-kicker orbital-topbar-kicker">{labels.title}</p>
-            <h2 className="panel-title orbital-title">{labels.subtitle}</h2>
+      <header className="orbital-command-bar">
+        <div className="orbital-command-content">
+          <div className="orbital-command-title">
+            <p className="orbital-command-kicker">{labels.title}</p>
+            <h2 className="orbital-command-heading">{labels.subtitle}</h2>
           </div>
-          <div className="orbital-title-meta orbital-topbar-meta">
-            <LocalVaultSwitcher
-              label={labels.localVault}
-              activeLabel={t("sync.localVaultActive")}
-              items={localVaultOptions}
-              activeVaultId={activeLocalVaultId}
-              onSelect={onSelectLocalVault}
-              onCreate={onCreateLocalVault}
-            />
-            {currentProject ? <span className="orbital-context-pill">{currentProject.name}</span> : null}
-            {syncStatusChip ? (
-              <span
-                className={`orbital-context-pill orbital-sync-pill is-${syncStatusChip.tone}`}
-                title={syncStatusChip.title ?? syncStatusChip.text}
-              >
-                {syncStatusChip.text}
-              </span>
-            ) : null}
-            {syncTransportChip ? (
-              <span
-                className={`orbital-context-pill orbital-sync-pill orbital-sync-transport-pill is-${syncTransportChip.tone}`}
-                title={syncTransportChip.title ?? syncTransportChip.text}
-              >
-                {syncTransportChip.text}
-              </span>
-            ) : null}
-            {autoFocusEnabled ? <span className="status-chip accent">{labels.autoFocus}</span> : null}
-            {isSceneFocusActive ? <span className="status-chip online">{labels.focusMode}</span> : null}
+
+          <div className="orbital-command-status">
+            <div className="orbital-command-vault">
+              <LocalVaultSwitcher
+                label={labels.localVault}
+                activeLabel={t("sync.localVaultActive")}
+                items={localVaultOptions}
+                activeVaultId={activeLocalVaultId}
+                onSelect={onSelectLocalVault}
+                onCreate={onCreateLocalVault}
+              />
+            </div>
+
+            <div className="orbital-command-chips">
+              {autoFocusEnabled ? (
+                <span className="orbital-context-pill orbital-context-pill-state is-autofocus">
+                  {labels.autoFocus}
+                </span>
+              ) : null}
+              {isSceneFocusActive ? (
+                <span className="orbital-context-pill orbital-context-pill-state is-focus">
+                  {labels.focusMode}
+                </span>
+              ) : null}
+              {syncStatusChip ? (
+                <span
+                  className={`orbital-context-pill orbital-sync-pill is-${syncStatusChip.tone}`}
+                  title={syncStatusChip.title ?? syncStatusChip.text}
+                >
+                  {syncStatusChip.text}
+                </span>
+              ) : null}
+              {syncTransportChip ? (
+                <span
+                  className={`orbital-context-pill orbital-sync-pill orbital-sync-transport-pill is-${syncTransportChip.tone}`}
+                  title={syncTransportChip.title ?? syncTransportChip.text}
+                >
+                  {syncTransportChip.text}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="orbital-toolbar-shell">
-          <div className="orbital-toolbar-cluster">
-            <button className="toolbar-action orbital-toolbar-action" onClick={() => setIsPaused((current) => !current)}>
-              {isPaused ? labels.resume : labels.pause}
-            </button>
+        <div className="orbital-command-actions" aria-label={labels.title}>
+          <div className="orbital-command-group">
             <button
-              className={`toolbar-action orbital-toolbar-action ${isSceneFocusActive ? "accent is-active" : ""}`}
-              onClick={() => {
-                setFocusModeOverride((current) => (current === true ? null : true));
-              }}
-              aria-pressed={isSceneFocusActive}
-              title={isSceneFocusActive ? labels.showAll : labels.focusMode}
+              type="button"
+              className="orbital-command-button"
+              onClick={() => setIsPaused((current) => !current)}
             >
-              {isSceneFocusActive ? labels.showAll : labels.focusMode}
+              {isPaused ? labels.resume : labels.pause}
             </button>
           </div>
 
           {(trashModalSlot || settingsModalSlot) && (
-            <div className="orbital-toolbar-cluster">
+            <div className="orbital-command-group">
               {trashModalSlot ? (
-                <button className="toolbar-action orbital-toolbar-action" onClick={() => setActiveModal("trash")}>
+                <button type="button" className="orbital-command-button" onClick={() => setActiveModal("trash")}>
                   {labels.trash}
                 </button>
               ) : null}
               {settingsModalSlot ? (
-                <button className="toolbar-action orbital-toolbar-action" onClick={() => setActiveModal("settings")}>
+                <button type="button" className="orbital-command-button" onClick={() => setActiveModal("settings")}>
                   {labels.settings}
                 </button>
               ) : null}
             </div>
           )}
 
-          <div className="orbital-toolbar-cluster orbital-toolbar-cluster-camera">
+          <div className="orbital-command-group">
             <button
-              className="toolbar-action orbital-toolbar-action orbital-toolbar-action-icon"
+              type="button"
+              className="orbital-command-button orbital-command-button-icon"
               onClick={() => {
                 stopCameraAnimation();
                 setCamera((current) => ({
@@ -5240,7 +5312,8 @@ export default function OrbitalMapView({
               −
             </button>
             <button
-              className="toolbar-action orbital-toolbar-action orbital-toolbar-action-icon"
+              type="button"
+              className="orbital-command-button orbital-command-button-icon"
               onClick={() => {
                 stopCameraAnimation();
                 setCamera((current) => ({
@@ -5253,16 +5326,16 @@ export default function OrbitalMapView({
             >
               +
             </button>
-            <button className="toolbar-action orbital-toolbar-action" onClick={handleCenterSelection}>
+            <button type="button" className="orbital-command-button" onClick={handleCenterSelection}>
               {labels.centerSelection}
             </button>
-            <button className="toolbar-action orbital-toolbar-action" onClick={handleResetCamera}>
+            <button type="button" className="orbital-command-button" onClick={handleResetCamera}>
               {labels.resetView}
             </button>
           </div>
 
           {showClose ? (
-            <button className="toolbar-action orbital-toolbar-action orbital-toolbar-close danger" onClick={onClose}>
+            <button type="button" className="orbital-command-button orbital-command-button-danger" onClick={onClose}>
               {labels.close}
             </button>
           ) : null}
@@ -5768,21 +5841,46 @@ export default function OrbitalMapView({
 
         <div className="orbital-scene-wrap" onWheel={handleWheel}>
           <div className="orbital-filter-dock">
-            <div className="orbital-filter-topline">
-              <label className="orbital-searchbar" aria-label={labels.searchPlaceholder}>
-                <span className="orbital-searchbar-mark">Q</span>
-                <input
-                  value={filterQuery}
-                  onChange={(event) => setFilterQuery(event.target.value)}
-                  placeholder={labels.searchPlaceholder}
-                />
-              </label>
+            <div className="orbital-filter-shell">
+              <div className="orbital-filter-topline">
+                <label className="orbital-searchbar" aria-label={labels.searchPlaceholder}>
+                  <span className="orbital-searchbar-mark">Q</span>
+                  <input
+                    value={filterQuery}
+                    onChange={(event) => setFilterQuery(event.target.value)}
+                    placeholder={labels.searchPlaceholder}
+                  />
+                </label>
 
-              {hasActiveFilter ? (
-                <button className="toolbar-action orbital-filter-clear" onClick={clearFilters}>
-                  {labels.clearFilters}
-                </button>
-              ) : null}
+                {hasActiveFilter ? (
+                  <button className="toolbar-action orbital-filter-clear" onClick={clearFilters}>
+                    {labels.clearFilters}
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="orbital-filter-chiprow">
+                {currentProject ? (
+                  <span className="orbital-filter-chip orbital-filter-chip-project">
+                    <span
+                      className="orbital-filter-chip-dot"
+                      style={{ "--pill-color": currentProject.color } as CSSProperties}
+                    />
+                    <span>{currentProject.name}</span>
+                  </span>
+                ) : null}
+                <span className="orbital-filter-chip is-success">
+                  {labels.visibleBodies}: {visibleBodies}
+                </span>
+                {hiddenBodies > 0 ? (
+                  <span className="orbital-filter-chip is-warning">
+                    {labels.hiddenBodies}: {hiddenBodies}
+                  </span>
+                ) : null}
+                <span className={`orbital-filter-chip ${isSceneFocusActive ? "is-accent" : ""}`}>
+                  {isSceneFocusActive ? labels.focusMode : labels.showAll}
+                </span>
+              </div>
             </div>
           </div>
 

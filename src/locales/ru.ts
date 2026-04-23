@@ -543,7 +543,7 @@ const ru = {
   orbit: {
     open: "Открыть Orbit",
     title: "Orbital Mind Map",
-    subtitle: "Живая система хранилища с орбитальным движением.",
+    subtitle: "Живая система хранилища",
     close: "Закрыть Orbit",
     pause: "Пауза",
     resume: "Продолжить",

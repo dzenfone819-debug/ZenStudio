@@ -121,6 +121,8 @@ export default function LocalVaultSwitcher({
     return null;
   }
 
+  const triggerProviderLabel = activeItem.providerLabel ?? t("sync.localOnlyShort");
+
   const resetCreateDraft = () => {
     setCreateVaultKind("regular");
     setCreateName("");
@@ -210,6 +212,9 @@ export default function LocalVaultSwitcher({
             <span className="vault-switcher-trigger-label">{label}</span>
             <span className="vault-switcher-trigger-titleline">
               <strong title={activeItem.name}>{activeItem.name}</strong>
+              <span className={`vault-switcher-chip vault-switcher-trigger-provider is-provider-${activeItem.providerTone}`}>
+                {triggerProviderLabel}
+              </span>
               {activeItem.encryptionState !== "disabled" ? (
                 <span
                   className={`vault-switcher-lock-badge is-${activeItem.encryptionState}`}
@@ -220,7 +225,6 @@ export default function LocalVaultSwitcher({
               ) : null}
             </span>
           </span>
-          <span className={`vault-switcher-chip is-${activeItem.statusTone}`}>{activeItem.statusLabel}</span>
           <span className="vault-switcher-trigger-chevron" aria-hidden="true">
             <ChevronGlyph open={open} />
           </span>
