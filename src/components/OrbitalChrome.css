@@ -313,6 +313,12 @@
   gap: 6px;
 }
 
+.orbital-inspector-quickactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .orbital-inline-count {
   display: inline-flex;
   align-items: center;
@@ -336,6 +342,29 @@
   padding: 0;
   justify-content: center;
   border-radius: 999px;
+}
+
+.orbital-inspector-create-action {
+  color: rgba(228, 232, 255, 0.78);
+}
+
+.orbital-inspector-create-action svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.orbital-inspector-create-action svg * {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.orbital-inspector-create-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .orbital-overview-switcher {

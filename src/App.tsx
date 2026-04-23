@@ -1166,14 +1166,14 @@ export default function App() {
     const previousEditorNoteId = previousOrbitalEditorNoteIdRef.current;
     previousOrbitalEditorNoteIdRef.current = orbitalEditorNoteId;
 
-    if (!previousEditorNoteId || orbitalEditorNoteId !== null) {
+    if (!previousEditorNoteId || orbitalEditorNoteId !== null || activeVaultPendingSync.total <= 0) {
       return;
     }
 
     requestAutoSync({
       delayMs: 380
     });
-  }, [orbitalEditorNoteId, requestAutoSync]);
+  }, [activeVaultPendingSync.total, orbitalEditorNoteId, requestAutoSync]);
 
   const handleSelectNote = async (noteId: string) => {
     setSelectedNoteId(noteId);
@@ -1244,38 +1244,53 @@ export default function App() {
   };
 
   const handleRenameProject = async (projectId: string, name: string) => {
-    await renameProject(projectId, name);
-    requestAutoSync({
-      delayMs: 1800
-    });
+    const changed = await renameProject(projectId, name);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 1800
+      });
+    }
   };
 
   const handleUpdateProjectPosition = async (projectId: string, x: number, y: number) => {
-    await updateProjectPosition(projectId, x, y);
-    requestAutoSync({
-      delayMs: 2600
-    });
+    const changed = await updateProjectPosition(projectId, x, y);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 2600
+      });
+    }
   };
 
   const handleUpdateProjectColor = async (projectId: string, color: string) => {
-    await updateProjectColor(projectId, color);
-    requestAutoSync({
-      delayMs: 1800
-    });
+    const changed = await updateProjectColor(projectId, color);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 1800
+      });
+    }
   };
 
   const handleRenameFolder = async (folderId: string, name: string) => {
-    await renameFolder(folderId, name);
-    requestAutoSync({
-      delayMs: 1800
-    });
+    const changed = await renameFolder(folderId, name);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 1800
+      });
+    }
   };
 
   const handleUpdateFolderColor = async (folderId: string, color: string) => {
-    await updateFolderColor(folderId, color);
-    requestAutoSync({
-      delayMs: 1800
-    });
+    const changed = await updateFolderColor(folderId, color);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 1800
+      });
+    }
   };
 
   const handleCreateTag = async (name: string) => {
@@ -1304,10 +1319,13 @@ export default function App() {
     >,
     delayMs = 1800
   ) => {
-    await updateNoteMeta(noteId, patch);
-    requestAutoSync({
-      delayMs
-    });
+    const changed = await updateNoteMeta(noteId, patch);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs
+      });
+    }
   };
 
   const handleToggleTagForNote = async (noteId: string, tagId: string) => {
@@ -1340,10 +1358,13 @@ export default function App() {
     setSaveState(state);
 
     if (state === "saved") {
-      await saveNoteContent(noteId, content);
-      requestAutoSync({
-        delayMs: 6000
-      });
+      const changed = await saveNoteContent(noteId, content);
+
+      if (changed) {
+        requestAutoSync({
+          delayMs: 6000
+        });
+      }
     }
   };
 
@@ -1357,10 +1378,13 @@ export default function App() {
     setSaveState(state);
 
     if (state === "saved" && content) {
-      await saveCanvasContent(noteId, content, files, fileNames);
-      requestAutoSync({
-        delayMs: 6000
-      });
+      const changed = await saveCanvasContent(noteId, content, files, fileNames);
+
+      if (changed) {
+        requestAutoSync({
+          delayMs: 6000
+        });
+      }
     }
   };
 
@@ -1373,10 +1397,13 @@ export default function App() {
   };
 
   const handleRestoreNoteById = async (noteId: string) => {
-    await restoreNoteFromTrash(noteId);
-    requestAutoSync({
-      delayMs: 1500
-    });
+    const changed = await restoreNoteFromTrash(noteId);
+
+    if (changed) {
+      requestAutoSync({
+        delayMs: 1500
+      });
+    }
   };
 
   const handleDeleteNoteById = async (noteId: string) => {

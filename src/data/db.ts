@@ -1088,7 +1088,7 @@ export async function updateProjectPosition(projectId: string, x: number, y: num
   const project = await db.projects.get(projectId);
 
   if (!project || (project.x === x && project.y === y)) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1100,13 +1100,14 @@ export async function updateProjectPosition(projectId: string, x: number, y: num
     });
     await putSyncDirtyEntry("project", projectId, timestamp);
   });
+  return true;
 }
 
 export async function updateProjectColor(projectId: string, color: string) {
   const project = await db.projects.get(projectId);
 
   if (!project || project.color === color) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1117,13 +1118,14 @@ export async function updateProjectColor(projectId: string, color: string) {
     });
     await putSyncDirtyEntry("project", projectId, timestamp);
   });
+  return true;
 }
 
 export async function renameProject(projectId: string, name: string) {
   const project = await db.projects.get(projectId);
 
   if (!project || project.name === name) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1134,6 +1136,7 @@ export async function renameProject(projectId: string, name: string) {
     });
     await putSyncDirtyEntry("project", projectId, timestamp);
   });
+  return true;
 }
 
 export async function removeProject(projectId: string) {
@@ -1235,7 +1238,7 @@ export async function renameFolder(folderId: string, name: string) {
   const folder = await db.folders.get(folderId);
 
   if (!folder || folder.name === name) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1246,13 +1249,14 @@ export async function renameFolder(folderId: string, name: string) {
     });
     await putSyncDirtyEntry("folder", folderId, timestamp);
   });
+  return true;
 }
 
 export async function updateFolderColor(folderId: string, color: string) {
   const folder = await db.folders.get(folderId);
 
   if (!folder || folder.color === color) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1263,6 +1267,7 @@ export async function updateFolderColor(folderId: string, color: string) {
     });
     await putSyncDirtyEntry("folder", folderId, timestamp);
   });
+  return true;
 }
 
 export async function removeFolder(folderId: string) {
@@ -1549,7 +1554,7 @@ export async function updateNoteMeta(
       : patch.projectId ?? existingNote?.projectId;
 
   if (!existingNote) {
-    return;
+    return false;
   }
 
   const nextValues = {
@@ -1575,7 +1580,7 @@ export async function updateNoteMeta(
     existingNote.archived === nextValues.archived &&
     existingNote.trashedAt === nextValues.trashedAt
   ) {
-    return;
+    return false;
   }
 
   const timestamp = now();
@@ -1588,6 +1593,7 @@ export async function updateNoteMeta(
     });
     await putSyncDirtyEntry("note", noteId, timestamp);
   });
+  return true;
 }
 
 export async function saveNoteContent(noteId: string, content: NoteContent) {
@@ -1597,6 +1603,7 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
   const activeAssetIds = new Set(extractReferencedAssetIds(normalizedContent));
 
   const timestamp = now();
+  let didChange = false;
   await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
     const existingNote = await db.notes.get(noteId);
 
@@ -1628,6 +1635,7 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
 
       await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
       await Promise.all(staleAssets.map((asset) => putSyncTombstone("asset", asset.id)));
+      didChange = true;
     }
 
     await db.notes.update(noteId, {
@@ -1638,7 +1646,9 @@ export async function saveNoteContent(noteId: string, content: NoteContent) {
       syncState: nextSyncState(existingNote.syncState)
     });
     await putSyncDirtyEntry("note", noteId, timestamp);
+    didChange = true;
   });
+  return didChange;
 }
 
 export async function loadCanvasFiles(noteId: string): Promise<BinaryFiles> {
@@ -1694,6 +1704,7 @@ export async function saveCanvasContent(
   const activeFileIds = new Set(extractCanvasReferencedFileIds(normalizedContent));
 
   const timestamp = now();
+  let didChange = false;
   await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
     const existingNote = await db.notes.get(noteId);
 
@@ -1719,6 +1730,7 @@ export async function saveCanvasContent(
       await db.assets.bulkDelete(staleAssets.map((asset) => asset.id));
       await Promise.all(staleAssets.map((asset) => putSyncTombstone("asset", asset.id)));
       assetMutationCount += staleAssets.length;
+      didChange = true;
     }
 
     for (const fileId of activeFileIds) {
@@ -1755,6 +1767,7 @@ export async function saveCanvasContent(
       await db.assets.put(nextAsset);
       await putSyncDirtyEntry("asset", nextAsset.id, timestamp);
       assetMutationCount += 1;
+      didChange = true;
     }
 
     const sceneChanged =
@@ -1774,18 +1787,20 @@ export async function saveCanvasContent(
       syncState: nextSyncState(existingNote.syncState)
     });
     await putSyncDirtyEntry("note", noteId, timestamp);
+    didChange = true;
   });
+  return didChange;
 }
 
 export async function moveNoteToTrash(noteId: string) {
-  await updateNoteMeta(noteId, {
+  return updateNoteMeta(noteId, {
     trashedAt: now(),
     archived: false
   });
 }
 
 export async function restoreNoteFromTrash(noteId: string) {
-  await updateNoteMeta(noteId, {
+  return updateNoteMeta(noteId, {
     trashedAt: null
   });
 }
