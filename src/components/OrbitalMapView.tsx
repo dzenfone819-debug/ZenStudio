@@ -60,6 +60,7 @@ interface OrbitalMapViewProps {
   editorMode?: Note["contentType"] | null;
   editorSlot: ReactNode;
   editorTitle?: string;
+  editorAccentColor?: string | null;
   settingsModalSlot?: ReactNode;
   trashModalSlot?: ReactNode;
   showClose?: boolean;
@@ -1692,6 +1693,7 @@ export default function OrbitalMapView({
   editorMode = null,
   editorSlot,
   editorTitle,
+  editorAccentColor,
   settingsModalSlot,
   trashModalSlot,
   showClose = true,
@@ -6342,6 +6344,11 @@ export default function OrbitalMapView({
             } ${editorMode === "note" ? "is-note-mode" : ""} ${
               isCanvasEditorFullscreen ? "is-canvas-fullscreen" : ""
             }`}
+            style={
+              {
+                "--editor-modal-accent": editorAccentColor || DEFAULT_NOTE_COLOR
+              } as CSSProperties
+            }
           >
             <div
               className={`orbital-editor-topbar ${editorMode === "canvas" ? "is-canvas-mode" : ""} ${

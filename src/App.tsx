@@ -97,6 +97,7 @@ import {
   updateSyncBindingState,
   upsertSyncBinding
 } from "./lib/syncRegistry";
+import { DEFAULT_NOTE_COLOR } from "./lib/palette";
 import i18n from "./i18n";
 import type {
   AppSettings,
@@ -2558,6 +2559,7 @@ export default function App() {
           (orbitalEditorEntry?.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled"))
         }
         editorMode={orbitalEditorEntry?.contentType ?? null}
+        editorAccentColor={orbitalEditorEntry?.color || DEFAULT_NOTE_COLOR}
         editorSlot={
           orbitalEditorEntry ? (
             orbitalEditorEntry.contentType === "canvas" ? (
@@ -2606,6 +2608,7 @@ export default function App() {
                   );
                 }}
                 onLoadFiles={() => loadCanvasFiles(orbitalEditorEntry.id)}
+                libraryStorageScopeId={activeLocalVaultId}
               />
             ) : (
               <EditorPane

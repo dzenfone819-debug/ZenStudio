@@ -1,10 +1,7 @@
 import {
   CaptureUpdateAction,
   Excalidraw,
-  exportToBlob,
-  exportToSvg,
-  getNonDeletedElements,
-  serializeAsJSON
+  MainMenu
 } from "@excalidraw/excalidraw";
 import type {
   AppState as ExcalidrawAppState,
@@ -23,6 +20,10 @@ import "./CanvasPane.excalidraw.css";
 import FolderPicker from "./FolderPicker";
 import TagInputField from "./TagInputField";
 import { DEFAULT_CANVAS_BACKGROUND } from "../lib/canvas";
+import {
+  persistExcalidrawLibrary,
+  readPersistedExcalidrawLibrary
+} from "../lib/excalidrawLibrary";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import { flattenFolderOptions, formatTimestamp } from "../lib/notes";
 import type {
@@ -55,10 +56,9 @@ interface CanvasPaneProps {
     state: SaveState
   ) => void;
   onLoadFiles: () => Promise<BinaryFiles>;
+  libraryStorageScopeId: string;
   immersive?: boolean;
 }
-
-type CanvasExportStatus = "png" | "svg" | "json" | "error" | null;
 
 type CanvasBackgroundQuickPickMarker = "void" | "slate" | "blue" | "amber" | "bronze";
 
@@ -67,8 +67,10 @@ const EXCALIDRAW_UI_OPTIONS: Partial<UIOptions> = {
     export: false,
     loadScene: false,
     saveToActiveFile: false,
+    saveAsImage: true,
     toggleTheme: false
   },
+  welcomeScreen: false,
   tools: {
     image: true
   }
@@ -172,13 +174,12 @@ export default function CanvasPane({
   onTogglePin,
   onContentChange,
   onLoadFiles,
+  libraryStorageScopeId,
   immersive = false
 }: CanvasPaneProps) {
   const { t } = useTranslation();
   const [titleDraft, setTitleDraft] = useState(note.title);
   const [activeSurface, setActiveSurface] = useState<"canvas" | "info">("canvas");
-  const [exportStatus, setExportStatus] = useState<CanvasExportStatus>(null);
-  const exportStatusTimeoutRef = useRef<number | null>(null);
   const titleTimeoutRef = useRef<number | null>(null);
   const contentTimeoutRef = useRef<number | null>(null);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -226,6 +227,11 @@ export default function CanvasPane({
   useEffect(() => {
     latestOnTitleChangeRef.current = onTitleChange;
   }, [onTitleChange]);
+
+  const persistedLibraryItems = useMemo(
+    () => readPersistedExcalidrawLibrary(libraryStorageScopeId),
+    [libraryStorageScopeId]
+  );
 
   useEffect(() => {
     const stageShell = stageShellRef.current;
@@ -339,109 +345,6 @@ export default function CanvasPane({
     }, 220);
   };
 
-  const showExportStatus = (status: Exclude<CanvasExportStatus, null>) => {
-    setExportStatus(status);
-
-    if (exportStatusTimeoutRef.current) {
-      window.clearTimeout(exportStatusTimeoutRef.current);
-    }
-
-    exportStatusTimeoutRef.current = window.setTimeout(() => {
-      setExportStatus(null);
-      exportStatusTimeoutRef.current = null;
-    }, 2400);
-  };
-
-  const getCanvasFilename = (extension: "png" | "svg" | "excalidraw") => {
-    const safeTitle = (titleDraft.trim() || note.title || t("canvas.untitled"))
-      .replace(/[\\/:*?"<>|]+/g, "-")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 80);
-
-    return `${safeTitle || "canvas"}.${extension}`;
-  };
-
-  const downloadCanvasBlob = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  const getCurrentCanvasExportData = () => {
-    const api = excalidrawApiRef.current;
-    const elements = (api?.getSceneElements() ??
-      latestSceneRef.current.elements) as readonly ExcalidrawElement[];
-    const appState = (api?.getAppState() ??
-      latestSceneRef.current.appState ??
-      {}) as Partial<ExcalidrawAppState>;
-    const files = api?.getFiles() ?? latestFilesRef.current;
-
-    return {
-      elements: getNonDeletedElements(elements),
-      appState: {
-        ...appState,
-        name: titleDraft.trim() || note.title || t("canvas.untitled"),
-        exportBackground: true,
-        exportWithDarkMode: false,
-        viewBackgroundColor:
-          appState.viewBackgroundColor ?? DEFAULT_CANVAS_BACKGROUND
-      } as Partial<ExcalidrawAppState>,
-      files
-    };
-  };
-
-  const handleExportCanvas = async (format: "png" | "svg" | "json") => {
-    try {
-      const { elements, appState, files } = getCurrentCanvasExportData();
-
-      if (format === "json") {
-        const json = serializeAsJSON(elements, appState, files, "local");
-        downloadCanvasBlob(
-          new Blob([json], { type: "application/vnd.excalidraw+json;charset=utf-8" }),
-          getCanvasFilename("excalidraw")
-        );
-        showExportStatus("json");
-        return;
-      }
-
-      if (format === "svg") {
-        const svg = await exportToSvg({
-          elements,
-          appState,
-          files,
-          exportPadding: 16,
-          skipInliningFonts: true
-        });
-        const svgText = new XMLSerializer().serializeToString(svg);
-        downloadCanvasBlob(
-          new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }),
-          getCanvasFilename("svg")
-        );
-        showExportStatus("svg");
-        return;
-      }
-
-      const png = await exportToBlob({
-        elements,
-        appState,
-        files,
-        mimeType: "image/png",
-        exportPadding: 16
-      });
-      downloadCanvasBlob(png, getCanvasFilename("png"));
-      showExportStatus("png");
-    } catch {
-      showExportStatus("error");
-    }
-  };
-
   useEffect(() => {
     return () => {
       if (titleTimeoutRef.current) {
@@ -456,10 +359,6 @@ export default function CanvasPane({
           latestFileNamesRef.current,
           "saved"
         );
-      }
-
-      if (exportStatusTimeoutRef.current) {
-        window.clearTimeout(exportStatusTimeoutRef.current);
       }
 
       if (latestTitleDraftRef.current !== latestStoredTitleRef.current) {
@@ -478,6 +377,7 @@ export default function CanvasPane({
       className={`canvas-pane ${immersive ? "is-immersive" : ""} ${
         activeSurface === "info" ? "is-details-open" : ""
       }`}
+      style={{ "--note-accent": note.color || DEFAULT_NOTE_COLOR } as CSSProperties}
     >
       <div className="canvas-pane-toolbar">
         <div className="canvas-pane-toolbar-main">
@@ -497,35 +397,6 @@ export default function CanvasPane({
         </div>
 
         <div className="canvas-pane-tools">
-          <div className="canvas-export-actions" aria-label={t("canvas.exportActions")}>
-            <button
-              type="button"
-              className="canvas-export-action"
-              onClick={() => void handleExportCanvas("png")}
-            >
-              {t("canvas.exportPng")}
-            </button>
-            <button
-              type="button"
-              className="canvas-export-action"
-              onClick={() => void handleExportCanvas("svg")}
-            >
-              {t("canvas.exportSvg")}
-            </button>
-            <button
-              type="button"
-              className="canvas-export-action"
-              onClick={() => void handleExportCanvas("json")}
-            >
-              {t("canvas.exportJson")}
-            </button>
-            {exportStatus ? (
-              <span className={`canvas-export-status is-${exportStatus}`}>
-                {t(`canvas.exportStatus.${exportStatus}`)}
-              </span>
-            ) : null}
-          </div>
-
           <div
             className="canvas-surface-switcher"
             role="tablist"
@@ -580,7 +451,8 @@ export default function CanvasPane({
                 initialData={async (): Promise<ExcalidrawInitialDataState> => ({
                   elements: (note.canvasContent?.elements ?? []) as unknown as readonly ExcalidrawElement[],
                   appState: getInitialCanvasAppState(note.canvasContent),
-                  files: await onLoadFiles()
+                  files: await onLoadFiles(),
+                  libraryItems: persistedLibraryItems
                 })}
                 onChange={(elements, appState, files) =>
                   handleSceneChange(
@@ -589,13 +461,24 @@ export default function CanvasPane({
                     files
                   )
                 }
+                onLibraryChange={(libraryItems) =>
+                  persistExcalidrawLibrary(libraryStorageScopeId, libraryItems)
+                }
                 generateIdForFile={(file) => {
                   const id = crypto.randomUUID();
                   generatedFileNamesRef.current[id] = file.name;
                   return id;
                 }}
                 viewModeEnabled={false}
-              />
+              >
+                <MainMenu>
+                  <MainMenu.DefaultItems.SaveAsImage />
+                  <MainMenu.DefaultItems.ChangeCanvasBackground />
+                  <MainMenu.Separator />
+                  <MainMenu.DefaultItems.ClearCanvas />
+                  <MainMenu.DefaultItems.Help />
+                </MainMenu>
+              </Excalidraw>
             </div>
           </div>
         </div>

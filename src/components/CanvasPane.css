@@ -1,10 +1,14 @@
 .canvas-pane {
+  --canvas-accent: var(--note-accent, var(--gold));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   height: 100%;
   min-height: 0;
   padding: 8px 10px 10px;
+  background:
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--canvas-accent) 12%, transparent), transparent 30%),
+    radial-gradient(circle at 88% 14%, rgba(115, 247, 255, 0.038), transparent 28%);
 }
 
 .canvas-pane.is-immersive {
@@ -13,14 +17,28 @@
 }
 
 .canvas-pane-toolbar {
+  min-width: 0;
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+  padding: 8px;
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 20%, rgba(147, 173, 255, 0.1));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--canvas-accent) 8%, transparent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014)),
+    rgba(8, 10, 22, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 16px 38px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(16px);
 }
 
 .canvas-pane.is-immersive .canvas-pane-toolbar {
   gap: 6px;
+  padding: 7px;
+  border-radius: 21px;
 }
 
 .canvas-pane-toolbar-main {
@@ -53,12 +71,26 @@
   min-height: 40px;
   padding: 0 14px;
   border-radius: 14px;
-  border: 1px solid rgba(147, 173, 255, 0.12);
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 18%, rgba(147, 173, 255, 0.11));
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
-    rgba(10, 12, 24, 0.82);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018)),
+    rgba(7, 9, 20, 0.78);
   color: var(--text);
+  font-family: var(--font-note-default);
   font-size: 0.94rem;
+  line-height: 1.25;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.canvas-title-field:focus {
+  border-color: color-mix(in srgb, var(--canvas-accent) 44%, rgba(115, 247, 255, 0.2));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.02)),
+    rgba(8, 11, 24, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 0 0 1px color-mix(in srgb, var(--canvas-accent) 18%, transparent);
 }
 
 .canvas-pane.is-immersive .canvas-title-field {
@@ -86,6 +118,12 @@
   letter-spacing: 0.1em;
 }
 
+.canvas-pane-toolbar .editor-save-pill.is-saved {
+  border-color: color-mix(in srgb, var(--canvas-accent) 30%, rgba(255, 224, 138, 0.14));
+  background: color-mix(in srgb, var(--canvas-accent) 13%, rgba(255, 255, 255, 0.03));
+  color: color-mix(in srgb, var(--text) 88%, var(--canvas-accent) 12%);
+}
+
 .canvas-pane.is-immersive .canvas-pane-toolbar .editor-save-pill {
   min-height: 22px;
   padding: 2px 7px;
@@ -95,70 +133,9 @@
 .canvas-pane-tools {
   min-width: 0;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   justify-content: flex-end;
-}
-
-.canvas-export-actions {
-  min-width: 0;
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  justify-content: flex-end;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.canvas-export-actions::-webkit-scrollbar {
-  display: none;
-}
-
-.canvas-export-action,
-.canvas-export-status {
-  min-height: 28px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(147, 173, 255, 0.12);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012)),
-    rgba(255, 255, 255, 0.025);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.66rem;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.canvas-export-action {
-  cursor: pointer;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-}
-
-.canvas-export-action:hover {
-  transform: translateY(-1px);
-  border-color: rgba(255, 224, 138, 0.24);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.018)),
-    rgba(255, 224, 138, 0.07);
-}
-
-.canvas-export-status {
-  border-color: rgba(115, 247, 255, 0.18);
-  background: rgba(115, 247, 255, 0.07);
-  color: color-mix(in srgb, var(--text) 86%, #73f7ff 14%);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.canvas-export-status.is-error {
-  border-color: rgba(255, 113, 113, 0.26);
-  background: rgba(255, 113, 113, 0.08);
-  color: color-mix(in srgb, var(--text) 80%, #ff7171 20%);
 }
 
 .canvas-surface-switcher {
@@ -168,7 +145,7 @@
   flex: 0 0 auto;
   padding: 3px;
   border-radius: 999px;
-  border: 1px solid rgba(147, 173, 255, 0.1);
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 16%, rgba(147, 173, 255, 0.1));
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -198,9 +175,12 @@
 
 .canvas-surface-tab:hover,
 .canvas-surface-tab.is-active {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
+  color: color-mix(in srgb, var(--text) 88%, var(--canvas-accent) 12%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, var(--canvas-accent) 12%, rgba(255, 255, 255, 0.02));
   transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .canvas-pane-shell {
@@ -238,9 +218,10 @@
   min-height: 0;
   overflow: hidden;
   border-radius: 28px;
-  border: 1px solid rgba(147, 173, 255, 0.12);
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 18%, rgba(147, 173, 255, 0.12));
   background:
-    radial-gradient(circle at top, rgba(79, 157, 255, 0.1), transparent 34%),
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--canvas-accent) 12%, transparent), transparent 34%),
+    radial-gradient(circle at 88% 14%, rgba(115, 247, 255, 0.045), transparent 24%),
     linear-gradient(180deg, rgba(12, 14, 30, 0.96), rgba(6, 8, 18, 0.98));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
@@ -252,27 +233,39 @@
 }
 
 .canvas-stage-shell .excalidraw {
-  --color-primary: #ffe08a;
-  --color-primary-darker: #f1b460;
-  --color-primary-darkest: #d67c3a;
-  --color-primary-light: #f4d6a0;
+  --ui-font: var(--font-ui);
+  --color-primary: color-mix(in srgb, var(--canvas-accent) 78%, white 22%);
+  --color-primary-darker: color-mix(in srgb, var(--canvas-accent) 84%, black 16%);
+  --color-primary-darkest: color-mix(in srgb, var(--canvas-accent) 76%, #ff8a42 24%);
+  --color-primary-light: color-mix(in srgb, var(--canvas-accent) 24%, rgba(255, 255, 255, 0.94));
+  --island-bg-color: rgba(8, 10, 22, 0.92);
+  --popup-bg-color: rgba(10, 12, 24, 0.98);
+  --default-border-color: color-mix(in srgb, var(--canvas-accent) 16%, rgba(147, 173, 255, 0.14));
+  --color-surface-low: rgba(255, 255, 255, 0.05);
+  --color-surface-mid: rgba(255, 255, 255, 0.07);
+  --color-surface-high: rgba(255, 255, 255, 0.09);
+  --button-hover-bg: rgba(255, 255, 255, 0.08);
+  --button-gray-1: rgba(255, 255, 255, 0.04);
+  --button-gray-2: rgba(255, 255, 255, 0.08);
+  --button-gray-3: rgba(255, 255, 255, 0.12);
   height: 100%;
 }
 
 .canvas-stage-shell .excalidraw.theme--dark {
-  --color-primary: #d8b26a;
-  --color-primary-darker: #e19f57;
-  --color-primary-darkest: #ff8a42;
-  --color-primary-light: #d9c09e;
+  --color-primary: color-mix(in srgb, var(--canvas-accent) 70%, #f1e1b4 30%);
+  --color-primary-darker: color-mix(in srgb, var(--canvas-accent) 82%, #0b0d1c 18%);
+  --color-primary-darkest: color-mix(in srgb, var(--canvas-accent) 70%, #ff8a42 30%);
+  --color-primary-light: color-mix(in srgb, var(--canvas-accent) 22%, rgba(255, 255, 255, 0.92));
 }
 
 .canvas-stage-shell .excalidraw .App-menu_top,
 .canvas-stage-shell .excalidraw .layer-ui__wrapper__footer {
-  background: rgba(11, 13, 28, 0.78);
-  backdrop-filter: blur(16px);
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .canvas-stage-shell .excalidraw .Island {
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 14%, rgba(147, 173, 255, 0.12));
   box-shadow:
     0 14px 42px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -294,8 +287,9 @@
   gap: 12px;
   padding: 12px;
   border-radius: 20px;
-  border: 1px solid rgba(147, 173, 255, 0.1);
+  border: 1px solid color-mix(in srgb, var(--canvas-accent) 18%, rgba(147, 173, 255, 0.1));
   background:
+    linear-gradient(135deg, color-mix(in srgb, var(--canvas-accent) 7%, transparent), transparent 48%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
     rgba(10, 12, 24, 0.78);
 }
@@ -432,11 +426,7 @@
 
   .canvas-pane-tools {
     width: 100%;
-    justify-content: space-between;
-  }
-
-  .canvas-export-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .canvas-surface-switcher {
@@ -480,11 +470,7 @@
 
   .canvas-pane-tools {
     align-items: stretch;
-    flex-direction: column;
-  }
-
-  .canvas-export-actions {
-    width: 100%;
+    justify-content: flex-end;
   }
 
   .canvas-pane-contextmeta,

@@ -3552,6 +3552,7 @@ button {
 }
 
 .orbital-modal-window.orbital-editor-modal-window {
+  border: 1px solid color-mix(in srgb, var(--editor-modal-accent, var(--gold)) 18%, rgba(146, 168, 255, 0.12));
   width: min(1200px, calc(100vw - 32px));
   max-height: calc(100vh - 24px);
   padding-top: 0;
@@ -3559,10 +3560,13 @@ button {
   flex-direction: column;
   border-radius: 30px;
   background:
-    radial-gradient(circle at top, rgba(255, 224, 138, 0.06), transparent 26%),
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--editor-modal-accent, var(--gold)) 10%, transparent), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgba(115, 247, 255, 0.04), transparent 24%),
     linear-gradient(180deg, rgba(12, 13, 32, 0.98), rgba(6, 8, 18, 0.99)),
     rgba(6, 8, 18, 0.99);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.42);
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
@@ -3570,7 +3574,8 @@ button {
   height: min(920px, calc(100vh - 24px));
   height: min(920px, calc(100dvh - 24px));
   background:
-    radial-gradient(circle at top, rgba(115, 247, 255, 0.05), transparent 24%),
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--editor-modal-accent, var(--gold)) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgba(115, 247, 255, 0.05), transparent 24%),
     linear-gradient(180deg, rgba(10, 11, 28, 0.98), rgba(5, 7, 16, 0.995)),
     rgba(5, 7, 16, 0.995);
 }
@@ -3578,7 +3583,8 @@ button {
 .orbital-modal-window.orbital-editor-modal-window.is-note-mode {
   width: min(1320px, calc(100vw - 20px));
   background:
-    radial-gradient(circle at top, rgba(255, 224, 138, 0.05), transparent 22%),
+    radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--editor-modal-accent, var(--gold)) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgba(115, 247, 255, 0.04), transparent 24%),
     linear-gradient(180deg, rgba(10, 11, 28, 0.98), rgba(6, 8, 18, 0.995)),
     rgba(6, 8, 18, 0.995);
 }

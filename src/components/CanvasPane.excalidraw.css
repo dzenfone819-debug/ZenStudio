@@ -2,6 +2,118 @@
   --theme-filter: none;
 }
 
+.canvas-stage-shell .excalidraw .main-menu-trigger {
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 22, 0.88);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.canvas-stage-shell .excalidraw .main-menu-trigger:hover {
+  border-color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 26%, rgba(147, 173, 255, 0.16));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 8%, rgba(8, 10, 22, 0.9));
+}
+
+.canvas-stage-shell .excalidraw .help-icon,
+.canvas-stage-shell .excalidraw .default-sidebar-trigger,
+.canvas-stage-shell .excalidraw .sidebar-trigger {
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 22, 0.94) !important;
+  color: var(--text);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+}
+
+.canvas-stage-shell .excalidraw .help-icon:hover,
+.canvas-stage-shell .excalidraw .default-sidebar-trigger:hover,
+.canvas-stage-shell .excalidraw .sidebar-trigger:hover {
+  border-color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 26%, rgba(147, 173, 255, 0.16));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 8%, rgba(8, 10, 22, 0.96)) !important;
+}
+
+.canvas-stage-shell .excalidraw .help-icon svg,
+.canvas-stage-shell .excalidraw .default-sidebar-trigger svg,
+.canvas-stage-shell .excalidraw .sidebar-trigger svg {
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu {
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--canvas-accent, var(--gold)) 8%, transparent), transparent 52%),
+    linear-gradient(180deg, rgba(13, 15, 30, 0.98), rgba(7, 9, 19, 0.99));
+  box-shadow:
+    0 22px 52px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(18px);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-container {
+  padding: 8px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-group {
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-group-title {
+  margin: 0 8px 4px;
+  color: var(--text-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item,
+.canvas-stage-shell .excalidraw .dropdown-menu-item-base,
+.canvas-stage-shell .excalidraw .dropdown-menu-item-bare {
+  border-radius: 14px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item {
+  min-height: 38px;
+  padding-inline: 10px;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item:hover,
+.canvas-stage-shell .excalidraw .dropdown-menu-item:focus-visible,
+.canvas-stage-shell .excalidraw .dropdown-menu-item--selected {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 10%, rgba(255, 255, 255, 0.02));
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item__icon,
+.canvas-stage-shell .excalidraw .dropdown-menu-item__shortcut,
+.canvas-stage-shell .excalidraw .dropdown-menu-item__text {
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item__text {
+  font-size: 0.78rem;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu-item__shortcut {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
 .canvas-stage-shell .excalidraw.theme--dark canvas,
 .canvas-stage-shell .excalidraw.theme--dark .excalidraw-eye-dropper-preview,
 .canvas-stage-shell .excalidraw.theme--dark .color-picker__button,
