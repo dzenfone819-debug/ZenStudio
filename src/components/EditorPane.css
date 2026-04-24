@@ -1,5 +1,19 @@
 .editor-pane {
   --editor-accent: var(--note-accent, var(--gold));
+  --editor-title-font: var(--font-note-default);
+  --editor-title-size: 1rem;
+  --editor-title-weight: 600;
+  --editor-copy-font: var(--font-note-default);
+  --editor-copy-size: 0.95rem;
+  --editor-copy-leading: 1.8;
+  --editor-copy-tracking: 0;
+  --editor-heading-font: var(--font-note-display);
+  --editor-heading-weight: 650;
+  --editor-heading-tracking: -0.016em;
+  --editor-content-padding-top: 28px;
+  --editor-content-padding-right: clamp(22px, 4vw, 46px);
+  --editor-content-padding-bottom: 60px;
+  --editor-content-padding-left: clamp(54px, 6vw, 78px);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
@@ -11,6 +25,19 @@
   background:
     radial-gradient(circle at 14% 0%, color-mix(in srgb, var(--editor-accent) 12%, transparent), transparent 32%),
     radial-gradient(circle at 88% 14%, rgba(115, 247, 255, 0.035), transparent 30%);
+}
+
+.editor-pane.is-reading {
+  --editor-title-font: var(--font-note-reading);
+  --editor-title-size: 1.03rem;
+  --editor-copy-font: var(--font-note-reading);
+  --editor-copy-size: 1rem;
+  --editor-copy-leading: 1.92;
+  --editor-copy-tracking: 0.002em;
+  --editor-heading-font: var(--font-note-default);
+  --editor-heading-tracking: -0.022em;
+  --editor-content-padding-right: clamp(28px, 9vw, 180px);
+  --editor-content-padding-left: clamp(56px, 11vw, 210px);
 }
 
 .editor-pane.is-immersive {
@@ -63,10 +90,11 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018)),
     rgba(7, 9, 20, 0.78);
   color: var(--text);
-  font-family: "Azeret Mono", "IBM Plex Mono", monospace;
-  font-size: 0.94rem;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  font-family: var(--editor-title-font);
+  font-size: var(--editor-title-size);
+  font-weight: var(--editor-title-weight);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
   outline: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
@@ -88,6 +116,45 @@
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
+}
+
+.editor-pane-typography-switch {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.editor-pane-typography-option {
+  min-height: 23px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-dim) 92%, rgba(255, 255, 255, 0.14));
+  font: inherit;
+  font-size: 0.63rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.editor-pane-typography-option:hover {
+  color: var(--text);
+}
+
+.editor-pane-typography-option.is-active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, var(--editor-accent) 12%, rgba(255, 255, 255, 0.02));
+  color: color-mix(in srgb, var(--text) 88%, var(--editor-accent) 12%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .editor-pane-chip,
@@ -208,63 +275,6 @@
   display: none;
 }
 
-.editor-pane-import-confirm {
-  min-width: 0;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 224, 138, 0.16);
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 224, 138, 0.08), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014)),
-    rgba(8, 10, 22, 0.82);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    0 16px 38px rgba(0, 0, 0, 0.2);
-}
-
-.editor-pane-import-confirm-copy {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.editor-pane-import-confirm-kicker,
-.editor-pane-import-confirm-copy h3,
-.editor-pane-import-confirm-copy p {
-  margin: 0;
-}
-
-.editor-pane-import-confirm-kicker {
-  color: rgba(255, 224, 138, 0.78);
-  font-size: 0.56rem;
-  line-height: 1;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.editor-pane-import-confirm-copy h3 {
-  color: var(--text);
-  font-size: 0.82rem;
-  line-height: 1.3;
-}
-
-.editor-pane-import-confirm-copy p {
-  color: var(--text-dim);
-  font-size: 0.68rem;
-  line-height: 1.45;
-}
-
-.editor-pane-import-confirm-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
 .editor-pane-shell {
   display: flex;
   gap: 10px;
@@ -321,19 +331,55 @@
 .editor-stage-shell .bn-editor {
   min-height: 100%;
   height: auto;
-  padding: 26px clamp(20px, 4vw, 42px) 60px clamp(54px, 6vw, 76px);
+  padding:
+    var(--editor-content-padding-top)
+    var(--editor-content-padding-right)
+    var(--editor-content-padding-bottom)
+    var(--editor-content-padding-left);
   background: transparent;
   color: var(--bn-colors-editor-text);
-  font-family: "IBM Plex Mono", "Azeret Mono", monospace;
-  font-size: 0.92rem;
+  font-family: var(--editor-copy-font);
+  font-size: var(--editor-copy-size);
+  letter-spacing: var(--editor-copy-tracking);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 .editor-stage-shell .bn-editor .bn-block-content[data-content-type="heading"][data-text-color="default"],
 .editor-stage-shell .bn-editor .bn-block-content[data-content-type="heading"]:not([data-text-color]) {
   color: color-mix(in srgb, var(--text) 92%, var(--editor-accent) 8%);
-  font-family: "Azeret Mono", "IBM Plex Mono", monospace;
-  letter-spacing: -0.015em;
+  font-family: var(--editor-heading-font);
+  font-weight: var(--editor-heading-weight);
+  letter-spacing: var(--editor-heading-tracking);
   text-transform: none;
+}
+
+.editor-stage-shell .bn-block-outer {
+  margin-block: 0.05rem;
+}
+
+.editor-pane.is-reading .editor-stage-shell .bn-block-outer {
+  margin-block: 0.08rem;
+}
+
+.editor-stage-shell .bn-block-content {
+  padding-block: 0.14rem;
+}
+
+.editor-pane.is-reading .editor-stage-shell .bn-block-content {
+  padding-block: 0.18rem;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="heading"][data-level="1"] {
+  line-height: 1.12;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="heading"][data-level="2"] {
+  line-height: 1.18;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="heading"][data-level="3"] {
+  line-height: 1.24;
 }
 
 .editor-stage-shell .bn-editor p,
@@ -341,7 +387,38 @@
 .editor-stage-shell .bn-editor td,
 .editor-stage-shell .bn-editor th,
 .editor-stage-shell .bn-editor blockquote {
-  line-height: 1.78;
+  line-height: var(--editor-copy-leading);
+}
+
+.editor-stage-shell .bn-editor .bn-inline-content code {
+  padding: 0.12em 0.34em;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background: rgba(255, 255, 255, 0.045);
+  color: color-mix(in srgb, var(--text) 90%, rgba(141, 183, 255, 0.14));
+  font-family: var(--font-ui-mono);
+  font-size: 0.92em;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="codeBlock"] {
+  border-radius: 18px;
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    rgba(6, 8, 18, 0.88);
+  padding: 0.32rem 0.42rem;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="codeBlock"] > pre {
+  font-family: var(--font-ui-mono);
+  font-size: 0.83rem;
+  line-height: 1.72;
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="quote"] blockquote {
+  padding-left: 0.9rem;
+  border-left-color: color-mix(in srgb, var(--editor-accent) 38%, rgba(147, 173, 255, 0.2));
+  color: color-mix(in srgb, var(--text) 86%, rgba(255, 255, 255, 0.14));
 }
 
 .editor-stage-shell .bn-editor table,
@@ -475,6 +552,11 @@
 }
 
 @media (max-width: 1180px) {
+  .editor-pane.is-reading {
+    --editor-content-padding-right: clamp(24px, 7vw, 96px);
+    --editor-content-padding-left: clamp(52px, 9vw, 132px);
+  }
+
   .editor-sidepanel {
     flex-basis: 264px;
     width: 264px;
@@ -520,7 +602,13 @@
     min-height: 36px;
     padding-inline: 11px;
     border-radius: 14px;
-    font-size: 0.9rem;
+    font-size: 0.94rem;
+  }
+
+  .editor-pane.is-reading {
+    --editor-copy-size: 0.96rem;
+    --editor-content-padding-right: 20px;
+    --editor-content-padding-left: 48px;
   }
 
   .editor-pane-chip,
@@ -537,15 +625,6 @@
     font-size: 0.64rem;
   }
 
-  .editor-pane-import-confirm {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .editor-pane-import-confirm-actions {
-    justify-content: flex-end;
-  }
-
   .editor-stage-frame,
   .editor-pane.is-immersive .editor-stage-frame {
     min-height: clamp(300px, 54vh, 620px);
@@ -557,7 +636,7 @@
 
   .editor-stage-shell .bn-editor {
     padding: 22px 16px 44px 44px;
-    font-size: 0.88rem;
+    font-size: var(--editor-copy-size);
   }
 
   .editor-pane-detail-card {
@@ -573,6 +652,13 @@
 
   .editor-pane.is-immersive {
     padding: 6px;
+  }
+
+  .editor-pane.is-reading {
+    --editor-copy-size: 0.93rem;
+    --editor-copy-leading: 1.84;
+    --editor-content-padding-right: 14px;
+    --editor-content-padding-left: 40px;
   }
 
   .editor-pane-toolbar {

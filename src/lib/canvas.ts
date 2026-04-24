@@ -7,7 +7,7 @@ const UNTITLED_CANVAS_TITLE: Record<AppLanguage, string> = {
   ru: "Новый канвас"
 };
 
-const DEFAULT_CANVAS_BACKGROUND = "#090d1f";
+export const DEFAULT_CANVAS_BACKGROUND = "#000000";
 
 export function getUntitledCanvasTitle(language: AppLanguage) {
   return UNTITLED_CANVAS_TITLE[language];

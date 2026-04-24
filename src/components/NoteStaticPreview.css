@@ -3,14 +3,16 @@
   gap: 10px;
   min-width: 0;
   color: var(--text);
-  font-size: 0.88rem;
-  line-height: 1.72;
+  font-family: var(--font-note-reading);
+  font-size: 0.9rem;
+  line-height: 1.76;
+  letter-spacing: 0.002em;
 }
 
 .note-static-preview.is-compact {
   gap: 8px;
   font-size: 0.84rem;
-  line-height: 1.68;
+  line-height: 1.66;
 }
 
 .note-static-preview:not(.is-interactive) {
@@ -32,10 +34,11 @@
 
 .note-static-heading {
   color: var(--text);
-  font-family: "Azeret Mono", "IBM Plex Mono", monospace;
+  font-family: var(--font-note-default);
   font-size: 1rem;
-  line-height: 1.45;
-  letter-spacing: -0.01em;
+  font-weight: 600;
+  line-height: 1.36;
+  letter-spacing: -0.02em;
 }
 
 .note-static-preview.is-compact .note-static-heading {
@@ -43,7 +46,7 @@
 }
 
 .note-static-paragraph {
-  color: inherit;
+  color: color-mix(in srgb, var(--text) 96%, rgba(141, 183, 255, 0.04));
   word-break: break-word;
 }
 
@@ -56,7 +59,7 @@
 
 .note-static-quote {
   padding: 0.78rem 0.9rem;
-  border-left: 2px solid rgba(141, 183, 255, 0.34);
+  border-left: 2px solid rgba(141, 183, 255, 0.3);
   border-radius: 0 0.9rem 0.9rem 0;
   background: rgba(255, 255, 255, 0.035);
   color: color-mix(in srgb, var(--text) 88%, rgba(255, 255, 255, 0.16));
@@ -69,8 +72,8 @@
   background: rgba(5, 8, 18, 0.82);
   color: color-mix(in srgb, var(--text) 92%, rgba(141, 183, 255, 0.12));
   overflow: auto;
-  font-family: "IBM Plex Mono", "Azeret Mono", monospace;
-  font-size: 0.82rem;
+  font-family: var(--font-ui-mono);
+  font-size: 0.81rem;
   line-height: 1.7;
   white-space: pre-wrap;
 }
@@ -125,7 +128,7 @@
   min-height: 1rem;
   padding-top: 0.04rem;
   color: var(--text-dim);
-  font-family: "IBM Plex Mono", "Azeret Mono", monospace;
+  font-family: var(--font-ui-mono);
   font-size: 0.78rem;
 }
 

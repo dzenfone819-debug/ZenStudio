@@ -1,0 +1,109 @@
+.editor-formatting-toolbar-shell {
+  pointer-events: auto;
+}
+
+.editor-formatting-toolbar-shell .bn-toolbar {
+  width: auto;
+  max-width: min(760px, calc(100vw - 40px));
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  overflow: visible;
+  border-radius: 22px;
+}
+
+.editor-formatting-toolbar-shell .bn-select {
+  overflow: visible;
+}
+
+.editor-formatting-toolbar-shell .mantine-Button-root,
+.editor-formatting-toolbar-shell .mantine-ActionIcon-root {
+  min-height: 32px;
+}
+
+.editor-formatting-toolbar-shell .mantine-Button-root {
+  max-width: min(210px, calc(100vw - 84px));
+}
+
+.editor-formatting-toolbar-shell .mantine-Button-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-stage-shell .bn-formatting-toolbar,
+.editor-stage-shell .bn-link-toolbar,
+.editor-stage-shell .bn-form-popover,
+.editor-stage-shell .bn-menu-dropdown {
+  border: 1px solid color-mix(in srgb, var(--editor-accent) 18%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    rgba(8, 10, 22, 0.92);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+}
+
+.editor-stage-shell .bn-menu-dropdown {
+  max-height: min(320px, 52vh);
+}
+
+.editor-stage-shell .bn-link-toolbar {
+  overflow: visible;
+}
+
+.editor-stage-shell .bn-form-popover {
+  min-width: 0;
+  max-width: min(320px, calc(100vw - 28px));
+}
+
+.editor-stage-shell .bn-form-popover .mantine-TextInput-root,
+.editor-stage-shell .bn-form-popover .mantine-FileInput-root {
+  width: min(280px, calc(100vw - 56px));
+  max-width: 100%;
+}
+
+.editor-font-option-preview {
+  min-width: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.74rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.editor-font-option-preview[data-font-choice="default"] {
+  font-family: var(--font-note-default);
+}
+
+.editor-font-option-preview[data-font-choice="ibmPlexSerif"] {
+  transform: translateY(0.02em);
+}
+
+.editor-font-option-preview[data-font-choice="unbounded"] {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 720px) {
+  .editor-formatting-toolbar-shell .bn-toolbar {
+    max-width: calc(100vw - 20px);
+    min-height: 40px;
+    gap: 3px;
+    padding: 4px;
+    border-radius: 18px;
+  }
+
+  .editor-formatting-toolbar-shell .mantine-Button-root,
+  .editor-formatting-toolbar-shell .mantine-ActionIcon-root {
+    min-height: 30px;
+  }
+
+  .editor-formatting-toolbar-shell .mantine-Button-root {
+    max-width: min(180px, calc(100vw - 60px));
+  }
+}

@@ -1,4 +1,5 @@
 import {
+  CaptureUpdateAction,
   Excalidraw,
   exportToBlob,
   exportToSvg,
@@ -18,8 +19,10 @@ import { useTranslation } from "react-i18next";
 
 import "@excalidraw/excalidraw/index.css";
 import "./CanvasPane.css";
+import "./CanvasPane.excalidraw.css";
 import FolderPicker from "./FolderPicker";
 import TagInputField from "./TagInputField";
+import { DEFAULT_CANVAS_BACKGROUND } from "../lib/canvas";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import { flattenFolderOptions, formatTimestamp } from "../lib/notes";
 import type {
@@ -57,6 +60,8 @@ interface CanvasPaneProps {
 
 type CanvasExportStatus = "png" | "svg" | "json" | "error" | null;
 
+type CanvasBackgroundQuickPickMarker = "void" | "slate" | "blue" | "amber" | "bronze";
+
 const EXCALIDRAW_UI_OPTIONS: Partial<UIOptions> = {
   canvasActions: {
     export: false,
@@ -68,6 +73,88 @@ const EXCALIDRAW_UI_OPTIONS: Partial<UIOptions> = {
     image: true
   }
 };
+
+const CANVAS_BACKGROUND_QUICK_PICKS: ReadonlyArray<{
+  source: string;
+  target: string;
+  marker: CanvasBackgroundQuickPickMarker;
+}> = [
+  { source: "#ffffff", target: "#000000", marker: "void" },
+  { source: "#f8f9fa", target: "#111827", marker: "slate" },
+  { source: "#f5faff", target: "#081423", marker: "blue" },
+  { source: "#fffce8", target: "#1b1605", marker: "amber" },
+  { source: "#fdf8f6", target: "#1c1311", marker: "bronze" }
+];
+
+const DEFAULT_CANVAS_BACKGROUND_ALIASES = new Set([
+  "black",
+  "#000",
+  "#000000",
+  "rgb(0,0,0)",
+  "rgb(0, 0, 0)"
+]);
+
+function isBlankCanvasContent(content: CanvasContent | null | undefined) {
+  return !(content?.elements ?? []).some((element) => !element.isDeleted);
+}
+
+function normalizeCanvasColorKey(color: unknown) {
+  return typeof color === "string" ? color.trim().toLowerCase() : "";
+}
+
+function isMissingOrDefaultCanvasBackground(background: unknown) {
+  const normalized = normalizeCanvasColorKey(background);
+
+  if (normalized.length === 0) {
+    return true;
+  }
+
+  return DEFAULT_CANVAS_BACKGROUND_ALIASES.has(normalized);
+}
+
+function getCanvasBackgroundQuickPickFromSource(color: unknown) {
+  const normalized = normalizeCanvasColorKey(color);
+
+  return CANVAS_BACKGROUND_QUICK_PICKS.find((entry) => entry.source === normalized) ?? null;
+}
+
+function getCanvasBackgroundQuickPickFromTarget(color: unknown) {
+  const normalized = normalizeCanvasColorKey(color);
+
+  return CANVAS_BACKGROUND_QUICK_PICKS.find((entry) => entry.target === normalized) ?? null;
+}
+
+function isDefaultCanvasBackground(background: unknown) {
+  return (
+    typeof background === "string" &&
+    background.trim().toLowerCase() === DEFAULT_CANVAS_BACKGROUND.toLowerCase()
+  );
+}
+
+function shouldUseDefaultCanvasBackground(content: CanvasContent | null | undefined) {
+  return isBlankCanvasContent(content) && isMissingOrDefaultCanvasBackground(content?.appState?.viewBackgroundColor);
+}
+
+function shouldHydrateDefaultCanvasBackground(content: CanvasContent | null | undefined) {
+  const background = content?.appState?.viewBackgroundColor;
+
+  return (
+    isBlankCanvasContent(content) &&
+    (isMissingOrDefaultCanvasBackground(background) || isDefaultCanvasBackground(background))
+  );
+}
+
+function getInitialCanvasAppState(content: CanvasContent | null | undefined) {
+  const storedAppState = content?.appState ?? {};
+
+  return {
+    viewBackgroundColor: DEFAULT_CANVAS_BACKGROUND,
+    ...storedAppState,
+    ...(shouldUseDefaultCanvasBackground(content)
+      ? { viewBackgroundColor: DEFAULT_CANVAS_BACKGROUND }
+      : {})
+  } as unknown as Partial<ExcalidrawAppState>;
+}
 
 export default function CanvasPane({
   note,
@@ -95,6 +182,7 @@ export default function CanvasPane({
   const titleTimeoutRef = useRef<number | null>(null);
   const contentTimeoutRef = useRef<number | null>(null);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const stageShellRef = useRef<HTMLDivElement | null>(null);
   const latestSceneRef = useRef<CanvasContent>(note.canvasContent ?? { elements: [], appState: null });
   const latestFilesRef = useRef<BinaryFiles>({});
   const latestFileNamesRef = useRef<Record<string, string>>({});
@@ -138,6 +226,73 @@ export default function CanvasPane({
   useEffect(() => {
     latestOnTitleChangeRef.current = onTitleChange;
   }, [onTitleChange]);
+
+  useEffect(() => {
+    const stageShell = stageShellRef.current;
+
+    if (!stageShell) {
+      return;
+    }
+
+    const applyMappedCanvasBackground = (eventTarget: EventTarget | null) => {
+      if (!(eventTarget instanceof Element)) {
+        return false;
+      }
+
+      const button = eventTarget.closest('button[data-testid^="color-top-pick-"]');
+
+      if (!(button instanceof HTMLButtonElement)) {
+        return false;
+      }
+
+      const quickPick = getCanvasBackgroundQuickPickFromSource(
+        button.getAttribute("title") ?? button.dataset.testid ?? ""
+      );
+
+      if (!quickPick || !excalidrawApiRef.current) {
+        return false;
+      }
+
+      excalidrawApiRef.current.updateScene({
+        appState: {
+          viewBackgroundColor: quickPick.target
+        },
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY
+      });
+
+      return true;
+    };
+
+    const handleClickCapture = (event: MouseEvent) => {
+      if (!applyMappedCanvasBackground(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const handleKeydownCapture = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      if (!applyMappedCanvasBackground(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    stageShell.addEventListener("click", handleClickCapture, true);
+    stageShell.addEventListener("keydown", handleKeydownCapture, true);
+
+    return () => {
+      stageShell.removeEventListener("click", handleClickCapture, true);
+      stageShell.removeEventListener("keydown", handleKeydownCapture, true);
+    };
+  }, []);
 
   const handleSceneChange = (
     elements: readonly CanvasContent["elements"][number][],
@@ -234,8 +389,9 @@ export default function CanvasPane({
         ...appState,
         name: titleDraft.trim() || note.title || t("canvas.untitled"),
         exportBackground: true,
-        exportWithDarkMode: true,
-        viewBackgroundColor: "#080a16"
+        exportWithDarkMode: false,
+        viewBackgroundColor:
+          appState.viewBackgroundColor ?? DEFAULT_CANVAS_BACKGROUND
       } as Partial<ExcalidrawAppState>,
       files
     };
@@ -313,6 +469,9 @@ export default function CanvasPane({
       }
     };
   }, [t]);
+
+  const activeCanvasBackgroundQuickPick =
+    getCanvasBackgroundQuickPickFromTarget(note.canvasContent?.appState?.viewBackgroundColor)?.marker ?? "";
 
   return (
     <section
@@ -393,11 +552,26 @@ export default function CanvasPane({
       <div className="canvas-pane-shell">
         <div className={`canvas-stage-column ${activeSurface === "info" ? "is-hidden-mobile" : ""}`}>
           <div className="canvas-stage-frame">
-            <div className="canvas-stage-shell">
+            <div
+              ref={stageShellRef}
+              className="canvas-stage-shell"
+              data-canvas-background-quick-pick={activeCanvasBackgroundQuickPick}
+            >
               <Excalidraw
                 key={note.id}
                 excalidrawAPI={(api) => {
                   excalidrawApiRef.current = api;
+
+                  if (shouldHydrateDefaultCanvasBackground(note.canvasContent)) {
+                    window.requestAnimationFrame(() => {
+                      api.updateScene({
+                        appState: {
+                          viewBackgroundColor: DEFAULT_CANVAS_BACKGROUND
+                        },
+                        captureUpdate: CaptureUpdateAction.NEVER
+                      });
+                    });
+                  }
                 }}
                 name={note.title}
                 langCode={language === "ru" ? "ru-RU" : "en"}
@@ -405,7 +579,7 @@ export default function CanvasPane({
                 UIOptions={EXCALIDRAW_UI_OPTIONS}
                 initialData={async (): Promise<ExcalidrawInitialDataState> => ({
                   elements: (note.canvasContent?.elements ?? []) as unknown as readonly ExcalidrawElement[],
-                  appState: (note.canvasContent?.appState ?? {}) as unknown as Partial<ExcalidrawAppState>,
+                  appState: getInitialCanvasAppState(note.canvasContent),
                   files: await onLoadFiles()
                 })}
                 onChange={(elements, appState, files) =>

@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { en, ru } from "@blocknote/core/locales";
-import { useCreateBlockNote } from "@blocknote/react";
+import {
+  FormattingToolbarController,
+  LinkToolbarController,
+  useCreateBlockNote
+} from "@blocknote/react";
 import { useTranslation } from "react-i18next";
 
 import "./EditorPane.css";
+import ConfirmDialog from "./ConfirmDialog";
+import EditorFormattingToolbar from "./EditorFormattingToolbar";
 import FolderPicker from "./FolderPicker";
 import TagInputField from "./TagInputField";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
+import { editorBlockNoteSchema } from "../lib/blocknoteSchema";
 import {
   flattenFolderOptions,
   formatTimestamp,
@@ -16,10 +23,13 @@ import {
 import type { AppLanguage, Folder, Note, NoteContent, SaveState, Tag } from "../types";
 
 type MarkdownStatus = "copied" | "exported" | "imported" | "error" | null;
+type EditorTypographyMode = "focus" | "reading";
 type PendingMarkdownImport = {
   fileName: string;
   markdown: string;
 };
+
+const EDITOR_TYPOGRAPHY_MODE_STORAGE_KEY = "zen:editor-typography-mode";
 
 interface EditorPaneProps {
   note: Note;
@@ -62,6 +72,15 @@ export default function EditorPane({
 }: EditorPaneProps) {
   const { t } = useTranslation();
   const [titleDraft, setTitleDraft] = useState(note.title);
+  const [typographyMode, setTypographyMode] = useState<EditorTypographyMode>(() => {
+    if (typeof window === "undefined") {
+      return "focus";
+    }
+
+    const storedMode = window.localStorage.getItem(EDITOR_TYPOGRAPHY_MODE_STORAGE_KEY);
+
+    return storedMode === "reading" ? "reading" : "focus";
+  });
   const [markdownStatus, setMarkdownStatus] = useState<MarkdownStatus>(null);
   const [pendingMarkdownImport, setPendingMarkdownImport] =
     useState<PendingMarkdownImport | null>(null);
@@ -88,10 +107,19 @@ export default function EditorPane({
     setTitleDraft(note.title);
   }, [note.id, note.title]);
 
+  useEffect(() => {
+    setPendingMarkdownImport(null);
+  }, [note.id]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EDITOR_TYPOGRAPHY_MODE_STORAGE_KEY, typographyMode);
+  }, [typographyMode]);
+
   const editorDictionary = language === "ru" ? ru : en;
 
   const editor = useCreateBlockNote(
     {
+      schema: editorBlockNoteSchema,
       initialContent: normalizedContent as any,
       animations: true,
       dictionary: {
@@ -282,7 +310,9 @@ export default function EditorPane({
 
   return (
     <section
-      className={`editor-pane ${immersive ? "is-immersive" : ""}`}
+      className={`editor-pane ${immersive ? "is-immersive" : ""} ${
+        typographyMode === "reading" ? "is-reading" : ""
+      }`}
       style={{ "--note-accent": note.color || DEFAULT_NOTE_COLOR } as CSSProperties}
     >
       <div className="editor-pane-toolbar">
@@ -296,6 +326,32 @@ export default function EditorPane({
             />
 
             <div className="editor-pane-toolbar-meta">
+              <div
+                className="editor-pane-typography-switch"
+                role="group"
+                aria-label={t("note.typographyMode")}
+              >
+                <button
+                  type="button"
+                  className={`editor-pane-typography-option ${
+                    typographyMode === "focus" ? "is-active" : ""
+                  }`}
+                  aria-pressed={typographyMode === "focus"}
+                  onClick={() => setTypographyMode("focus")}
+                >
+                  {t("note.typographyFocus")}
+                </button>
+                <button
+                  type="button"
+                  className={`editor-pane-typography-option ${
+                    typographyMode === "reading" ? "is-active" : ""
+                  }`}
+                  aria-pressed={typographyMode === "reading"}
+                  onClick={() => setTypographyMode("reading")}
+                >
+                  {t("note.typographyReading")}
+                </button>
+              </div>
               <span className={`editor-pane-chip editor-pane-save-pill is-${saveState}`}>
                 {t(`saveState.${saveState}`)}
               </span>
@@ -346,37 +402,28 @@ export default function EditorPane({
         </div>
       </div>
 
-      {pendingMarkdownImport ? (
-        <div className="editor-pane-import-confirm" role="alertdialog" aria-modal="false">
-          <div className="editor-pane-import-confirm-copy">
-            <p className="editor-pane-import-confirm-kicker">
-              {t("note.importMarkdown")}
-            </p>
-            <h3>{t("note.importMarkdownTitle")}</h3>
-            <p>
-              {t("note.importMarkdownMessage", {
+      <ConfirmDialog
+        open={Boolean(pendingMarkdownImport)}
+        kicker={t("note.importMarkdown")}
+        title={t("note.importMarkdownTitle")}
+        message={
+          pendingMarkdownImport
+            ? t("note.importMarkdownMessage", {
                 fileName: pendingMarkdownImport.fileName
-              })}
-            </p>
-          </div>
-          <div className="editor-pane-import-confirm-actions">
-            <button
-              type="button"
-              className="editor-pane-ghost-action"
-              onClick={() => setPendingMarkdownImport(null)}
-            >
-              {t("dialog.cancel")}
-            </button>
-            <button
-              type="button"
-              className="editor-pane-ghost-action is-danger"
-              onClick={() => void applyMarkdownImport(pendingMarkdownImport.markdown)}
-            >
-              {t("note.replaceWithMarkdown")}
-            </button>
-          </div>
-        </div>
-      ) : null}
+              })
+            : ""
+        }
+        confirmLabel={t("note.replaceWithMarkdown")}
+        cancelLabel={t("dialog.cancel")}
+        onCancel={() => setPendingMarkdownImport(null)}
+        onConfirm={() => {
+          if (!pendingMarkdownImport) {
+            return;
+          }
+
+          void applyMarkdownImport(pendingMarkdownImport.markdown);
+        }}
+      />
 
       <div className="editor-pane-shell">
         <div className="editor-stage-column">
@@ -386,15 +433,41 @@ export default function EditorPane({
                 editor={editor}
                 theme="dark"
                 onChange={handleEditorChange}
-                formattingToolbar
-                linkToolbar
+                formattingToolbar={false}
+                linkToolbar={false}
                 slashMenu
                 sideMenu
                 filePanel
                 tableHandles
                 emojiPicker
                 comments={false}
-              />
+              >
+                <FormattingToolbarController
+                  formattingToolbar={EditorFormattingToolbar}
+                  floatingUIOptions={{
+                    useFloatingOptions: {
+                      strategy: "fixed"
+                    },
+                    elementProps: {
+                      style: {
+                        zIndex: 60
+                      }
+                    }
+                  }}
+                />
+                <LinkToolbarController
+                  floatingUIOptions={{
+                    useFloatingOptions: {
+                      strategy: "fixed"
+                    },
+                    elementProps: {
+                      style: {
+                        zIndex: 62
+                      }
+                    }
+                  }}
+                />
+              </BlockNoteView>
             </div>
           </div>
         </div>

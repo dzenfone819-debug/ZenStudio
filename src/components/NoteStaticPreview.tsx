@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import "./NoteStaticPreview.css";
+import { resolveEditorFontFamily } from "../lib/blocknoteSchema";
 import { normalizeNoteContent } from "../lib/notes";
 import type { NoteContent, StoredBlock } from "../types";
 
@@ -95,6 +96,14 @@ function getInlineStyle(styles: unknown) {
   const record = styles as Record<string, unknown>;
   const style: CSSProperties = {};
 
+  const fontFamily = resolveEditorFontFamily(
+    typeof record.font === "string" ? record.font : null
+  );
+
+  if (fontFamily) {
+    style.fontFamily = fontFamily;
+  }
+
   if (record.bold) {
     style.fontWeight = 700;
   }
@@ -118,7 +127,7 @@ function getInlineStyle(styles: unknown) {
   }
 
   if (record.code) {
-    style.fontFamily = "\"IBM Plex Mono\", \"Azeret Mono\", monospace";
+    style.fontFamily = "\"IBM Plex Mono\", ui-monospace, monospace";
     style.padding = "0.06rem 0.34rem";
     style.borderRadius = "0.42rem";
     style.background = "rgba(255, 255, 255, 0.08)";

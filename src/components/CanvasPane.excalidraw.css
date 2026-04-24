@@ -1,0 +1,61 @@
+.canvas-stage-shell .excalidraw.theme--dark {
+  --theme-filter: none;
+}
+
+.canvas-stage-shell .excalidraw.theme--dark canvas,
+.canvas-stage-shell .excalidraw.theme--dark .excalidraw-eye-dropper-preview,
+.canvas-stage-shell .excalidraw.theme--dark .color-picker__button,
+.canvas-stage-shell .excalidraw.theme--dark .color-picker__button:hover::after,
+.canvas-stage-shell .excalidraw.theme--dark .color-picker__button.active .color-picker__button-outline,
+.canvas-stage-shell .excalidraw.theme--dark .color-picker-swatch,
+.canvas-stage-shell .excalidraw.theme--dark .color-picker-label-swatch,
+.canvas-stage-shell .excalidraw.theme--dark .picker-swatch {
+  filter: none !important;
+}
+
+.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#ffffff"] {
+  background-color: #000000 !important;
+}
+
+.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#f8f9fa"] {
+  background-color: #111827 !important;
+}
+
+.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#f5faff"] {
+  background-color: #081423 !important;
+}
+
+.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#fffce8"] {
+  background-color: #1b1605 !important;
+}
+
+.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#fdf8f6"] {
+  background-color: #1c1311 !important;
+}
+
+.canvas-stage-shell[data-canvas-background-quick-pick="void"]
+  .excalidraw
+  [data-testid="color-top-pick-#ffffff"]
+  .color-picker__button-outline,
+.canvas-stage-shell[data-canvas-background-quick-pick="slate"]
+  .excalidraw
+  [data-testid="color-top-pick-#f8f9fa"]
+  .color-picker__button-outline,
+.canvas-stage-shell[data-canvas-background-quick-pick="blue"]
+  .excalidraw
+  [data-testid="color-top-pick-#f5faff"]
+  .color-picker__button-outline,
+.canvas-stage-shell[data-canvas-background-quick-pick="amber"]
+  .excalidraw
+  [data-testid="color-top-pick-#fffce8"]
+  .color-picker__button-outline,
+.canvas-stage-shell[data-canvas-background-quick-pick="bronze"]
+  .excalidraw
+  [data-testid="color-top-pick-#fdf8f6"]
+  .color-picker__button-outline {
+  position: absolute;
+  inset: -2px;
+  box-shadow: 0 0 0 1px var(--color-primary-darkest);
+  z-index: 1;
+  border-radius: calc(var(--radius) + 1px);
+}
