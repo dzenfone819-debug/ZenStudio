@@ -1,5 +1,6 @@
+.canvas-stage-shell .excalidraw,
 .canvas-stage-shell .excalidraw.theme--dark {
-  --theme-filter: none;
+  --theme-filter: none !important;
 }
 
 .canvas-stage-shell .excalidraw .main-menu-trigger {
@@ -48,6 +49,32 @@
 .canvas-stage-shell .excalidraw .default-sidebar-trigger svg,
 .canvas-stage-shell .excalidraw .sidebar-trigger svg {
   color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .zoom-actions,
+.canvas-stage-shell .excalidraw .undo-redo-buttons {
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 22, 0.94);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.canvas-stage-shell .excalidraw .zoom-button,
+.canvas-stage-shell .excalidraw .undo-redo-buttons button {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 22, 0.92) !important;
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .zoom-button:hover,
+.canvas-stage-shell .excalidraw .undo-redo-buttons button:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 10%, rgba(8, 10, 22, 0.94)) !important;
 }
 
 .canvas-stage-shell .excalidraw .dropdown-menu {
@@ -114,60 +141,765 @@
   font-size: 0.68rem;
 }
 
-.canvas-stage-shell .excalidraw.theme--dark canvas,
-.canvas-stage-shell .excalidraw.theme--dark .excalidraw-eye-dropper-preview,
-.canvas-stage-shell .excalidraw.theme--dark .color-picker__button,
-.canvas-stage-shell .excalidraw.theme--dark .color-picker__button:hover::after,
-.canvas-stage-shell .excalidraw.theme--dark .color-picker__button.active .color-picker__button-outline,
-.canvas-stage-shell .excalidraw.theme--dark .color-picker-swatch,
-.canvas-stage-shell .excalidraw.theme--dark .color-picker-label-swatch,
-.canvas-stage-shell .excalidraw.theme--dark .picker-swatch {
+.canvas-stage-shell .excalidraw .layer-ui__library {
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.015)),
+    rgba(8, 10, 22, 0.96);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.canvas-stage-shell .excalidraw .library-menu-items-container,
+.canvas-stage-shell .excalidraw .library-menu-items-container__items,
+.canvas-stage-shell .excalidraw .library-menu-items-container__grid,
+.canvas-stage-shell .excalidraw .library-menu-items-private-library-container {
+  background: transparent;
+}
+
+.canvas-stage-shell .excalidraw .library-menu-items-container__header {
+  margin-bottom: 0.75rem;
+  color: var(--text);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.canvas-stage-shell .excalidraw .library-menu-items__no-items,
+.canvas-stage-shell .excalidraw .layer-ui__library-message {
+  color: var(--text-dim);
+}
+
+.canvas-stage-shell .excalidraw .library-menu-items__no-items__label {
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .library-unit--hover,
+.canvas-stage-shell .excalidraw .library-unit--selected {
+  border-color: rgba(147, 173, 255, 0.24);
+}
+
+.canvas-stage-shell .excalidraw .library-unit__checkbox .Checkbox-box {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(147, 173, 255, 0.22);
+}
+
+.canvas-stage-shell .excalidraw .library-unit__checkbox.is-checked .Checkbox-box {
+  background: rgba(147, 173, 255, 0.22) !important;
+}
+
+.canvas-stage-shell .excalidraw .library-unit__checkbox.is-checked .Checkbox-box svg {
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .library-actions-counter,
+.canvas-stage-shell .excalidraw .library-unit__adder {
+  background: rgba(147, 173, 255, 0.18);
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .library-menu-control-buttons--at-bottom::before {
+  background: rgba(147, 173, 255, 0.12);
+}
+
+.canvas-stage-shell .excalidraw .library-menu-browse-button {
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(8, 10, 22, 0.92);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.canvas-stage-shell .excalidraw .library-menu-browse-button:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(10, 12, 24, 0.96);
+}
+
+.canvas-stage-shell .excalidraw .layer-ui__library .dropdown-menu .dropdown-menu-container {
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(13, 15, 30, 0.98), rgba(7, 9, 19, 0.99));
+  box-shadow:
+    0 22px 52px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.canvas-stage-shell .excalidraw .layer-ui__library .dropdown-menu-item:hover,
+.canvas-stage-shell .excalidraw .layer-ui__library .dropdown-menu-item:focus-visible,
+.canvas-stage-shell .excalidraw .layer-ui__library .dropdown-menu-item--selected {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(147, 173, 255, 0.08);
+}
+
+.canvas-stage-shell .excalidraw canvas,
+.canvas-stage-shell .excalidraw .excalidraw-eye-dropper-preview,
+.canvas-stage-shell .excalidraw .color-picker__button,
+.canvas-stage-shell .excalidraw .color-picker__button:hover::after,
+.canvas-stage-shell .excalidraw .color-picker__button.active .color-picker__button-outline,
+.canvas-stage-shell .excalidraw .color-picker-swatch,
+.canvas-stage-shell .excalidraw .color-picker-label-swatch,
+.canvas-stage-shell .excalidraw .picker-swatch,
+.canvas-stage-shell .excalidraw .library-unit__dragger > svg,
+.canvas-stage-shell .excalidraw .excalidraw-wysiwyg {
   filter: none !important;
 }
 
-.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#ffffff"] {
-  background-color: #000000 !important;
+.canvas-mainmenu-section {
+  display: grid;
+  gap: 10px;
+  padding: 4px 2px 2px;
 }
 
-.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#f8f9fa"] {
-  background-color: #111827 !important;
+.canvas-mainmenu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.74rem;
+  line-height: 1.2;
 }
 
-.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#f5faff"] {
-  background-color: #081423 !important;
+.canvas-mainmenu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 54%, var(--text) 46%);
 }
 
-.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#fffce8"] {
-  background-color: #1b1605 !important;
+.canvas-mainmenu-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
-.canvas-stage-shell .excalidraw [data-testid="color-top-pick-#fdf8f6"] {
-  background-color: #1c1311 !important;
+.canvas-mainmenu-icon.is-danger {
+  color: color-mix(in srgb, #ff7d6d 72%, var(--text) 28%);
 }
 
-.canvas-stage-shell[data-canvas-background-quick-pick="void"]
+.canvas-mainmenu-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.canvas-mainmenu-swatch {
+  --swatch-ring: color-mix(in srgb, var(--canvas-accent, var(--gold)) 18%, rgba(147, 173, 255, 0.16));
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--swatch-ring);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.14)),
+    var(--canvas-menu-swatch);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.canvas-mainmenu-swatch:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 28%, rgba(147, 173, 255, 0.2));
+}
+
+.canvas-mainmenu-swatch.is-active {
+  border-color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 42%, rgba(255, 255, 255, 0.16));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 0 0 1px color-mix(in srgb, var(--canvas-accent, var(--gold)) 18%, transparent);
+}
+
+.canvas-mainmenu-swatch-fill {
+  display: none;
+}
+
+.canvas-mainmenu-custom {
+  display: grid;
+  gap: 6px;
+}
+
+.canvas-mainmenu-custom-label {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.canvas-mainmenu-custom-controls {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.canvas-mainmenu-color-input {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 12px;
+  background: rgba(7, 9, 20, 0.92);
+  cursor: pointer;
+}
+
+.canvas-mainmenu-color-input::-webkit-color-swatch-wrapper {
+  padding: 3px;
+}
+
+.canvas-mainmenu-color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 9px;
+}
+
+.canvas-mainmenu-color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 9px;
+}
+
+.canvas-mainmenu-hex-input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 14%, rgba(147, 173, 255, 0.12));
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.014)),
+    rgba(7, 9, 20, 0.92);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canvas-mainmenu-hex-input:focus-visible,
+.canvas-mainmenu-color-input:focus-visible,
+.canvas-mainmenu-swatch:focus-visible,
+.canvas-mainmenu-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--canvas-accent, var(--gold)) 24%, transparent);
+}
+
+.canvas-mainmenu-action {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.canvas-mainmenu-action:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, #ff7d6d 8%, rgba(255, 255, 255, 0.02));
+  transform: translateY(-1px);
+}
+
+.canvas-stage-shell .excalidraw .color-picker__button[data-canvas-quick-color] {
+  border-color: rgba(147, 173, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.canvas-stage-shell .excalidraw .color-picker__button[data-canvas-quick-color]:hover::after {
+  box-shadow: 0 0 0 1px rgba(147, 173, 255, 0.34);
+}
+
+.canvas-stage-shell
   .excalidraw
-  [data-testid="color-top-pick-#ffffff"]
-  .color-picker__button-outline,
-.canvas-stage-shell[data-canvas-background-quick-pick="slate"]
-  .excalidraw
-  [data-testid="color-top-pick-#f8f9fa"]
-  .color-picker__button-outline,
-.canvas-stage-shell[data-canvas-background-quick-pick="blue"]
-  .excalidraw
-  [data-testid="color-top-pick-#f5faff"]
-  .color-picker__button-outline,
-.canvas-stage-shell[data-canvas-background-quick-pick="amber"]
-  .excalidraw
-  [data-testid="color-top-pick-#fffce8"]
-  .color-picker__button-outline,
-.canvas-stage-shell[data-canvas-background-quick-pick="bronze"]
-  .excalidraw
-  [data-testid="color-top-pick-#fdf8f6"]
+  .color-picker__button[data-canvas-quick-color].is-canvas-override-active
   .color-picker__button-outline {
   position: absolute;
   inset: -2px;
-  box-shadow: 0 0 0 1px var(--color-primary-darkest);
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--canvas-accent, var(--gold)) 46%, rgba(255, 255, 255, 0.18));
+}
+
+.canvas-stage-shell .excalidraw .canvas-font-picker-popover {
+  max-width: min(18rem, calc(100vw - 40px)) !important;
+}
+
+.canvas-stage-shell .excalidraw .canvas-font-picker-popover > .Island {
+  display: flex;
+  flex-direction: column;
+  min-width: 16.5rem;
+  max-height: min(22rem, 60vh);
+  border: 1px solid color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--canvas-accent, var(--gold)) 8%, transparent), transparent 52%),
+    linear-gradient(180deg, rgba(13, 15, 30, 0.98), rgba(7, 9, 19, 0.99));
+  box-shadow:
+    0 22px 52px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+}
+
+.canvas-stage-shell .excalidraw .canvas-font-picker-popover .QuickSearch__wrapper {
+  position: sticky;
+  top: 0;
   z-index: 1;
-  border-radius: calc(var(--radius) + 1px);
+  height: 42px;
+  border-bottom: 1px solid rgba(147, 173, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.016)),
+    rgba(8, 10, 22, 0.96);
+}
+
+.canvas-stage-shell .excalidraw .canvas-font-picker-popover .QuickSearch__input {
+  height: 100%;
+  padding-left: 2.35rem !important;
+  padding-right: 0.85rem !important;
+  background: transparent;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.canvas-stage-shell .excalidraw .canvas-font-picker-popover .QuickSearch__input::placeholder {
+  color: color-mix(in srgb, var(--text-dim) 90%, rgba(255, 255, 255, 0.18));
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  max-height: min(18rem, 52vh) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 10px !important;
+  background: transparent;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts::-webkit-scrollbar {
+  width: 10px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 24%, rgba(18, 24, 44, 0.92));
+  background-clip: padding-box;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-group {
+  display: grid;
+  gap: 6px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-group + .dropdown-menu-group {
+  margin-top: 8px;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-group-title {
+  margin: 0 4px 2px;
+  color: color-mix(in srgb, var(--text-dim) 92%, rgba(255, 224, 138, 0.26));
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item-base {
+  display: flex !important;
+  width: 100%;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item {
+  position: relative;
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding-inline: 12px;
+  border: 1px solid transparent;
+  border-radius: 15px;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.008)),
+    rgba(10, 12, 24, 0.42) !important;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item:hover,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item:focus-visible,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts.manual-hover .dropdown-menu-item--hovered {
+  border-color: color-mix(in srgb, var(--canvas-accent, var(--gold)) 18%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, var(--canvas-accent, var(--gold)) 9%, rgba(12, 16, 30, 0.96)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.032),
+    0 8px 20px rgba(0, 0, 0, 0.16);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts.manual-hover .dropdown-menu-item--selected,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts.manual-hover .dropdown-menu-item--selected.dropdown-menu-item--hovered {
+  border: 1px solid color-mix(
+    in srgb,
+    var(--canvas-accent, var(--gold)) 28%,
+    rgba(147, 173, 255, 0.12)
+  );
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.018)),
+    linear-gradient(90deg, color-mix(in srgb, var(--canvas-accent, var(--gold)) 16%, transparent), transparent 24%),
+    rgba(8, 10, 22, 0.96) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.038),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected::before,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts.manual-hover .dropdown-menu-item--selected::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--canvas-accent, var(--gold)) 76%, white 24%);
+  opacity: 0.92;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item__text {
+  font-size: 0.8rem;
+  gap: 0.7rem;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected .dropdown-menu-item__text,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected .dropdown-menu-item__icon,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item--selected .dropdown-menu-item__shortcut {
+  color: var(--text) !important;
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item__icon,
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item svg {
+  color: color-mix(in srgb, var(--text) 88%, var(--canvas-accent, var(--gold)) 12%);
+}
+
+.canvas-stage-shell .excalidraw .dropdown-menu.fonts .dropdown-menu-item__shortcut {
+  color: color-mix(in srgb, var(--text-dim) 92%, rgba(255, 255, 255, 0.12));
+  opacity: 1;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Modal__background,
+.excalidraw .Dialog.HelpDialog .Modal__background,
+.excalidraw .Dialog.confirm-dialog .Modal__background {
+  background: rgba(3, 5, 12, 0.78);
+  backdrop-filter: blur(18px);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Modal__content,
+.excalidraw .Dialog.HelpDialog .Modal__content,
+.excalidraw .Dialog.confirm-dialog .Modal__content {
+  padding: 16px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Island,
+.excalidraw .Dialog.HelpDialog .Island,
+.excalidraw .Dialog.confirm-dialog .Island {
+  border: 1px solid color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 16%, rgba(147, 173, 255, 0.14));
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 12%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(8, 10, 22, 0.98);
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Dialog__content {
+  padding: 0;
+}
+
+.excalidraw .Dialog.HelpDialog .Dialog__content,
+.excalidraw .Dialog.confirm-dialog .Dialog__content {
+  padding: 0;
+}
+
+.excalidraw .Dialog.HelpDialog .Dialog__title,
+.excalidraw .Dialog.confirm-dialog .Dialog__title {
+  margin: 0;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(147, 173, 255, 0.12);
+  color: var(--text);
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 1.1rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.excalidraw .Dialog.HelpDialog .Dialog__close,
+.excalidraw .Dialog.confirm-dialog .Dialog__close {
+  color: rgba(232, 239, 255, 0.72);
+}
+
+.excalidraw .Dialog.HelpDialog .Dialog__close:hover,
+.excalidraw .Dialog.confirm-dialog .Dialog__close:hover {
+  color: var(--text);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+  gap: 18px;
+  padding: 18px;
+  align-items: stretch;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview,
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings {
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
+    rgba(10, 12, 24, 0.84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview {
+  padding: 16px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__canvas {
+  border-color: rgba(147, 173, 255, 0.16);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.01)),
+    rgba(6, 8, 18, 0.88);
+  padding: 18px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__filename > input {
+  margin-top: 12px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings {
+  gap: 12px;
+  padding: 16px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings h3 {
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting {
+  min-height: 42px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(147, 173, 255, 0.1);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting:last-of-type {
+  border-bottom: 0;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__label {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__content {
+  gap: 8px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons {
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting.canvas-export-setting-hidden {
+  display: none;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .RadioGroup {
+  border-color: rgba(147, 173, 255, 0.14);
+  background: rgba(8, 10, 22, 0.9);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Switch {
+  border: 1px solid rgba(147, 173, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Switch.toggled {
+  background: color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 58%, rgba(10, 12, 24, 0.88));
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ExcButton {
+  border-radius: 14px;
+}
+
+.excalidraw .Dialog.HelpDialog .Modal__content {
+  max-width: min(1120px, calc(100vw - 24px));
+}
+
+.excalidraw .Dialog.HelpDialog .Island {
+  padding: 20px;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__header {
+  display: none;
+}
+
+.excalidraw .Dialog.HelpDialog h3 {
+  margin: 0 0 16px;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__islands-container {
+  gap: 16px;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__island h4 {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__island-content {
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.012)),
+    rgba(10, 12, 24, 0.84);
+  overflow: hidden;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__shortcut {
+  border-bottom: 1px solid rgba(147, 173, 255, 0.08);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__shortcut:last-child {
+  border-bottom: 0;
+}
+
+.excalidraw .Dialog.HelpDialog .HelpDialog__key {
+  background: rgba(147, 173, 255, 0.14);
+  border: 1px solid rgba(147, 173, 255, 0.18);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.42rem 0.56rem;
+}
+
+.excalidraw .Dialog.confirm-dialog .Modal__content {
+  max-width: min(540px, calc(100vw - 24px));
+}
+
+.excalidraw .Dialog.confirm-dialog .Island {
+  padding: 20px;
+}
+
+.excalidraw .Dialog.confirm-dialog .Dialog__content p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.excalidraw .Dialog.confirm-dialog .confirm-dialog-buttons {
+  margin-top: 16px;
+  gap: 10px;
+}
+
+.excalidraw .Dialog.confirm-dialog .Dialog__action-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(147, 173, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 24, 0.82);
+  color: var(--text);
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.excalidraw .Dialog.confirm-dialog .Dialog__action-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(147, 173, 255, 0.18);
+}
+
+.excalidraw .Dialog.confirm-dialog .Dialog__action-button--danger {
+  border-color: color-mix(in srgb, #ff8b7a 26%, rgba(147, 173, 255, 0.14));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.015)),
+    rgba(96, 29, 24, 0.86);
+  color: #ffe2dc;
+}
+
+.excalidraw .Dialog.confirm-dialog .Dialog__action-button--danger:hover {
+  border-color: color-mix(in srgb, #ff8b7a 40%, rgba(147, 173, 255, 0.14));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.016)),
+    rgba(116, 35, 28, 0.9);
+}
+
+@media (max-width: 900px) {
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .excalidraw .Dialog.HelpDialog .Island,
+  .excalidraw .Dialog.confirm-dialog .Island {
+    padding: 16px;
+  }
+
+  .excalidraw .Dialog.confirm-dialog .confirm-dialog-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }

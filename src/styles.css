@@ -3570,7 +3570,8 @@ button {
 }
 
 .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
-  width: min(1480px, calc(100vw - 12px));
+  width: min(1480px, calc(100vw - 40px));
+  max-width: calc(100vw - 32px);
   height: min(920px, calc(100vh - 24px));
   height: min(920px, calc(100dvh - 24px));
   background:
@@ -3790,7 +3791,8 @@ button {
   }
 
   .orbital-modal-window.orbital-editor-modal-window.is-canvas-mode {
-    width: min(1280px, calc(100vw - 24px));
+    width: min(1280px, calc(100vw - 40px));
+    max-width: calc(100vw - 32px);
   }
 
   .orbital-modal-window.orbital-editor-modal-window.is-note-mode {

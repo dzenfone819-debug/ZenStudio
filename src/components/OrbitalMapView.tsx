@@ -1753,14 +1753,16 @@ export default function OrbitalMapView({
     }
 
     try {
-      if (document.fullscreenElement) {
+      const fullscreenTarget = document.documentElement;
+
+      if (document.fullscreenElement === fullscreenTarget) {
         await document.exitFullscreen();
         setIsCanvasEditorFullscreen(false);
         return;
       }
 
-      if (editorModalRef.current?.requestFullscreen) {
-        await editorModalRef.current.requestFullscreen();
+      if (fullscreenTarget.requestFullscreen) {
+        await fullscreenTarget.requestFullscreen();
       }
 
       setIsCanvasEditorFullscreen(true);
@@ -2811,7 +2813,7 @@ export default function OrbitalMapView({
     }
 
     const handleFullscreenChange = () => {
-      setIsCanvasEditorFullscreen(document.fullscreenElement === editorModalRef.current);
+      setIsCanvasEditorFullscreen(document.fullscreenElement === document.documentElement);
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -2825,7 +2827,7 @@ export default function OrbitalMapView({
       return;
     }
 
-    if (document.fullscreenElement === editorModalRef.current) {
+    if (document.fullscreenElement === document.documentElement) {
       void document.exitFullscreen();
     }
 

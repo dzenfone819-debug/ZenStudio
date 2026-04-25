@@ -1,4 +1,4 @@
-import { getTextFromElements } from "@excalidraw/excalidraw";
+import { FONT_FAMILY, getTextFromElements } from "@excalidraw/excalidraw";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { AppLanguage, CanvasContent, CanvasSceneAppState, CanvasSceneElement } from "../types";
 
@@ -8,6 +8,162 @@ const UNTITLED_CANVAS_TITLE: Record<AppLanguage, string> = {
 };
 
 export const DEFAULT_CANVAS_BACKGROUND = "#000000";
+export const DEFAULT_CANVAS_STROKE_LIGHT = "#f8fafc";
+export const DEFAULT_CANVAS_STROKE_DARK = "#1e1e1e";
+export const DEFAULT_CANVAS_ELEMENT_BACKGROUND = "transparent";
+export const DEFAULT_CANVAS_THEME = "light";
+export const DEFAULT_CANVAS_FONT_FAMILY = FONT_FAMILY.Nunito;
+
+function normalizeCanvasColorInput(color: unknown) {
+  return typeof color === "string" ? color.trim().toLowerCase() : "";
+}
+
+function expandShortHexColor(hex: string) {
+  return `#${hex
+    .slice(1)
+    .split("")
+    .map((char) => `${char}${char}`)
+    .join("")}`;
+}
+
+export function normalizeCanvasHexColor(color: string) {
+  const normalized = normalizeCanvasColorInput(color);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const prefixed = normalized.startsWith("#") ? normalized : `#${normalized}`;
+
+  if (/^#[0-9a-f]{3}$/i.test(prefixed)) {
+    return expandShortHexColor(prefixed);
+  }
+
+  if (/^#[0-9a-f]{6}$/i.test(prefixed)) {
+    return prefixed;
+  }
+
+  return null;
+}
+
+function parseCanvasRgbChannel(channel: string) {
+  const parsed = Number.parseFloat(channel.trim());
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(255, parsed));
+}
+
+function parseCanvasRgbColor(color: string) {
+  const match = color.match(/^rgba?\(([^)]+)\)$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const channels = match[1].split(",").slice(0, 3).map(parseCanvasRgbChannel);
+
+  if (channels.some((value) => value === null)) {
+    return null;
+  }
+
+  return channels as [number, number, number];
+}
+
+function parseCanvasColorToRgb(color: unknown) {
+  const normalized = normalizeCanvasColorInput(color);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const hex = normalizeCanvasHexColor(normalized);
+
+  if (hex) {
+    return [
+      Number.parseInt(hex.slice(1, 3), 16),
+      Number.parseInt(hex.slice(3, 5), 16),
+      Number.parseInt(hex.slice(5, 7), 16)
+    ] as [number, number, number];
+  }
+
+  return parseCanvasRgbColor(normalized);
+}
+
+function getCanvasRelativeLuminance(color: unknown) {
+  const rgb = parseCanvasColorToRgb(color);
+
+  if (!rgb) {
+    return null;
+  }
+
+  const [red, green, blue] = rgb.map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+export function getCanvasStrokeColorForBackground(background: unknown) {
+  const luminance = getCanvasRelativeLuminance(background);
+
+  if (luminance === null) {
+    return DEFAULT_CANVAS_STROKE_LIGHT;
+  }
+
+  return luminance >= 0.54 ? DEFAULT_CANVAS_STROKE_DARK : DEFAULT_CANVAS_STROKE_LIGHT;
+}
+
+export function getCanvasRuntimeAppStateDefaults(background?: unknown): CanvasSceneAppState {
+  const resolvedBackground =
+    normalizeCanvasHexColor(typeof background === "string" ? background : "") ??
+    (typeof background === "string" && background.trim().length > 0
+      ? background.trim()
+      : DEFAULT_CANVAS_BACKGROUND);
+
+  return {
+    theme: DEFAULT_CANVAS_THEME,
+    viewBackgroundColor: resolvedBackground,
+    currentItemStrokeColor: getCanvasStrokeColorForBackground(resolvedBackground),
+    currentItemBackgroundColor: DEFAULT_CANVAS_ELEMENT_BACKGROUND,
+    currentItemFontFamily: DEFAULT_CANVAS_FONT_FAMILY,
+    exportBackground: true,
+    exportWithDarkMode: false
+  };
+}
+
+export function shouldMigrateLegacyCanvasStrokeColor(
+  theme: unknown,
+  currentStrokeColor: unknown,
+  background: unknown
+) {
+  return (
+    theme === "dark" &&
+    shouldAutoAdaptCanvasStrokeColor(currentStrokeColor, background)
+  );
+}
+
+export function shouldAutoAdaptCanvasStrokeColor(
+  currentStrokeColor: unknown,
+  previousBackground: unknown
+) {
+  const normalizedStroke =
+    typeof currentStrokeColor === "string" ? currentStrokeColor.trim().toLowerCase() : "";
+
+  if (!normalizedStroke) {
+    return true;
+  }
+
+  const legacyDefault = DEFAULT_CANVAS_STROKE_DARK.toLowerCase();
+  const previousAutomatic = getCanvasStrokeColorForBackground(previousBackground).toLowerCase();
+
+  return normalizedStroke === legacyDefault || normalizedStroke === previousAutomatic;
+}
 
 export function getUntitledCanvasTitle(language: AppLanguage) {
   return UNTITLED_CANVAS_TITLE[language];
@@ -16,9 +172,7 @@ export function getUntitledCanvasTitle(language: AppLanguage) {
 export function createStarterCanvasContent(): CanvasContent {
   return {
     elements: [],
-    appState: {
-      viewBackgroundColor: DEFAULT_CANVAS_BACKGROUND
-    }
+    appState: getCanvasRuntimeAppStateDefaults()
   };
 }
 
@@ -37,7 +191,15 @@ export function pickCanvasAppState(appState: CanvasSceneAppState | null | undefi
     return null;
   }
 
+  const runtimeDefaults = getCanvasRuntimeAppStateDefaults(appState.viewBackgroundColor);
+  const shouldMigrateLegacyStroke = shouldMigrateLegacyCanvasStrokeColor(
+    appState.theme,
+    appState.currentItemStrokeColor,
+    runtimeDefaults.viewBackgroundColor
+  );
+
   return {
+    theme: DEFAULT_CANVAS_THEME,
     viewBackgroundColor:
       typeof appState.viewBackgroundColor === "string"
         ? appState.viewBackgroundColor
@@ -49,16 +211,33 @@ export function pickCanvasAppState(appState: CanvasSceneAppState | null | undefi
     gridStep: typeof appState.gridStep === "number" ? appState.gridStep : undefined,
     scrollX: typeof appState.scrollX === "number" ? appState.scrollX : undefined,
     scrollY: typeof appState.scrollY === "number" ? appState.scrollY : undefined,
-    zoom: appState.zoom && typeof appState.zoom === "object" ? { ...appState.zoom } : undefined
+    zoom: appState.zoom && typeof appState.zoom === "object" ? { ...appState.zoom } : undefined,
+    currentItemStrokeColor:
+      typeof appState.currentItemStrokeColor === "string"
+        ? shouldMigrateLegacyStroke
+          ? runtimeDefaults.currentItemStrokeColor
+          : appState.currentItemStrokeColor
+        : runtimeDefaults.currentItemStrokeColor,
+    currentItemBackgroundColor:
+      typeof appState.currentItemBackgroundColor === "string"
+        ? appState.currentItemBackgroundColor
+        : runtimeDefaults.currentItemBackgroundColor,
+    currentItemFontFamily:
+      typeof appState.currentItemFontFamily === "number"
+        ? appState.currentItemFontFamily
+        : runtimeDefaults.currentItemFontFamily,
+    exportBackground:
+      typeof appState.exportBackground === "boolean"
+        ? appState.exportBackground
+        : runtimeDefaults.exportBackground,
+    exportWithDarkMode: false
   };
 }
 
 export function normalizeCanvasContent(content: CanvasContent | null | undefined): CanvasContent {
   return {
     elements: normalizeCanvasElements(content?.elements),
-    appState: pickCanvasAppState(content?.appState) ?? {
-      viewBackgroundColor: DEFAULT_CANVAS_BACKGROUND
-    }
+    appState: pickCanvasAppState(content?.appState) ?? getCanvasRuntimeAppStateDefaults()
   };
 }
 

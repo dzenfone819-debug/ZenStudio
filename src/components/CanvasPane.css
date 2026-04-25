@@ -234,12 +234,23 @@
 
 .canvas-stage-shell .excalidraw {
   --ui-font: var(--font-ui);
+  --theme-filter: none;
   --color-primary: color-mix(in srgb, var(--canvas-accent) 78%, white 22%);
   --color-primary-darker: color-mix(in srgb, var(--canvas-accent) 84%, black 16%);
   --color-primary-darkest: color-mix(in srgb, var(--canvas-accent) 76%, #ff8a42 24%);
   --color-primary-light: color-mix(in srgb, var(--canvas-accent) 24%, rgba(255, 255, 255, 0.94));
+  --color-primary-hover: color-mix(in srgb, var(--canvas-accent) 86%, white 14%);
+  --color-on-surface: var(--text);
+  --text-primary-color: var(--text);
+  --icon-fill-color: var(--text);
+  --input-label-color: color-mix(in srgb, var(--text) 82%, var(--canvas-accent) 18%);
+  --default-bg-color: rgba(8, 10, 22, 0.96);
+  --input-bg-color: rgba(7, 9, 20, 0.92);
+  --input-hover-bg-color: rgba(10, 12, 24, 0.98);
   --island-bg-color: rgba(8, 10, 22, 0.92);
   --popup-bg-color: rgba(10, 12, 24, 0.98);
+  --popup-secondary-bg-color: rgba(16, 18, 34, 0.98);
+  --popup-text-color: var(--text);
   --default-border-color: color-mix(in srgb, var(--canvas-accent) 16%, rgba(147, 173, 255, 0.14));
   --color-surface-low: rgba(255, 255, 255, 0.05);
   --color-surface-mid: rgba(255, 255, 255, 0.07);
@@ -248,14 +259,14 @@
   --button-gray-1: rgba(255, 255, 255, 0.04);
   --button-gray-2: rgba(255, 255, 255, 0.08);
   --button-gray-3: rgba(255, 255, 255, 0.12);
+  --button-active-border: color-mix(in srgb, var(--canvas-accent) 28%, rgba(255, 255, 255, 0.1));
+  --link-color: color-mix(in srgb, var(--canvas-accent) 68%, #73f7ff 32%);
+  --select-highlight-color: color-mix(in srgb, var(--canvas-accent) 72%, #73f7ff 28%);
+  --overlay-bg-color: rgba(255, 255, 255, 0.04);
+  --scrollbar-thumb: rgba(147, 173, 255, 0.22);
+  --scrollbar-thumb-hover: rgba(147, 173, 255, 0.34);
+  --color-disabled: rgba(255, 255, 255, 0.34);
   height: 100%;
-}
-
-.canvas-stage-shell .excalidraw.theme--dark {
-  --color-primary: color-mix(in srgb, var(--canvas-accent) 70%, #f1e1b4 30%);
-  --color-primary-darker: color-mix(in srgb, var(--canvas-accent) 82%, #0b0d1c 18%);
-  --color-primary-darkest: color-mix(in srgb, var(--canvas-accent) 70%, #ff8a42 30%);
-  --color-primary-light: color-mix(in srgb, var(--canvas-accent) 22%, rgba(255, 255, 255, 0.92));
 }
 
 .canvas-stage-shell .excalidraw .App-menu_top,
