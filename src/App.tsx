@@ -10,6 +10,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import TrashPanel from "./components/TrashPanel";
 import {
   createCanvas,
+  clearTrash,
   createProject,
   createFolder,
   createNote,
@@ -1458,6 +1459,45 @@ export default function App() {
     }
   };
 
+  const handleClearTrash = async () => {
+    if (trashedNotes.length === 0) {
+      return;
+    }
+
+    const confirmed = await requestConfirmation({
+      title: t("orbit.clearTrashTitle"),
+      message: t("orbit.clearTrashMessage", {
+        count: trashedNotes.length
+      }),
+      confirmLabel: t("orbit.clearTrashAction"),
+      cancelLabel: t("dialog.cancel"),
+      details: [`${t("filters.viewTrash")}: ${trashedNotes.length}`]
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    const trashedIds = new Set(trashedNotes.map((note) => note.id));
+    const removedCount = await clearTrash();
+
+    if (removedCount === 0) {
+      return;
+    }
+
+    requestAutoSync({
+      delayMs: 1500
+    });
+
+    if (selectedNoteId && trashedIds.has(selectedNoteId)) {
+      setSelectedNoteId(null);
+    }
+
+    if (orbitalEditorNoteId && trashedIds.has(orbitalEditorNoteId)) {
+      setOrbitalEditorNoteId(null);
+    }
+  };
+
   const handleCreateNote = async () => {
     setViewMode("all");
     const note = await handleCreateNoteAt(selectedFolderId, selectedTagId ? [selectedTagId] : []);
@@ -2666,13 +2706,17 @@ export default function App() {
               folder: t("note.folder"),
               restore: t("note.restore"),
               deletePermanently: t("note.deletePermanently"),
+              clearTrash: t("orbit.clearTrashAction"),
               emptyTitle: t("orbit.trashEmptyTitle"),
               emptyDescription: t("orbit.trashEmptyDescription"),
               noteCount: t("noteList.noteCount"),
-              allNotes: t("filters.allNotes")
+              allNotes: t("filters.allNotes"),
+              noteType: t("orbit.note"),
+              canvasType: t("orbit.canvas")
             }}
             onRestore={(noteId) => void handleRestoreNoteById(noteId)}
             onDelete={(noteId) => void handleDeleteNoteById(noteId)}
+            onClear={() => void handleClearTrash()}
           />
         }
         settingsModalSlot={

@@ -1,0 +1,308 @@
+.trash-panel-shell {
+  min-height: 100%;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.trash-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-right: 46px;
+}
+
+.trash-panel-heading {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.trash-panel-kicker {
+  color: rgba(255, 224, 138, 0.78);
+}
+
+.trash-panel-title {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.18;
+  letter-spacing: 0.03em;
+}
+
+.trash-panel-caption {
+  margin: 0;
+  color: rgba(191, 198, 231, 0.76);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.trash-panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.trash-panel-chip {
+  min-height: 28px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(240, 244, 255, 0.84);
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.trash-panel-clear {
+  min-height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(236, 107, 108, 0.16);
+  background:
+    linear-gradient(180deg, rgba(236, 107, 108, 0.12), rgba(255, 255, 255, 0.02)),
+    rgba(18, 12, 18, 0.58);
+  color: rgba(255, 218, 218, 0.96);
+  font-size: 0.72rem;
+  line-height: 1;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.trash-panel-clear:hover {
+  border-color: rgba(255, 155, 158, 0.24);
+  background:
+    linear-gradient(180deg, rgba(236, 107, 108, 0.16), rgba(255, 255, 255, 0.03)),
+    rgba(22, 13, 19, 0.7);
+}
+
+.trash-panel-clear:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.trash-empty-card {
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(10, 12, 24, 0.48);
+  color: rgba(238, 242, 255, 0.9);
+  display: grid;
+  gap: 6px;
+}
+
+.trash-empty-card strong {
+  font-size: 0.86rem;
+}
+
+.trash-empty-card p {
+  margin: 0;
+  color: rgba(191, 198, 231, 0.74);
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
+.trash-list {
+  display: grid;
+  gap: 12px;
+}
+
+.trash-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+    rgba(9, 11, 22, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 14px 32px rgba(2, 4, 12, 0.14);
+}
+
+.trash-card:hover {
+  border-color: rgba(255, 224, 138, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.045), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 24, 0.6);
+}
+
+.trash-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trash-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.trash-card-copy h3 {
+  margin: 0;
+  color: rgba(246, 248, 255, 0.96);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.trash-card-copy p {
+  margin: 0;
+  color: rgba(188, 195, 228, 0.74);
+  font-size: 0.75rem;
+  line-height: 1.62;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.trash-card-chip-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.trash-card-chip {
+  min-height: 24px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background: rgba(255, 255, 255, 0.026);
+  color: rgba(234, 239, 255, 0.74);
+  font-size: 0.64rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.trash-card-chip.is-type {
+  border-color: rgba(255, 224, 138, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.09), rgba(255, 255, 255, 0.015)),
+    rgba(16, 14, 20, 0.54);
+  color: rgba(255, 239, 191, 0.94);
+}
+
+.trash-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.trash-card-meta-chip {
+  min-height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(182, 189, 222, 0.74);
+  font-size: 0.69rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.trash-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trash-card-action {
+  min-height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
+    rgba(9, 11, 22, 0.62);
+  color: rgba(242, 246, 255, 0.92);
+  font-size: 0.72rem;
+  line-height: 1;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.trash-card-action:hover {
+  border-color: rgba(255, 224, 138, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 224, 138, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(12, 14, 26, 0.74);
+}
+
+.trash-card-action.is-primary {
+  border-color: rgba(124, 232, 188, 0.16);
+  background:
+    linear-gradient(180deg, rgba(124, 232, 188, 0.11), rgba(255, 255, 255, 0.02)),
+    rgba(9, 17, 18, 0.62);
+  color: rgba(214, 255, 236, 0.96);
+}
+
+.trash-card-action.is-primary:hover {
+  border-color: rgba(149, 244, 204, 0.24);
+  background:
+    linear-gradient(180deg, rgba(124, 232, 188, 0.15), rgba(255, 255, 255, 0.025)),
+    rgba(10, 20, 20, 0.76);
+}
+
+.trash-card-action.is-danger {
+  border-color: rgba(236, 107, 108, 0.16);
+  background:
+    linear-gradient(180deg, rgba(236, 107, 108, 0.11), rgba(255, 255, 255, 0.018)),
+    rgba(17, 10, 18, 0.62);
+  color: rgba(255, 221, 221, 0.96);
+}
+
+.trash-card-action.is-danger:hover {
+  border-color: rgba(255, 155, 158, 0.24);
+  background:
+    linear-gradient(180deg, rgba(236, 107, 108, 0.15), rgba(255, 255, 255, 0.02)),
+    rgba(22, 13, 19, 0.76);
+}
+
+@media (max-width: 720px) {
+  .trash-panel-header {
+    flex-direction: column;
+    align-items: stretch;
+    padding-right: 0;
+  }
+
+  .trash-panel-toolbar {
+    justify-content: flex-start;
+  }
+
+  .trash-card-head,
+  .trash-card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

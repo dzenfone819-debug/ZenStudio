@@ -2,19 +2,21 @@
   display: grid;
   gap: 14px;
   min-width: 0;
+  min-height: 100%;
+  align-content: start;
 }
 
 .settings-panel-header,
 .settings-panel-block,
 .settings-panel-footnote {
   border-radius: 22px;
-  border: 1px solid rgba(147, 173, 255, 0.1);
+  border: 1px solid rgba(147, 173, 255, 0.08);
   background:
-    linear-gradient(180deg, rgba(15, 18, 34, 0.94), rgba(8, 10, 20, 0.94)),
-    rgba(8, 10, 20, 0.94);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(9, 11, 22, 0.46);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 18px 40px rgba(2, 4, 12, 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.022),
+    0 14px 32px rgba(2, 4, 12, 0.12);
 }
 
 .settings-panel-header {
@@ -22,7 +24,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  padding: 14px 16px;
+  padding: 16px 18px;
+  padding-right: 56px;
 }
 
 .settings-panel-heading {
@@ -46,11 +49,11 @@
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.55;
-  color: rgba(197, 204, 236, 0.76);
+  color: rgba(191, 198, 231, 0.76);
 }
 
 .settings-panel-block {
-  padding: 12px;
+  padding: 14px;
 }
 
 .settings-panel-block-head {
@@ -73,8 +76,8 @@
   gap: 10px;
   padding: 11px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(147, 173, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(147, 173, 255, 0.07);
+  background: rgba(255, 255, 255, 0.018);
   text-align: left;
   transition:
     border-color 160ms ease,
@@ -85,8 +88,8 @@
 .settings-row:hover {
   border-color: rgba(255, 224, 138, 0.16);
   background:
-    linear-gradient(180deg, rgba(255, 224, 138, 0.04), rgba(255, 255, 255, 0.012)),
-    rgba(255, 255, 255, 0.026);
+    linear-gradient(180deg, rgba(255, 224, 138, 0.045), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.024);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
@@ -196,7 +199,7 @@
   justify-content: center;
   border-radius: 999px;
   border: 1px solid rgba(147, 173, 255, 0.1);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.022);
   font-size: 0.66rem;
   line-height: 1;
   color: rgba(239, 242, 255, 0.84);
@@ -243,7 +246,7 @@
   border-radius: 18px;
   border: 1px solid rgba(147, 173, 255, 0.12);
   background:
-    linear-gradient(180deg, rgba(17, 20, 38, 0.98), rgba(8, 10, 19, 0.98)),
+    linear-gradient(180deg, rgba(16, 19, 34, 0.98), rgba(8, 10, 19, 0.98)),
     rgba(8, 10, 19, 0.98);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
@@ -300,6 +303,7 @@
   .settings-panel-header {
     flex-direction: column;
     align-items: flex-start;
+    padding-right: 18px;
   }
 
   .settings-row {

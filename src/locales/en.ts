@@ -649,7 +649,11 @@ const en = {
     customColor: "Custom color",
     maxDepthReached: "Only one level of subfolders is allowed.",
     trashEmptyTitle: "Trash is empty",
-    trashEmptyDescription: "Deleted notes will appear here until you restore or permanently remove them."
+    trashEmptyDescription: "Deleted notes will appear here until you restore or permanently remove them.",
+    clearTrashAction: "Empty trash",
+    clearTrashTitle: "Empty trash",
+    clearTrashMessage:
+      "Delete {{count}} note(s) from Trash permanently? This action cannot be undone."
   },
   palette: {
     rose: "Rose",

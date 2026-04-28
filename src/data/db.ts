@@ -1826,6 +1826,40 @@ export async function removeNote(noteId: string) {
   });
 }
 
+export async function clearTrash() {
+  const trashedNoteIds = (await db.notes.toArray())
+    .filter((note) => note.trashedAt !== null)
+    .map((note) => note.id);
+
+  if (trashedNoteIds.length === 0) {
+    return 0;
+  }
+
+  await db.transaction("rw", db.notes, db.assets, db.syncTombstones, db.syncDirtyEntries, async () => {
+    for (const noteId of trashedNoteIds) {
+      await db.notes.delete(noteId);
+      await putSyncTombstone("note", noteId);
+
+      const assetIds = await db.assets.where("noteId").equals(noteId).primaryKeys();
+      const normalizedIds = assetIds.map((id) => String(id));
+
+      normalizedIds.forEach((assetId) => {
+        const cachedUrl = assetUrlCache.get(assetId);
+
+        if (cachedUrl) {
+          URL.revokeObjectURL(cachedUrl);
+          assetUrlCache.delete(assetId);
+        }
+      });
+
+      await db.assets.bulkDelete(normalizedIds);
+      await Promise.all(normalizedIds.map((assetId) => putSyncTombstone("asset", assetId)));
+    }
+  });
+
+  return trashedNoteIds.length;
+}
+
 function detectAssetKind(file: File): AssetKind {
   if (file.type.startsWith("image/")) {
     return "image";

@@ -6404,19 +6404,15 @@ export default function OrbitalMapView({
               activeModal === "settings" ? "is-settings-mode" : "is-trash-mode"
             }`}
           >
-            <div className="orbital-utility-modal-head">
-              <div className="orbital-utility-modal-heading">
-                <p className="panel-kicker orbital-utility-modal-kicker">
-                  {activeModal === "settings" ? labels.settings : labels.trash}
-                </p>
-              </div>
-              <button
-                className="toolbar-action orbital-utility-modal-close"
-                onClick={() => setActiveModal(null)}
-              >
-                {labels.closeModal}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="orbital-utility-modal-close"
+              aria-label={labels.closeModal}
+              title={labels.closeModal}
+              onClick={() => setActiveModal(null)}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
             <div className="orbital-modal-content orbital-utility-modal-content">
               {activeModal === "settings" ? settingsModalSlot : trashModalSlot}
             </div>
