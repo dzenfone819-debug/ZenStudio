@@ -646,6 +646,54 @@
   padding: 0;
 }
 
+.excalidraw .Dialog.canvas-export-dialog {
+  --canvas-export-border: color-mix(
+    in srgb,
+    var(--canvas-dialog-accent, var(--gold)) 18%,
+    rgba(147, 173, 255, 0.12)
+  );
+  --canvas-export-border-strong: color-mix(
+    in srgb,
+    var(--canvas-dialog-accent, var(--gold)) 34%,
+    rgba(147, 173, 255, 0.18)
+  );
+  --canvas-export-surface: rgba(8, 10, 22, 0.84);
+  --canvas-export-surface-strong: rgba(10, 13, 27, 0.92);
+  --canvas-export-surface-soft: rgba(12, 15, 30, 0.68);
+  --canvas-export-text-muted: color-mix(in srgb, var(--text-dim) 88%, rgba(255, 224, 138, 0.18));
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Modal__content {
+  width: min(960px, calc(100vw - 24px));
+  max-width: min(960px, calc(100vw - 24px));
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Dialog__close {
+  color: rgba(232, 239, 255, 0.72);
+  border: 1px solid var(--canvas-export-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.016)),
+    rgba(8, 10, 22, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.036),
+    0 10px 24px rgba(0, 0, 0, 0.2);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Dialog__close:hover {
+  color: var(--text);
+  border-color: var(--canvas-export-border-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 8%, rgba(8, 10, 22, 0.94));
+  transform: translateY(-1px);
+}
+
 .excalidraw .Dialog.HelpDialog .Dialog__content,
 .excalidraw .Dialog.confirm-dialog .Dialog__content {
   padding: 0;
@@ -675,59 +723,119 @@
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
-  gap: 18px;
-  padding: 18px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1.12fr) minmax(19rem, 0.88fr);
+  gap: 20px;
+  width: min(920px, calc(100vw - 32px));
+  max-width: 100%;
+  padding: 20px;
+  align-items: start;
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview,
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings {
   width: auto;
   height: auto;
+  min-height: 0;
   margin: 0;
-  border: 1px solid rgba(147, 173, 255, 0.14);
-  border-radius: 22px;
+  border: 1px solid var(--canvas-export-border);
+  border-radius: 24px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
-    rgba(10, 12, 24, 0.84);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    rgba(10, 12, 24, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.028),
+    0 16px 36px rgba(0, 0, 0, 0.18);
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview {
-  padding: 16px;
-}
-
-.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__canvas {
-  border-color: rgba(147, 173, 255, 0.16);
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.01)),
-    rgba(6, 8, 18, 0.88);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-self: start;
   padding: 18px;
 }
 
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__canvas {
+  height: clamp(260px, 34vh, 360px);
+  min-height: 260px;
+  max-height: 360px;
+  border: 1px solid var(--canvas-export-border);
+  border-radius: 18px;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.028) 25%, transparent 25%) 0 0 / 16px 16px,
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.028) 25%, transparent 25%) 0 8px / 16px 16px,
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.022) 75%) 8px -8px / 16px 16px,
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.022) 75%) -8px 0 / 16px 16px,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.01)),
+    rgba(6, 8, 18, 0.92);
+  padding: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.026),
+    inset 0 0 0 1px rgba(4, 6, 14, 0.28);
+  overflow: hidden;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__canvas > canvas {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
+
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__filename > input {
-  margin-top: 12px;
+  min-height: 40px;
+  margin-top: 0;
+  padding: 0 14px;
+  border: 1px solid var(--canvas-export-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014)),
+    rgba(7, 9, 20, 0.92);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  line-height: 1.2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__filename > input::placeholder {
+  color: var(--canvas-export-text-muted);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__filename > input:focus {
+  outline: none;
+  border-color: var(--canvas-export-border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.034),
+    0 0 0 1px color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 16%, transparent);
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings {
-  gap: 12px;
-  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
 }
 
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview h3,
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings h3 {
-  color: var(--text-dim);
+  margin: 0;
+  color: var(--canvas-export-text-muted);
   font-family: var(--font-ui);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting {
-  min-height: 42px;
-  padding: 0 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 2px;
   border-bottom: 1px solid rgba(147, 173, 255, 0.1);
 }
 
@@ -738,16 +846,26 @@
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__label {
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 500;
+  line-height: 1.35;
+  gap: 8px;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__label svg {
+  color: var(--canvas-export-text-muted);
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__content {
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons {
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 10px;
+  margin-top: auto;
   padding-top: 10px;
 }
 
@@ -756,17 +874,140 @@
 }
 
 .excalidraw .Dialog.canvas-export-dialog .RadioGroup {
-  border-color: rgba(147, 173, 255, 0.14);
-  background: rgba(8, 10, 22, 0.9);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--canvas-export-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.036), rgba(255, 255, 255, 0.014)),
+    var(--canvas-export-surface-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.024);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .RadioGroup__choice {
+  min-width: 38px;
+  width: 38px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--canvas-export-text-muted);
+  background: transparent;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .RadioGroup__choice:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.042);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .RadioGroup__choice.active {
+  border-color: var(--canvas-export-border-strong);
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.062), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 18%, rgba(10, 12, 24, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.038),
+    0 8px 18px rgba(0, 0, 0, 0.14);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .RadioGroup__choice.active:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.072), rgba(255, 255, 255, 0.022)),
+    color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 22%, rgba(10, 12, 24, 0.98));
 }
 
 .excalidraw .Dialog.canvas-export-dialog .Switch {
-  border: 1px solid rgba(147, 173, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
+  width: 46px;
+  height: 26px;
+  border: 1px solid var(--canvas-export-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    rgba(18, 22, 38, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.024);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Switch:hover {
+  border-color: var(--canvas-export-border-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012)),
+    rgba(20, 24, 42, 0.94);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Switch::before {
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  background: rgba(235, 240, 255, 0.9);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.22);
 }
 
 .excalidraw .Dialog.canvas-export-dialog .Switch.toggled {
-  background: color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 58%, rgba(10, 12, 24, 0.88));
+  border-color: color-mix(
+    in srgb,
+    var(--canvas-dialog-accent, var(--gold)) 44%,
+    rgba(147, 173, 255, 0.18)
+  );
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012)),
+    color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 58%, rgba(10, 12, 24, 0.88));
+}
+
+.excalidraw .Dialog.canvas-export-dialog .Switch.toggled::before {
+  top: 3px;
+  left: 23px;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button {
+  --text-color: var(--text);
+  --border-color: var(--canvas-export-border);
+  --back-color: rgba(11, 14, 28, 0.94);
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  padding-inline: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.028),
+    0 14px 30px rgba(0, 0, 0, 0.16);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button:first-child {
+  --text-color: #f4f8ff;
+  --border-color: color-mix(
+    in srgb,
+    var(--canvas-dialog-accent, var(--gold)) 48%,
+    rgba(255, 255, 255, 0.14)
+  );
+  --back-color: color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 34%, rgba(10, 12, 24, 0.98));
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button:nth-child(2) {
+  --text-color: color-mix(in srgb, var(--text) 94%, rgba(255, 233, 178, 0.6));
+  --border-color: color-mix(in srgb, var(--canvas-dialog-accent, var(--gold)) 22%, rgba(147, 173, 255, 0.12));
+  --back-color: rgba(12, 15, 30, 0.92);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button:nth-child(3) {
+  --text-color: #dff9ff;
+  --border-color: rgba(115, 247, 255, 0.24);
+  --back-color: rgba(7, 33, 44, 0.92);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button:hover {
+  transform: translateY(-1px);
+}
+
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button .ExcButton__icon,
+.excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__buttons__button svg {
+  color: currentColor;
 }
 
 .excalidraw .Dialog.canvas-export-dialog .ExcButton {
@@ -888,11 +1129,35 @@
 
 @media (max-width: 900px) {
   .excalidraw .Dialog.canvas-export-dialog .ImageExportModal {
+    width: min(100%, calc(100vw - 24px));
     grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview,
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings {
+    padding: 16px;
   }
 }
 
 @media (max-width: 720px) {
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__settings__setting__content {
+    justify-content: flex-start;
+  }
+
+  .excalidraw .Dialog.canvas-export-dialog .ImageExportModal__preview__canvas {
+    height: clamp(220px, 30vh, 300px);
+    min-height: 220px;
+    max-height: 300px;
+  }
+
   .excalidraw .Dialog.HelpDialog .Island,
   .excalidraw .Dialog.confirm-dialog .Island {
     padding: 16px;
