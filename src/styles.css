@@ -2202,17 +2202,20 @@ button {
 }
 
 .orbital-overview-nav {
+  align-self: stretch;
   display: grid;
   place-items: center;
-  width: 42px;
-  min-height: 164px;
+  width: 32px;
+  min-width: 32px;
+  min-height: 0;
+  padding: 0;
   border-radius: 18px;
   border: 1px solid rgba(147, 173, 255, 0.12);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
-    rgba(12, 12, 32, 0.72);
-  color: var(--text);
-  font-size: 1.15rem;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.01)),
+    rgba(9, 12, 26, 0.74);
+  color: rgba(232, 237, 255, 0.86);
+  font-size: 0.82rem;
   transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, opacity 180ms ease;
 }
 
@@ -2220,8 +2223,8 @@ button {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--preview-accent, rgba(255, 224, 138, 0.36)) 52%, rgba(255, 255, 255, 0.16));
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--preview-accent, rgba(255, 224, 138, 0.14)) 14%, rgba(255, 255, 255, 0.04)), rgba(255, 255, 255, 0.02)),
-    rgba(12, 12, 32, 0.78);
+    linear-gradient(180deg, color-mix(in srgb, var(--preview-accent, rgba(255, 224, 138, 0.08)) 12%, rgba(255, 255, 255, 0.022)), rgba(255, 255, 255, 0.012)),
+    rgba(10, 14, 28, 0.82);
 }
 
 .orbital-overview-nav:disabled {
@@ -2231,9 +2234,55 @@ button {
 
 .orbital-overview-preview-stage {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
   --preview-accent: var(--gold);
   animation: orbital-preview-shift 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.orbital-overview-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.orbital-overview-preview-kicker {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(189, 197, 230, 0.7);
+  font-size: 0.63rem;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.orbital-overview-preview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--preview-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--preview-accent) 18%, transparent);
+}
+
+.orbital-overview-preview-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--preview-accent) 16%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--preview-accent) 8%, rgba(255, 255, 255, 0.03)), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+  color: rgba(234, 238, 255, 0.9);
+  font-size: 0.66rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
 }
 
 .orbital-overview-preview-stage .topology-activator {
@@ -2243,21 +2292,134 @@ button {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--preview-accent) 24%, rgba(147, 173, 255, 0.12));
   background:
-    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--preview-accent) 11%, transparent), transparent 56%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
-    rgba(7, 10, 24, 0.82);
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--preview-accent) 12%, transparent), transparent 57%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012)),
+    rgba(7, 10, 24, 0.84);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 18px 38px rgba(0, 0, 0, 0.18);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.028),
+    0 18px 40px rgba(0, 0, 0, 0.18);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.orbital-overview-preview-stage .topology-activator:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--preview-accent) 30%, rgba(255, 255, 255, 0.16));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.034),
+    0 24px 46px rgba(0, 0, 0, 0.22);
 }
 
 .orbital-overview-preview-stage .topology-map {
   display: block;
+  width: 100%;
+  height: auto;
+}
+
+.orbital-overview-preview-stage .topology-ring {
+  stroke: color-mix(in srgb, var(--preview-accent) 18%, rgba(128, 164, 255, 0.34));
+  stroke-opacity: 0.56;
+}
+
+.orbital-overview-preview-stage .topology-ring-inner {
+  stroke-opacity: 0.42;
+}
+
+.orbital-overview-preview-stage .topology-core {
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--preview-accent) 28%, transparent));
+}
+
+.orbital-overview-preview-stage .topology-label {
+  fill: rgba(229, 234, 252, 0.76);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.orbital-overview-core-aura {
+  opacity: 0.94;
+}
+
+.orbital-overview-core-pulse {
+  fill: none;
+  stroke: color-mix(in srgb, var(--preview-accent) 38%, rgba(255, 224, 138, 0.34));
+  stroke-width: 1.35;
+  stroke-opacity: 0.38;
+  animation: orbital-overview-core-pulse 3.4s ease-in-out infinite;
+  transform-origin: 180px 130px;
+}
+
+.orbital-overview-core-flare {
+  fill: rgba(255, 236, 177, 0.78);
+  filter: drop-shadow(0 0 10px rgba(255, 224, 138, 0.26));
+}
+
+.orbital-overview-node-note,
+.orbital-overview-node-canvas {
+  stroke: rgba(236, 241, 255, 0.3);
+  stroke-width: 1;
 }
 
 .orbital-overview-preview-meta {
   display: flex;
   justify-content: center;
+}
+
+.orbital-overview-statrow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.orbital-overview-statpill {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(147, 173, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+}
+
+.orbital-overview-statpill-folder {
+  border-color: color-mix(in srgb, rgba(255, 213, 126, 0.3) 60%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, rgba(255, 213, 126, 0.08), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overview-statpill-note {
+  border-color: color-mix(in srgb, rgba(115, 247, 255, 0.26) 60%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, rgba(115, 247, 255, 0.075), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overview-statpill-canvas {
+  border-color: color-mix(in srgb, rgba(197, 154, 255, 0.3) 60%, rgba(147, 173, 255, 0.12));
+  background:
+    linear-gradient(180deg, rgba(197, 154, 255, 0.078), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.orbital-overview-statvalue {
+  min-width: 0;
+  color: rgba(239, 243, 255, 0.94);
+  font-size: 0.84rem;
+  line-height: 1.05;
+  letter-spacing: 0.03em;
+}
+
+.orbital-overview-statlabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(181, 188, 216, 0.72);
+  font-size: 0.61rem;
+  line-height: 1.18;
+  letter-spacing: 0.04em;
 }
 
 .orbital-system-switcher {
@@ -2313,6 +2475,19 @@ button {
   100% {
     opacity: 1;
     transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes orbital-overview-core-pulse {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 0.72;
+    transform: scale(1.05);
   }
 }
 
