@@ -3068,7 +3068,6 @@ export default function OrbitalMapView({
 
     stopCameraAnimation();
     closeSelectionHoverPreview();
-    setSelectedEntityId(null);
     suppressSceneBackgroundClickRef.current = false;
     dragRef.current = {
       mode: "camera",
@@ -5222,26 +5221,6 @@ export default function OrbitalMapView({
                 ))}
               </div>
             </section>
-
-            <section className="orbital-overview-vaultcard">
-              <div className="orbital-overview-vaultcard-head">
-                <p className="panel-kicker orbital-overview-vaultcard-kicker">{labels.vaultActivity}</p>
-              </div>
-              <div className="orbital-overview-vaultkeylist">
-                <div className="orbital-overview-vaultkeyrow">
-                  <span className="orbital-overview-vaultkeylabel">{labels.notesStat}</span>
-                  <strong className="orbital-overview-vaultkeyvalue">{vaultTextNoteCount + vaultCanvasCount}</strong>
-                </div>
-                <div className="orbital-overview-vaultkeyrow">
-                  <span className="orbital-overview-vaultkeylabel">{labels.assetsStat}</span>
-                  <strong className="orbital-overview-vaultkeyvalue">{vaultVisibleAssets.length}</strong>
-                </div>
-                <div className="orbital-overview-vaultkeyrow">
-                  <span className="orbital-overview-vaultkeylabel">{labels.lastUpdated}</span>
-                  <strong className="orbital-overview-vaultkeyvalue">{latestVaultUpdatedText}</strong>
-                </div>
-              </div>
-            </section>
           </div>
         </div>
       ) : null}
@@ -6439,6 +6418,8 @@ export default function OrbitalMapView({
                       }
 
                       event.stopPropagation();
+                      // Prevent scene background click from clearing core selection on pointer release.
+                      suppressSceneBackgroundClickRef.current = true;
                       stopCameraAnimation();
                       setSelectedEntityId(node.entityId);
                       setActiveProjectId(node.project.id);
@@ -6456,6 +6437,7 @@ export default function OrbitalMapView({
                     }}
                     onClick={(event) => {
                       event.stopPropagation();
+                      suppressSceneBackgroundClickRef.current = false;
                       setSelectedEntityId(node.entityId);
                       openInspectorMenu(node.kind === "core" ? "overview" : "folders");
                       if (node.project) {
@@ -6468,6 +6450,7 @@ export default function OrbitalMapView({
                     }}
                     onDoubleClick={(event) => {
                       event.stopPropagation();
+                      suppressSceneBackgroundClickRef.current = false;
                       setSelectedEntityId(node.entityId);
                       if (node.kind !== "core") {
                         openInspectorMenu("folders");

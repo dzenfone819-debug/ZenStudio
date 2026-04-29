@@ -631,9 +631,7 @@
 }
 
 .orbital-overview-vaultcard-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
   gap: 8px;
 }
 
@@ -646,9 +644,17 @@
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.orbital-overview-vaultcard-chiprow .orbital-overview-chip {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.28;
 }
 
 .orbital-overview-vaultcard-body {
