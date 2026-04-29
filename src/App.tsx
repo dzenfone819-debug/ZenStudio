@@ -2770,6 +2770,9 @@ export default function App() {
             activate: true
           })
         }
+        onRenameLocalVault={(localVaultId, name) =>
+          handleRenameLocalVault(localVaultId, name)
+        }
         onCreateProject={handleCreateProjectNode}
         onRenameProject={(projectId, name) => void handleRenameProject(projectId, name)}
         onUpdateProjectPosition={(projectId, x, y) =>
