@@ -360,6 +360,12 @@ type HoverPreviewAnchorSource = "scene" | "inspector";
 type OrbitalChildKind = "folder" | "canvas" | "note";
 type InspectorContextMenuTarget =
   | {
+      kind: "core";
+      project: Project;
+      label: string;
+      color: string;
+    }
+  | {
       kind: "folder";
       folder: Folder;
       label: string;
@@ -2844,14 +2850,16 @@ export default function OrbitalMapView({
     }
 
     const exists =
-      contextMenuState.target.kind === "folder"
+      contextMenuState.target.kind === "core"
+        ? orbitalData.projectById.has(contextMenuState.target.project.id)
+        : contextMenuState.target.kind === "folder"
         ? orbitalData.folderById.has(contextMenuState.target.folder.id)
         : orbitalData.noteById.has(contextMenuState.target.note.id);
 
     if (!exists) {
       closeInspectorContextMenu();
     }
-  }, [contextMenuState, orbitalData.folderById, orbitalData.noteById]);
+  }, [contextMenuState, orbitalData.folderById, orbitalData.noteById, orbitalData.projectById]);
 
   useEffect(() => {
     closeInspectorContextMenu();
@@ -3758,6 +3766,13 @@ export default function OrbitalMapView({
   };
 
   const applySingleInspectorTargetSelection = (target: InspectorContextMenuTarget) => {
+    if (target.kind === "core") {
+      setActiveProjectId(target.project.id);
+      setActiveFolderFilters([]);
+      setActiveNoteFilters([]);
+      return;
+    }
+
     if (target.kind === "folder") {
       setActiveFolderFilters([target.folder.id]);
       setActiveNoteFilters([]);
@@ -3836,7 +3851,12 @@ export default function OrbitalMapView({
     closeInspectorContextMenu();
     setInspectorRenameState({
       kind: target.kind,
-      id: target.kind === "folder" ? target.folder.id : target.note.id
+      id:
+        target.kind === "core"
+          ? target.project.id
+          : target.kind === "folder"
+            ? target.folder.id
+            : target.note.id
     });
     setInspectorRenameDraft(target.label);
   };
@@ -3854,6 +3874,19 @@ export default function OrbitalMapView({
     const normalizedName = inspectorRenameDraft.trim();
 
     if (!normalizedName) {
+      cancelInspectorRename();
+      return;
+    }
+
+    if (inspectorRenameState.kind === "core") {
+      const project = orbitalData.projectById.get(inspectorRenameState.id);
+
+      if (!project || normalizedName === project.name.trim()) {
+        cancelInspectorRename();
+        return;
+      }
+
+      await onRenameProject(project.id, normalizedName);
       cancelInspectorRename();
       return;
     }
@@ -4653,7 +4686,12 @@ export default function OrbitalMapView({
     item: InspectorHierarchyItem
   ): InspectorContextMenuTarget => {
     if (item.kind === "core") {
-      throw new Error("CORE_CONTEXT_UNSUPPORTED");
+      return {
+        kind: "core",
+        project: item.project!,
+        label: item.label,
+        color: item.color
+      };
     }
 
     if (item.kind === "folder") {
@@ -4679,7 +4717,12 @@ export default function OrbitalMapView({
     Boolean(
       inspectorRenameState &&
         inspectorRenameState.kind === target.kind &&
-        inspectorRenameState.id === (target.kind === "folder" ? target.folder.id : target.note.id)
+        inspectorRenameState.id ===
+          (target.kind === "core"
+            ? target.project.id
+            : target.kind === "folder"
+              ? target.folder.id
+              : target.note.id)
     );
 
   const renderInspectorRenameField = (
@@ -4688,7 +4731,9 @@ export default function OrbitalMapView({
   ) => {
     const renameLabel = t("folders.rename");
     const placeholder =
-      target.kind === "folder"
+      target.kind === "core"
+        ? labels.system
+        : target.kind === "folder"
         ? t("folders.createPlaceholder")
         : target.kind === "canvas"
           ? t("canvas.titlePlaceholder")
@@ -4739,6 +4784,53 @@ export default function OrbitalMapView({
         onSelect: () => beginInspectorRename(target)
       }
     ];
+
+    if (target.kind === "core") {
+      actions.push(
+        {
+          id: "create-folder",
+          label: labels.addRootFolder,
+          icon: "folder",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            beginFolderDraft(null, target.project.id);
+          }
+        },
+        {
+          id: "create-note",
+          label: labels.addNote,
+          icon: "note",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void handleCreateNote(null, target.project.id);
+          }
+        },
+        {
+          id: "create-canvas",
+          label: labels.addCanvas,
+          icon: "canvas",
+          tone: "accent",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void handleCreateCanvas(null, target.project.id);
+          }
+        },
+        {
+          id: "delete-project",
+          label: labels.deleteSystem,
+          icon: "trash",
+          tone: "danger",
+          onSelect: () => {
+            closeInspectorContextMenu();
+            void onDeleteProject(target.project.id);
+          }
+        }
+      );
+
+      return actions;
+    }
 
     if (target.kind === "folder") {
       if (target.canCreateFolder) {
@@ -4823,11 +4915,15 @@ export default function OrbitalMapView({
     labels.addCanvas,
     labels.addChildFolder,
     labels.addNote,
+    labels.addRootFolder,
     labels.deleteFolder,
+    labels.deleteSystem,
     labels.moveToTrash,
     labels.renameAction,
+    onDeleteProject,
     onDeleteFolder,
     onDeleteNote,
+    onRenameProject,
     onSetNotePinned,
     t
   ]);
@@ -5404,8 +5500,7 @@ export default function OrbitalMapView({
         : item.note?.folderId
           ? folderPathMap.get(item.note.folderId) ?? labels.uncategorized
           : labels.uncategorized;
-    const contextMenuTarget =
-      item.kind === "core" ? null : buildInspectorHierarchyContextTarget(item);
+    const contextMenuTarget = buildInspectorHierarchyContextTarget(item);
     const isEditing = contextMenuTarget ? isEditingInspectorTarget(contextMenuTarget) : false;
     const kindLabel =
       item.kind === "core"
@@ -6664,7 +6759,9 @@ export default function OrbitalMapView({
   const contextMenuTarget = contextMenuState?.target ?? null;
   const contextMenuKindLabel = !contextMenuTarget
     ? ""
-    : contextMenuTarget.kind === "folder"
+    : contextMenuTarget.kind === "core"
+      ? labels.system
+      : contextMenuTarget.kind === "folder"
       ? labels.folder
       : contextMenuTarget.kind === "canvas"
         ? labels.canvas
@@ -6672,6 +6769,11 @@ export default function OrbitalMapView({
   const handleContextMenuColorChange = contextMenuTarget
     ? (color: string) => {
         closeInspectorContextMenu();
+
+        if (contextMenuTarget.kind === "core") {
+          onUpdateProjectColor(contextMenuTarget.project.id, color);
+          return;
+        }
 
         if (contextMenuTarget.kind === "folder") {
           onUpdateFolderColor(contextMenuTarget.folder.id, color);
