@@ -226,6 +226,7 @@ const en = {
     provider: "Sync provider",
     state: "Sync state",
     none: "Local only",
+    localOnlyShort: "Local",
     googleDrive: "Google Drive",
     selfHosted: "Self-hosted",
     hosted: "Hosted",

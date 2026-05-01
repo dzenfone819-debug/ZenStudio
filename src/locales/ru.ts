@@ -226,6 +226,7 @@ const ru = {
     provider: "Провайдер sync",
     state: "Состояние sync",
     none: "Только локально",
+    localOnlyShort: "Локально",
     googleDrive: "Google Drive",
     selfHosted: "Self-hosted",
     hosted: "Hosted",
