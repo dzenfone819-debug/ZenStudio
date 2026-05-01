@@ -388,6 +388,7 @@ const VIEWBOX = {
 };
 
 const CAMERA_MIN_SCALE = 0.45;
+const MOBILE_PREVIEW_BREAKPOINT = 720;
 const CAMERA_MAX_SCALE = 2.2;
 const ORBITAL_SCENE_BODY_BUDGET = 70;
 const PROJECT_MIN_DISTANCE = 430;
@@ -1795,6 +1796,11 @@ export default function OrbitalMapView({
   const [isDocumentVisible, setIsDocumentVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState !== "hidden"
   );
+  const [isMobilePreviewMode, setIsMobilePreviewMode] = useState(
+    typeof window === "undefined"
+      ? false
+      : window.matchMedia(`(max-width: ${MOBILE_PREVIEW_BREAKPOINT}px)`).matches
+  );
   const [isOrbitInteractionActive, setIsOrbitInteractionActive] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
   const [activeColorFilters, setActiveColorFilters] = useState<string[]>([]);
@@ -1904,6 +1910,24 @@ export default function OrbitalMapView({
       }
     | null
   >(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_PREVIEW_BREAKPOINT}px)`);
+    const syncMobileMode = () => {
+      setIsMobilePreviewMode(mediaQuery.matches);
+    };
+
+    syncMobileMode();
+    mediaQuery.addEventListener("change", syncMobileMode);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncMobileMode);
+    };
+  }, []);
   const folderPathMap = useMemo(() => buildFolderPathMap(folders), [folders]);
   const projectsWithDraftPositions = useMemo(
     () =>
@@ -2433,6 +2457,10 @@ export default function OrbitalMapView({
       sceneAnchorElement?: SVGGElement | null;
     }
   ) => {
+    if (isMobilePreviewMode) {
+      return;
+    }
+
     clearHoverPreviewCloseTimeout();
     markOrbitInteraction();
     setHoveredSelectionNoteId(noteId);
@@ -2450,6 +2478,10 @@ export default function OrbitalMapView({
       sceneAnchorElement?: SVGGElement | null;
     }
   ) => {
+    if (isMobilePreviewMode) {
+      return;
+    }
+
     markOrbitInteraction();
 
     if (typeof options?.anchorRect !== "undefined") {
@@ -3681,6 +3713,12 @@ export default function OrbitalMapView({
       return;
     }
 
+    if (isMobilePreviewMode && item.note) {
+      closeSelectionHoverPreview();
+      onOpenNote(item.note.id);
+      return;
+    }
+
     if (isAdditiveSelection) {
       toggleNoteFilter(item.id);
     } else {
@@ -4737,6 +4775,122 @@ export default function OrbitalMapView({
         <path d="M13.8 4.9v3.4h3.1" />
         <path d="M15.8 12v4.3M13.7 14.1H18" />
       </svg>
+    );
+  }
+
+  function renderPreviewActionIcon(kind: "open" | "pin" | "unpin" | "trash") {
+    if (kind === "open") {
+      return (
+        <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+          <path
+            d="M6.2 3.2h4.6v1.4H8.6l4.2 4.2-1 1-4.2-4.2v2.2H6.2V3.2Z"
+            fill="currentColor"
+          />
+          <path
+            d="M3.4 4.6A1.2 1.2 0 0 1 4.6 3.4h3v1.2h-3v6.8h6.8v-3h1.2v3a1.2 1.2 0 0 1-1.2 1.2H4.6a1.2 1.2 0 0 1-1.2-1.2V4.6Z"
+            fill="currentColor"
+          />
+        </svg>
+      );
+    }
+
+    if (kind === "trash") {
+      return (
+        <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+          <path
+            d="M6.2 2.8h3.6l.5 1.2H13v1.2h-1l-.4 7A1.6 1.6 0 0 1 10 13.8H6A1.6 1.6 0 0 1 4.4 12.2l-.4-7H3V4h2.7l.5-1.2Zm.8 1.2-.3.7h2.6L9 4H7Zm-1.4 1.9.4 6.2c.02.28.25.5.54.5H10c.29 0 .52-.22.54-.5l.4-6.2H5.6Zm1.2 1.1h1.1v4.3H6.8V7Zm2.3 0h1.1v4.3H9.1V7Z"
+            fill="currentColor"
+          />
+        </svg>
+      );
+    }
+
+    return (
+      <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+        <path
+          d="M8 2.2l1.55 3.14 3.47.5-2.51 2.45.6 3.46L8 10.1l-3.11 1.65.6-3.46L2.98 5.84l3.47-.5L8 2.2Z"
+          fill="currentColor"
+        />
+        {kind === "unpin" ? (
+          <path
+            d="M3.1 12.1 12.9 2.3"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        ) : null}
+      </svg>
+    );
+  }
+
+  function renderEntryPreviewActions(
+    note: Note,
+    options?: {
+      className?: string;
+      closeHoverPreviewOnAction?: boolean;
+    }
+  ) {
+    const isPinned = isEntryFavorite(note);
+    const openLabel = note.contentType === "canvas" ? labels.openCanvas : labels.openNote;
+    const pinLabel = isPinned ? t("note.unpin") : t("note.pin");
+
+    const runAction = (callback: () => void, closeHoverPreview = false) => {
+      if (closeHoverPreview || options?.closeHoverPreviewOnAction) {
+        closeSelectionHoverPreview();
+      }
+
+      callback();
+    };
+
+    return (
+      <div className={["orbital-preview-actions", options?.className ?? ""].filter(Boolean).join(" ")}>
+        <button
+          type="button"
+          className="orbital-preview-action"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            runAction(() => onOpenNote(note.id), true);
+          }}
+          aria-label={openLabel}
+          title={openLabel}
+        >
+          {renderPreviewActionIcon("open")}
+        </button>
+        <button
+          type="button"
+          className={`orbital-preview-action ${isPinned ? "is-active" : ""}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            runAction(() => {
+              void onSetNotePinned(note.id, !isPinned);
+            });
+          }}
+          aria-label={pinLabel}
+          title={pinLabel}
+        >
+          {renderPreviewActionIcon(isPinned ? "unpin" : "pin")}
+        </button>
+        <button
+          type="button"
+          className="orbital-preview-action is-danger"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            runAction(() => {
+              void onDeleteNote(note.id);
+            }, true);
+          }}
+          aria-label={labels.moveToTrash}
+          title={labels.moveToTrash}
+        >
+          {renderPreviewActionIcon("trash")}
+        </button>
+      </div>
     );
   }
 
@@ -6085,29 +6239,43 @@ export default function OrbitalMapView({
                 <div key={note.id}>
                   {renderInspectorCompactRow({
                     isActive: activeNoteFilterSet.has(note.id),
-                    onClick: () => toggleNoteFilter(note.id),
-                    onDoubleClick: () => {
-                      closeSelectionHoverPreview();
-                      onOpenNote(note.id);
+                    onClick: () => {
+                      if (isMobilePreviewMode) {
+                        closeSelectionHoverPreview();
+                        onOpenNote(note.id);
+                        return;
+                      }
+
+                      toggleNoteFilter(note.id);
                     },
-                    onPointerEnter: (event) => {
-                      openSelectionHoverPreview(
-                        note.id,
-                        event.clientX,
-                        event.clientY,
-                        "inspector",
-                        {
-                          anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                        }
-                      );
-                    },
-                    onPointerMove: (event) => {
-                      updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
-                        anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                      });
-                    },
-                    onPointerLeave: scheduleSelectionHoverPreviewClose,
-                    onPointerCancel: scheduleSelectionHoverPreviewClose,
+                    onDoubleClick: isMobilePreviewMode
+                      ? undefined
+                      : () => {
+                          closeSelectionHoverPreview();
+                          onOpenNote(note.id);
+                        },
+                    onPointerEnter: isMobilePreviewMode
+                      ? undefined
+                      : (event) => {
+                          openSelectionHoverPreview(
+                            note.id,
+                            event.clientX,
+                            event.clientY,
+                            "inspector",
+                            {
+                              anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                            }
+                          );
+                        },
+                    onPointerMove: isMobilePreviewMode
+                      ? undefined
+                      : (event) => {
+                          updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
+                            anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                          });
+                        },
+                    onPointerLeave: isMobilePreviewMode ? undefined : scheduleSelectionHoverPreviewClose,
+                    onPointerCancel: isMobilePreviewMode ? undefined : scheduleSelectionHoverPreviewClose,
                     title: getNoteInspectorTitle(note),
                     kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
                     contextMenuTarget: buildInspectorNoteContextTarget(note),
@@ -6125,29 +6293,43 @@ export default function OrbitalMapView({
                 <div key={note.id}>
                   {renderInspectorCompactRow({
                     isActive: activeNoteFilterSet.has(note.id),
-                    onClick: () => toggleNoteFilter(note.id),
-                    onDoubleClick: () => {
-                      closeSelectionHoverPreview();
-                      onOpenNote(note.id);
+                    onClick: () => {
+                      if (isMobilePreviewMode) {
+                        closeSelectionHoverPreview();
+                        onOpenNote(note.id);
+                        return;
+                      }
+
+                      toggleNoteFilter(note.id);
                     },
-                    onPointerEnter: (event) => {
-                      openSelectionHoverPreview(
-                        note.id,
-                        event.clientX,
-                        event.clientY,
-                        "inspector",
-                        {
-                          anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                        }
-                      );
-                    },
-                    onPointerMove: (event) => {
-                      updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
-                        anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
-                      });
-                    },
-                    onPointerLeave: scheduleSelectionHoverPreviewClose,
-                    onPointerCancel: scheduleSelectionHoverPreviewClose,
+                    onDoubleClick: isMobilePreviewMode
+                      ? undefined
+                      : () => {
+                          closeSelectionHoverPreview();
+                          onOpenNote(note.id);
+                        },
+                    onPointerEnter: isMobilePreviewMode
+                      ? undefined
+                      : (event) => {
+                          openSelectionHoverPreview(
+                            note.id,
+                            event.clientX,
+                            event.clientY,
+                            "inspector",
+                            {
+                              anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                            }
+                          );
+                        },
+                    onPointerMove: isMobilePreviewMode
+                      ? undefined
+                      : (event) => {
+                          updateSelectionHoverPreviewCursor(event.clientX, event.clientY, {
+                            anchorRect: toHoverPreviewAnchorRect(event.currentTarget.getBoundingClientRect())
+                          });
+                        },
+                    onPointerLeave: isMobilePreviewMode ? undefined : scheduleSelectionHoverPreviewClose,
+                    onPointerCancel: isMobilePreviewMode ? undefined : scheduleSelectionHoverPreviewClose,
                     title: getNoteInspectorTitle(note),
                     kindLabel: note.contentType === "canvas" ? labels.canvas : labels.note,
                     contextMenuTarget: buildInspectorNoteContextTarget(note),
@@ -6508,23 +6690,28 @@ export default function OrbitalMapView({
                       </div>
                     </div>
 
-                    {selectedNode.kind === "note" && selectedNode.note ? (
+                    {selectedNode.kind === "note" && selectedNode.note && !isMobilePreviewMode ? (
                       <>
-                        <div className="orbital-selection-preview orbital-selection-preview-note">
-                          <EntryStaticPreview
-                            note={selectedNode.note}
-                            emptyLabel={labels.empty}
-                            resolveFileUrl={onResolveFileUrl}
-                            compact
-                            interactive={false}
-                            labels={{
-                              canvas: labels.canvas,
-                              elements: labels.elementsStat,
-                              images: labels.assetsStat,
-                              emptyCanvas: labels.emptyCanvas,
-                              previewHint: labels.canvasPreviewHint
-                            }}
-                          />
+                        <div className="orbital-selection-preview orbital-selection-preview-note-shell">
+                          {renderEntryPreviewActions(selectedNode.note, {
+                            className: "orbital-selection-preview-actions"
+                          })}
+                          <div className="orbital-selection-preview-note">
+                            <EntryStaticPreview
+                              note={selectedNode.note}
+                              emptyLabel={labels.empty}
+                              resolveFileUrl={onResolveFileUrl}
+                              compact
+                              interactive={false}
+                              labels={{
+                                canvas: labels.canvas,
+                                elements: labels.elementsStat,
+                                images: labels.assetsStat,
+                                emptyCanvas: labels.emptyCanvas,
+                                previewHint: labels.canvasPreviewHint
+                              }}
+                            />
+                          </div>
                         </div>
                         <div className="orbital-selection-meta-line">
                           {selectedEntryIsCanvas && selectedCanvasMetrics ? (
@@ -6655,22 +6842,11 @@ export default function OrbitalMapView({
                       </button>
                     ) : null}
                     {selectedNode.kind === "note" && selectedNode.note ? (
-                      <button
-                        className="toolbar-action danger"
-                        onClick={() => void onDeleteNote(selectedNode.note!.id)}
-                      >
-                        {labels.moveToTrash}
-                      </button>
+                      null
                     ) : null}
                   </div>
 
               <div className="orbital-action-stack orbital-action-stack-compact">
-                {selectedNode.kind === "note" && selectedNode.note ? (
-                  <button className="primary-action" onClick={() => onOpenNote(selectedNode.note!.id)}>
-                    {selectedEntryIsCanvas ? labels.openCanvas : labels.openNote}
-                  </button>
-                ) : null}
-
                 {selectedNode.kind === "folder" ? (
                   <>
                     {(selectedFolderMeta?.depth ?? 0) < 1 ? (
@@ -7087,7 +7263,7 @@ export default function OrbitalMapView({
 
       </div>
 
-      {hoverPreviewNote && hoverPreviewPosition ? (
+      {!isMobilePreviewMode && hoverPreviewNote && hoverPreviewPosition ? (
         <div
           className="orbital-note-hovercard"
           style={{
@@ -7102,9 +7278,15 @@ export default function OrbitalMapView({
           onPointerLeave={scheduleSelectionHoverPreviewClose}
         >
           <div className="orbital-note-hovercard-head">
-            <p className="panel-kicker">
-              {hoverPreviewNote.contentType === "canvas" ? labels.canvas : labels.note}
-            </p>
+            <div className="orbital-note-hovercard-topline">
+              <p className="panel-kicker">
+                {hoverPreviewNote.contentType === "canvas" ? labels.canvas : labels.note}
+              </p>
+              {renderEntryPreviewActions(hoverPreviewNote, {
+                className: "orbital-note-hovercard-actions",
+                closeHoverPreviewOnAction: true
+              })}
+            </div>
             <h3>{hoverPreviewNote.title}</h3>
             <div className="orbital-note-hovercard-meta">
               <span>{hoverPreviewFolder}</span>
