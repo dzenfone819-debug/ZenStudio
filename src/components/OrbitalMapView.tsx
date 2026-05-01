@@ -3923,6 +3923,14 @@ export default function OrbitalMapView({
     );
   };
 
+  const selectInspectorEntity = (entityId: string, projectId: string | null) => {
+    setSelectedEntityId(entityId);
+    setActiveProjectId(projectId);
+    setActiveFolderFilters([]);
+    setActiveNoteFilters([]);
+    closeSelectionHoverPreview();
+  };
+
   const handleInspectorHierarchySelection = (
     item: InspectorHierarchyItem,
     event: ReactMouseEvent<HTMLElement>
@@ -3931,35 +3939,37 @@ export default function OrbitalMapView({
     setHierarchyFocusedEntityId(item.entityId);
 
     if (item.kind === "core") {
-      setActiveProjectId(item.project?.id ?? currentProjectId ?? null);
-      setActiveFolderFilters([]);
-      setActiveNoteFilters([]);
-      closeSelectionHoverPreview();
+      selectInspectorEntity(item.entityId, item.project?.id ?? currentProjectId ?? null);
+      if (isVaultInspectorScope) {
+        openInspectorMenu("overview");
+      }
       return;
+    }
+
+    if (!isAdditiveSelection) {
+      if (item.kind === "folder") {
+        selectInspectorEntity(item.entityId, item.folder?.projectId ?? currentProjectId ?? null);
+      } else if (item.note) {
+        selectInspectorEntity(item.entityId, item.note.projectId);
+      }
     }
 
     if (item.kind === "folder") {
       if (isAdditiveSelection) {
         toggleFolderFilter(item.id);
-      } else {
-        setActiveFolderFilters([item.id]);
-        setActiveNoteFilters([]);
       }
 
       return;
     }
 
     if (isMobilePreviewMode && item.note) {
-      closeSelectionHoverPreview();
+      selectInspectorEntity(item.entityId, item.note.projectId);
       onOpenNote(item.note.id);
       return;
     }
 
     if (isAdditiveSelection) {
       toggleNoteFilter(item.id);
-    } else {
-      setActiveNoteFilters([item.id]);
-      setActiveFolderFilters([]);
     }
   };
 
@@ -6572,15 +6582,16 @@ export default function OrbitalMapView({
             ? filteredNotesMenu.map((note) => (
                 <div key={note.id}>
                   {renderInspectorCompactRow({
-                    isActive: activeNoteFilterSet.has(note.id),
+                    isActive: activeNoteFilterSet.has(note.id) || selectedEntityId === `note:${note.id}`,
                     onClick: () => {
+                      selectInspectorEntity(`note:${note.id}`, note.projectId);
+
                       if (isMobilePreviewMode) {
-                        closeSelectionHoverPreview();
                         onOpenNote(note.id);
                         return;
                       }
 
-                      toggleNoteFilter(note.id);
+                      setHierarchyFocusedEntityId(`note:${note.id}`);
                     },
                     onDoubleClick: isMobilePreviewMode
                       ? undefined
@@ -6626,15 +6637,16 @@ export default function OrbitalMapView({
             ? filteredPinnedMenu.map((note) => (
                 <div key={note.id}>
                   {renderInspectorCompactRow({
-                    isActive: activeNoteFilterSet.has(note.id),
+                    isActive: activeNoteFilterSet.has(note.id) || selectedEntityId === `note:${note.id}`,
                     onClick: () => {
+                      selectInspectorEntity(`note:${note.id}`, note.projectId);
+
                       if (isMobilePreviewMode) {
-                        closeSelectionHoverPreview();
                         onOpenNote(note.id);
                         return;
                       }
 
-                      toggleNoteFilter(note.id);
+                      setHierarchyFocusedEntityId(`note:${note.id}`);
                     },
                     onDoubleClick: isMobilePreviewMode
                       ? undefined
