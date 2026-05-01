@@ -128,6 +128,10 @@ function isCheckedChecklistBlock(block: StoredBlock) {
 
 type ChecklistStableOrderResolver = (block: StoredBlock, fallbackIndex: number) => number | null;
 
+function getBlockId(block: StoredBlock) {
+  return typeof block.id === "string" && block.id.length > 0 ? block.id : null;
+}
+
 function compareChecklistBlocks(
   left: StoredBlock,
   right: StoredBlock,
@@ -166,10 +170,7 @@ function normalizeChecklistRun(
   blocks: StoredBlock[],
   getStableOrder?: ChecklistStableOrderResolver
 ) {
-  const hasChecked = blocks.some((block) => isCheckedChecklistBlock(block));
-  const hasUnchecked = blocks.some((block) => !isCheckedChecklistBlock(block));
-
-  if (!hasChecked || !hasUnchecked) {
+  if (blocks.length < 2) {
     return {
       blocks,
       changed: false
@@ -276,6 +277,104 @@ export function normalizeChecklistOrdering(
   getStableOrder?: ChecklistStableOrderResolver
 ) {
   return normalizeChecklistOrderingInternal(blocks, getStableOrder);
+}
+
+function seedChecklistStableOrderRun(
+  blocks: StoredBlock[],
+  stableOrderMap: Map<string, number>
+) {
+  const ids = blocks.map((block) => getBlockId(block));
+  const known = ids.map((id) => (id ? stableOrderMap.get(id) ?? null : null));
+  let changed = false;
+  let index = 0;
+
+  while (index < blocks.length) {
+    if (known[index] !== null) {
+      index += 1;
+      continue;
+    }
+
+    const start = index;
+
+    while (index < blocks.length && known[index] === null) {
+      index += 1;
+    }
+
+    const end = index - 1;
+    const previousKnown = start > 0 ? known[start - 1] : null;
+    const nextKnown = index < blocks.length ? known[index] : null;
+    const gap = end - start + 1;
+
+    for (let offset = 0; offset < gap; offset += 1) {
+      const blockIndex = start + offset;
+      const blockId = ids[blockIndex];
+
+      if (!blockId) {
+        continue;
+      }
+
+      let order: number;
+
+      if (previousKnown !== null && nextKnown !== null) {
+        const step = (nextKnown - previousKnown) / (gap + 1);
+        order = previousKnown + step * (offset + 1);
+      } else if (previousKnown !== null) {
+        order = previousKnown + (offset + 1);
+      } else if (nextKnown !== null) {
+        order = nextKnown - (gap - offset);
+      } else {
+        order = blockIndex;
+      }
+
+      stableOrderMap.set(blockId, order);
+      known[blockIndex] = order;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function seedChecklistStableOrderMapInternal(
+  blocks: StoredBlock[],
+  stableOrderMap: Map<string, number>
+) {
+  let changed = false;
+
+  for (let index = 0; index < blocks.length; ) {
+    const block = blocks[index];
+
+    if (block.type === "checkListItem") {
+      const runStart = index;
+
+      while (index < blocks.length && blocks[index].type === "checkListItem") {
+        index += 1;
+      }
+
+      if (seedChecklistStableOrderRun(blocks.slice(runStart, index), stableOrderMap)) {
+        changed = true;
+      }
+
+      continue;
+    }
+
+    if (Array.isArray(block.children) && block.children.length > 0) {
+      if (seedChecklistStableOrderMapInternal(block.children, stableOrderMap)) {
+        changed = true;
+      }
+    }
+
+    index += 1;
+  }
+
+  return changed;
+}
+
+export function seedChecklistStableOrderMap(
+  blocks: NoteContent,
+  stableOrderMap: Map<string, number>
+) {
+  return seedChecklistStableOrderMapInternal(blocks, stableOrderMap);
 }
 
 export function sortChecklistBlocksForDisplay(blocks: StoredBlock[]) {

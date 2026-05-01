@@ -20,7 +20,8 @@ import {
   flattenFolderOptions,
   formatTimestamp,
   normalizeChecklistOrdering,
-  normalizeNoteContent
+  normalizeNoteContent,
+  seedChecklistStableOrderMap
 } from "../lib/notes";
 import type { AppLanguage, Folder, Note, NoteContent, SaveState, Tag } from "../types";
 
@@ -180,6 +181,7 @@ export default function EditorPane({
     }
 
     const nextDocument = editor.document as unknown as NoteContent;
+    seedChecklistStableOrderMap(nextDocument, checklistStableOrderRef.current);
     const checklistNormalization = normalizeChecklistOrdering(nextDocument, (block, fallbackIndex) => {
       const blockId = typeof block.id === "string" ? block.id : null;
 
