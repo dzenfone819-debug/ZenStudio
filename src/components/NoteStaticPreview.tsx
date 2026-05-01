@@ -46,6 +46,7 @@ interface NoteStaticPreviewProps {
   content: NoteContent;
   emptyLabel: string;
   resolveFileUrl?: (url: string) => Promise<string>;
+  accentColor?: string;
   compact?: boolean;
   interactive?: boolean;
   className?: string;
@@ -337,6 +338,10 @@ function renderMediaBlock(
     previewWidth && !context.compact
       ? ({ "--note-static-preview-width": `${previewWidth}px` } as CSSProperties)
       : undefined;
+  const mediaBackgroundColor = getColorValue(props.backgroundColor, DARK_BACKGROUND_COLORS);
+  const mediaSurfaceStyle = mediaBackgroundColor
+    ? ({ backgroundColor: mediaBackgroundColor } as CSSProperties)
+    : undefined;
 
   if (kind === "image" && showPreview && url) {
     return (
@@ -344,6 +349,7 @@ function renderMediaBlock(
         <img
           className="note-static-image"
           src={url}
+          style={mediaSurfaceStyle}
           alt={caption || name || "Image"}
           loading="lazy"
         />
@@ -355,7 +361,13 @@ function renderMediaBlock(
   if (kind === "video" && showPreview && url && canShowInteractiveMedia) {
     return (
       <figure key={key} className="note-static-figure note-static-figure-video" style={mediaStyle}>
-        <video className="note-static-video" src={url} controls preload="metadata" />
+        <video
+          className="note-static-video"
+          style={mediaSurfaceStyle}
+          src={url}
+          controls
+          preload="metadata"
+        />
         {caption ? <figcaption className="note-static-caption">{caption}</figcaption> : null}
       </figure>
     );
@@ -482,8 +494,24 @@ function renderListGroup(
         const hasText = hasInlineContent(block.content);
         const marker =
           isCheck ? (
-            <span className="note-static-checkmark">
-              <input type="checkbox" checked={checked} readOnly disabled />
+            <span
+              className={`note-static-checkmark ${checked ? "is-checked" : ""}`}
+              aria-hidden="true"
+            >
+              <span className="note-static-checkmark-box">
+                {checked ? (
+                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                    <path
+                      d="M4.1 8.4 6.7 11 11.9 5.8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : null}
+              </span>
             </span>
           ) : type === "toggleListItem" ? (
             <span className="note-static-toggle-marker" aria-hidden="true">
@@ -669,6 +697,7 @@ export default function NoteStaticPreview({
   content,
   emptyLabel,
   resolveFileUrl,
+  accentColor,
   compact = false,
   interactive = false,
   className
@@ -726,10 +755,16 @@ export default function NoteStaticPreview({
     resolvedUrls
   };
   const hasVisibleContent = hasRenderableBlockStream(normalizedContent);
+  const previewStyle = accentColor
+    ? ({
+        "--note-accent": accentColor,
+        "--selection-accent": accentColor
+      } as CSSProperties)
+    : undefined;
 
   if (!hasVisibleContent) {
     return normalizedContent.length === 0 ? (
-      <p className="note-static-empty">{emptyLabel}</p>
+      <p className="note-static-empty" style={previewStyle}>{emptyLabel}</p>
     ) : (
       <div
         className={[
@@ -740,6 +775,7 @@ export default function NoteStaticPreview({
         ]
           .filter(Boolean)
           .join(" ")}
+        style={previewStyle}
       />
     );
   }
@@ -754,6 +790,7 @@ export default function NoteStaticPreview({
       ]
         .filter(Boolean)
         .join(" ")}
+      style={previewStyle}
     >
       {renderBlockStream(normalizedContent, context, "note-static")}
     </div>

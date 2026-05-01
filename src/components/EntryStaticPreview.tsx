@@ -44,6 +44,7 @@ export default function EntryStaticPreview({
       content={note.content}
       emptyLabel={emptyLabel}
       resolveFileUrl={resolveFileUrl}
+      accentColor={note.color}
       compact={compact}
       interactive={interactive}
       className={className}

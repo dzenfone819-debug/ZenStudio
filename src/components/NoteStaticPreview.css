@@ -119,17 +119,41 @@
 
 .note-static-checkmark {
   padding-top: 0.14rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.note-static-checkmark input {
-  width: 0.9rem;
-  height: 0.9rem;
-  margin: 0;
-  accent-color: color-mix(
+.note-static-checkmark-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.94rem;
+  height: 0.94rem;
+  border-radius: 0.28rem;
+  border: 1px solid
+    color-mix(in srgb, var(--selection-accent, var(--note-accent, #8db7ff)) 62%, rgba(255, 255, 255, 0.2));
+  background: rgba(255, 255, 255, 0.028);
+  color: rgba(8, 12, 24, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.note-static-checkmark.is-checked .note-static-checkmark-box {
+  border-color: color-mix(
     in srgb,
-    var(--selection-accent, var(--note-accent, #5fb3ff)) 82%,
-    #ffffff 18%
+    var(--selection-accent, var(--note-accent, #8db7ff)) 78%,
+    rgba(255, 255, 255, 0.18)
   );
+  background: color-mix(
+    in srgb,
+    var(--selection-accent, var(--note-accent, #8db7ff)) 78%,
+    #ffffff 22%
+  );
+}
+
+.note-static-checkmark-box svg {
+  width: 0.72rem;
+  height: 0.72rem;
 }
 
 .note-static-list-item.is-checked .note-static-list-text {
