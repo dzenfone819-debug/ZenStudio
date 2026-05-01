@@ -2001,6 +2001,10 @@ export default function OrbitalMapView({
   const orbitInteractionActiveRef = useRef(true);
   const vaultRenameErrorTimeoutRef = useRef<number | null>(null);
   const suppressInspectorClickRef = useRef(false);
+  const pendingInspectorCenterRef = useRef<{
+    entityId: string;
+    projectId: string | null;
+  } | null>(null);
   const inspectorLongPressRef = useRef<{
     pointerId: number;
     startX: number;
@@ -3411,6 +3415,41 @@ export default function OrbitalMapView({
     }, duration);
   };
 
+  useEffect(() => {
+    const pendingCenterTarget = pendingInspectorCenterRef.current;
+
+    if (!pendingCenterTarget) {
+      return;
+    }
+
+    if (selectedEntityId !== pendingCenterTarget.entityId) {
+      pendingInspectorCenterRef.current = null;
+      return;
+    }
+
+    const sceneNode = scene.entityMap.get(pendingCenterTarget.entityId);
+
+    if (sceneNode) {
+      animateCameraTo(
+        {
+          x: -sceneNode.x,
+          y: -sceneNode.y
+        },
+        560
+      );
+      pendingInspectorCenterRef.current = null;
+      return;
+    }
+
+    if (
+      pendingCenterTarget.projectId &&
+      pendingCenterTarget.entityId === getProjectEntityId(pendingCenterTarget.projectId)
+    ) {
+      centerOnProject(pendingCenterTarget.projectId, 560);
+      pendingInspectorCenterRef.current = null;
+    }
+  }, [scene.entityMap, selectedEntityId]);
+
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     markOrbitInteraction();
 
@@ -3923,7 +3962,20 @@ export default function OrbitalMapView({
     );
   };
 
-  const selectInspectorEntity = (entityId: string, projectId: string | null) => {
+  const selectInspectorEntity = (
+    entityId: string,
+    projectId: string | null,
+    options?: { centerInScene?: boolean }
+  ) => {
+    if (options?.centerInScene) {
+      pendingInspectorCenterRef.current = {
+        entityId,
+        projectId
+      };
+    } else if (pendingInspectorCenterRef.current?.entityId === entityId) {
+      pendingInspectorCenterRef.current = null;
+    }
+
     setSelectedEntityId(entityId);
     setActiveProjectId(projectId);
     setActiveFolderFilters([]);
@@ -3939,7 +3991,9 @@ export default function OrbitalMapView({
     setHierarchyFocusedEntityId(item.entityId);
 
     if (item.kind === "core") {
-      selectInspectorEntity(item.entityId, item.project?.id ?? currentProjectId ?? null);
+      selectInspectorEntity(item.entityId, item.project?.id ?? currentProjectId ?? null, {
+        centerInScene: true
+      });
       if (isVaultInspectorScope) {
         openInspectorMenu("overview");
       }
@@ -3948,9 +4002,13 @@ export default function OrbitalMapView({
 
     if (!isAdditiveSelection) {
       if (item.kind === "folder") {
-        selectInspectorEntity(item.entityId, item.folder?.projectId ?? currentProjectId ?? null);
+        selectInspectorEntity(item.entityId, item.folder?.projectId ?? currentProjectId ?? null, {
+          centerInScene: true
+        });
       } else if (item.note) {
-        selectInspectorEntity(item.entityId, item.note.projectId);
+        selectInspectorEntity(item.entityId, item.note.projectId, {
+          centerInScene: true
+        });
       }
     }
 
@@ -3963,7 +4021,9 @@ export default function OrbitalMapView({
     }
 
     if (isMobilePreviewMode && item.note) {
-      selectInspectorEntity(item.entityId, item.note.projectId);
+      selectInspectorEntity(item.entityId, item.note.projectId, {
+        centerInScene: true
+      });
       onOpenNote(item.note.id);
       return;
     }
