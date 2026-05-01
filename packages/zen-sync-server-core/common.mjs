@@ -443,7 +443,7 @@ export function sendJson(response, statusCode, payload) {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS"
+    "Access-Control-Allow-Methods": "GET, PUT, POST, PATCH, DELETE, OPTIONS"
   });
   response.end(JSON.stringify(payload));
 }
@@ -562,7 +562,7 @@ export function sendCorsNoContent(response) {
   response.writeHead(204, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS"
+    "Access-Control-Allow-Methods": "GET, PUT, POST, PATCH, DELETE, OPTIONS"
   });
   response.end();
 }

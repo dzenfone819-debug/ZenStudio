@@ -3396,7 +3396,7 @@ export default function OrbitalMapView({
     const position = findOpenProjectPosition(projectsWithDraftPositions);
     const project = await onCreateProject(position.x, position.y);
     setActiveProjectId(project.id);
-    setSelectedEntityId(null);
+    setSelectedEntityId(getProjectEntityId(project.id));
     setInspectorMenu("overview");
     animateCameraTo({
       x: -position.x,
@@ -4778,6 +4778,30 @@ export default function OrbitalMapView({
     );
   }
 
+  function renderAddProjectActionIcon() {
+    return (
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <circle cx="9.5" cy="12" r="3.9" />
+        <path d="M9.5 5.1a6.9 6.9 0 1 0 0 13.8" />
+        <path d="M17.8 6.7v5.2M15.2 9.3h5.2" />
+      </svg>
+    );
+  }
+
+  function renderOverviewAddProjectButton() {
+    return (
+      <button
+        type="button"
+        className="toolbar-action orbital-toolbar-action orbital-overview-primary-action"
+        onClick={() => void handleCreateProject()}
+        aria-label={labels.addProject}
+        title={labels.addProject}
+      >
+        <span className="orbital-overview-primary-action-icon">{renderAddProjectActionIcon()}</span>
+      </button>
+    );
+  }
+
   function renderPreviewActionIcon(kind: "open" | "pin" | "unpin" | "trash") {
     if (kind === "open") {
       return (
@@ -5617,19 +5641,7 @@ export default function OrbitalMapView({
             )
           )}
         </div>
-        {!isVaultOverview ? (
-          <div className="orbital-inspector-header-actions">
-            <button
-              type="button"
-              className="toolbar-action orbital-toolbar-action orbital-icon-action accent orbital-overview-addsystem"
-              onClick={() => void handleCreateProject()}
-              aria-label={labels.addProject}
-              title={labels.addProject}
-            >
-              +
-            </button>
-          </div>
-        ) : null}
+        <div className="orbital-inspector-header-actions">{renderOverviewAddProjectButton()}</div>
       </div>
 
       {isVaultOverview ? (

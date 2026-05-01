@@ -611,6 +611,7 @@ const ru = {
     addNote: "Новая заметка",
     addCanvas: "Новый канвас",
     addProject: "Новая система",
+    addProjectTooltip: "Создать новую систему внутри этого хранилища",
     create: "Создать",
     cancel: "Отмена",
     folderNamePlaceholder: "Имя папки",

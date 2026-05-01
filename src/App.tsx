@@ -60,6 +60,7 @@ import {
 import {
   createLocalVaultProfile,
   deleteLocalVaultDatabase,
+  getLocalVaultProfile,
   getLocalVaultProfileByGuid,
   getNextLocalVaultAfterDelete,
   getStoredActiveLocalVaultId,
@@ -89,6 +90,9 @@ import {
   issueGoogleDriveVaultToken,
   issueHostedVaultToken,
   issuePersonalServerVaultToken,
+  renameGoogleDriveVault,
+  renameHostedVault,
+  renamePersonalServerVault,
   runConfiguredSync
 } from "./lib/sync";
 import { computePendingSyncSummaryFromDirtyEntries } from "./lib/syncStatus";
@@ -101,6 +105,7 @@ import {
   removeBindingsForLocalVault,
   removeSyncConnection,
   updateSyncConnection,
+  updateSyncBindingRemoteName,
   updateSyncBindingState,
   upsertSyncBinding
 } from "./lib/syncRegistry";
@@ -873,6 +878,86 @@ export default function App() {
     []
   );
 
+  const syncBoundRemoteVaultName = useCallback(
+    async (localVaultId: string, explicitName?: string) => {
+      const binding = syncBindingsByVaultId.get(localVaultId) ?? null;
+      const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
+      const localVaultProfile = getLocalVaultProfile(localVaultId);
+      const targetName = (explicitName ?? localVaultProfile?.name ?? "").trim();
+
+      if (!binding || !connection || !targetName) {
+        return false;
+      }
+
+      if (binding.remoteVaultName.trim() === targetName) {
+        return true;
+      }
+
+      const renameRemoteVault = async (candidate: SyncConnection) => {
+        if (candidate.provider === "googleDrive") {
+          return renameGoogleDriveVault(candidate.sessionToken, binding.remoteVaultId, targetName);
+        }
+
+        if (candidate.provider === "hosted") {
+          return renameHostedVault(
+            candidate.serverUrl,
+            candidate.sessionToken,
+            binding.remoteVaultId,
+            targetName
+          );
+        }
+
+        return renamePersonalServerVault(
+          candidate.serverUrl,
+          candidate.managementToken,
+          binding.remoteVaultId,
+          targetName
+        );
+      };
+
+      let targetConnection = connection;
+
+      if (
+        targetConnection.provider === "googleDrive" &&
+        targetConnection.tokenExpiresAt &&
+        targetConnection.tokenExpiresAt <= Date.now() + 15_000
+      ) {
+        const refreshedConnection = await refreshGoogleDriveConnectionSilently(targetConnection);
+
+        if (refreshedConnection) {
+          targetConnection = refreshedConnection;
+        }
+      }
+
+      try {
+        const renamed = await renameRemoteVault(targetConnection);
+        const nextRemoteName = renamed.vault?.name?.trim() || targetName;
+        updateSyncBindingRemoteName(localVaultId, nextRemoteName);
+        refreshSyncRegistryState();
+        return true;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "SYNC_FAILED";
+
+        if (targetConnection.provider !== "googleDrive" || errorMessage !== "GOOGLE_DRIVE_AUTH_REQUIRED") {
+          throw error;
+        }
+
+        const refreshedConnection = await refreshGoogleDriveConnectionSilently(targetConnection);
+
+        if (!refreshedConnection) {
+          throw error;
+        }
+
+        const renamed = await renameRemoteVault(refreshedConnection);
+        const nextRemoteName = renamed.vault?.name?.trim() || targetName;
+        updateSyncBindingRemoteName(localVaultId, nextRemoteName);
+        refreshSyncRegistryState();
+        return true;
+      }
+    },
+    [refreshGoogleDriveConnectionSilently, syncBindingsByVaultId, syncConnectionsById]
+  );
+
   const runBoundVaultSync = useCallback(
     async (
       localVaultId: string,
@@ -999,6 +1084,13 @@ export default function App() {
           syncCursor: result.revision,
           lastError: null
         });
+        const syncedVaultProfile = getLocalVaultProfile(localVaultId);
+
+        if (syncedVaultProfile?.name?.trim()) {
+          updateSyncBindingRemoteName(localVaultId, syncedVaultProfile.name);
+        }
+
+        setLocalVaults(listLocalVaultProfiles());
         refreshSyncRegistryState();
         showSyncTransportIndicator(localVaultId, result.syncMode);
 
@@ -1046,6 +1138,7 @@ export default function App() {
       online,
       refreshGoogleDriveConnectionSilently,
       showSyncTransportIndicator,
+      syncBoundRemoteVaultName,
       syncBindingsByVaultId,
       syncConnectionsById,
       t,
@@ -2090,9 +2183,53 @@ export default function App() {
     return createdVault.id;
   };
 
-  const handleRenameLocalVault = (localVaultId: string, name: string) => {
+  const handleRenameLocalVault = async (localVaultId: string, name: string) => {
+    const previousProfile = getLocalVaultProfile(localVaultId);
+    const previousName = previousProfile?.name ?? "";
+    const binding = syncBindingsByVaultId.get(localVaultId) ?? null;
+    const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
+
     renameLocalVaultProfile(localVaultId, name);
     setLocalVaults(listLocalVaultProfiles());
+
+    if (!binding || !connection) {
+      return;
+    }
+
+    updateSyncBindingState(localVaultId, {
+      syncStatus: "syncing",
+      lastError: null
+    });
+    refreshSyncRegistryState();
+
+    try {
+      const didSyncRemoteName = await syncBoundRemoteVaultName(localVaultId, name);
+
+      if (!didSyncRemoteName) {
+        return;
+      }
+
+      updateSyncBindingState(localVaultId, {
+        syncStatus: "idle",
+        lastError: null,
+        lastSyncAt: Date.now()
+      });
+      refreshSyncRegistryState();
+    } catch (error) {
+      renameLocalVaultProfile(localVaultId, previousName);
+      setLocalVaults(listLocalVaultProfiles());
+
+      const errorMessage = error instanceof Error ? error.message : "SYNC_FAILED";
+      updateSyncBindingState(localVaultId, {
+        syncStatus: "error",
+        lastError: errorMessage
+      });
+      refreshSyncRegistryState();
+      setSyncFeedback({
+        tone: "error",
+        text: translateSyncError(error, connection.provider)
+      });
+    }
   };
 
   const discardEmptyDocumentDraftIfNeeded = useCallback(

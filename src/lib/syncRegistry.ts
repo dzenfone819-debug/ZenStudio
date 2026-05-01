@@ -416,6 +416,28 @@ export function updateSyncBindingState(
   return nextBindings.find((binding) => binding.localVaultId === localVaultId) ?? null;
 }
 
+export function updateSyncBindingRemoteName(localVaultId: string, remoteVaultName: string) {
+  const registry = getSyncRegistry();
+  const normalizedRemoteVaultName = sanitizeText(remoteVaultName, 160);
+
+  const nextBindings = registry.bindings.map((binding) =>
+    binding.localVaultId === localVaultId
+      ? {
+          ...binding,
+          remoteVaultName: normalizedRemoteVaultName || binding.remoteVaultId,
+          updatedAt: now()
+        }
+      : binding
+  );
+
+  writeNormalizedRegistry({
+    ...registry,
+    bindings: nextBindings
+  });
+
+  return nextBindings.find((binding) => binding.localVaultId === localVaultId) ?? null;
+}
+
 export function removeBindingsForLocalVault(localVaultId: string) {
   return clearSyncBinding(localVaultId);
 }

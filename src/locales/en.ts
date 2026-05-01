@@ -608,6 +608,7 @@ const en = {
     addNote: "Add note",
     addCanvas: "Add canvas",
     addProject: "New system",
+    addProjectTooltip: "Create a new system inside this vault",
     create: "Create",
     cancel: "Cancel",
     folderNamePlaceholder: "Folder name",

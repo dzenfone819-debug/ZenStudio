@@ -306,6 +306,46 @@ async function writeVaultEnvelope(vaultId, envelope) {
   await writeJsonFile(getVaultStateFile(vaultId), envelope);
 }
 
+async function syncVaultEnvelopeName(vaultId, vaultName) {
+  const envelope = await readVaultEnvelope(vaultId);
+
+  if (!envelope?.metadata) {
+    return;
+  }
+
+  const existingVaultDescriptor =
+    envelope.metadata.vault && typeof envelope.metadata.vault === "object"
+      ? envelope.metadata.vault
+      : null;
+
+  await writeVaultEnvelope(vaultId, {
+    ...envelope,
+    metadata: {
+      ...envelope.metadata,
+      vault: {
+        localVaultId:
+          typeof existingVaultDescriptor?.localVaultId === "string"
+            ? existingVaultDescriptor.localVaultId
+            : null,
+        vaultGuid:
+          typeof existingVaultDescriptor?.vaultGuid === "string"
+            ? existingVaultDescriptor.vaultGuid
+            : vaultId,
+        name: vaultName,
+        vaultKind:
+          existingVaultDescriptor?.vaultKind === "private" ||
+          envelope.metadata.payloadMode === "encrypted"
+            ? "private"
+            : "regular",
+        schemaVersion:
+          typeof existingVaultDescriptor?.schemaVersion === "number"
+            ? existingVaultDescriptor.schemaVersion
+            : 1
+      }
+    }
+  });
+}
+
 async function readVaultJournal(vaultId) {
   const parsed = await readJsonFile(getVaultJournalFile(vaultId), []);
 
@@ -1134,6 +1174,41 @@ const server = createServer(async (request, response) => {
     }
 
     const accountVaultMatch = pathname.match(/^\/v1\/account\/vaults\/([a-z0-9-_]{1,64})$/i);
+
+    if (accountVaultMatch && request.method === "PATCH") {
+      const context = await getAuthenticatedAccountContext(registry, request);
+
+      if (!context) {
+        sendJson(response, 401, { error: "UNAUTHORIZED" });
+        return;
+      }
+
+      const vaultId = sanitizeVaultId(accountVaultMatch[1]);
+      const vault = getVaultById(context.registry, vaultId);
+
+      if (!vault || !isVaultOwnedByUser(vault, context.user.id)) {
+        sendJson(response, 404, { error: "VAULT_NOT_FOUND" });
+        return;
+      }
+
+      const payload = await collectBody(request);
+      const nextName = sanitizeDisplayName(payload?.name, "");
+
+      if (!nextName) {
+        sendJson(response, 400, { error: "VAULT_NAME_REQUIRED" });
+        return;
+      }
+
+      const nextRegistry = await updateVaultMeta(context.registry, vaultId, {
+        name: nextName
+      });
+      await syncVaultEnvelopeName(vaultId, nextName);
+
+      sendJson(response, 200, {
+        vault: buildOwnedVaultList(nextRegistry, context.user.id).find((entry) => entry.id === vaultId) ?? null
+      });
+      return;
+    }
 
     if (accountVaultMatch && request.method === "DELETE") {
       const context = await getAuthenticatedAccountContext(registry, request);

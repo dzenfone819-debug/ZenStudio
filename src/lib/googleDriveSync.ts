@@ -1255,6 +1255,52 @@ export async function deleteGoogleDriveRemoteVault(accessToken: string, vaultId:
   });
 }
 
+export async function renameGoogleDriveRemoteVault(
+  accessToken: string,
+  input: {
+    vaultId: string;
+    vaultName: string;
+  }
+) {
+  const record = await getRemoteVaultRecord(accessToken, input.vaultId);
+
+  if (!record) {
+    throw new Error("VAULT_NOT_FOUND");
+  }
+
+  const nextName = sanitizeText(input.vaultName, record.name || input.vaultId);
+
+  if (!nextName) {
+    throw new Error("VAULT_NAME_REQUIRED");
+  }
+
+  const envelope = await loadGoogleDriveRemoteEnvelope(accessToken, input.vaultId);
+  const nextEnvelope =
+    envelope.metadata
+      ? {
+          ...envelope,
+          metadata: {
+            ...envelope.metadata,
+            vault: {
+              ...(envelope.metadata.vault ?? buildVaultDescriptor(input.vaultId, nextName)),
+              name: nextName
+            }
+          }
+        }
+      : {
+          ...envelope,
+          metadata: createPlainSyncDescriptor(buildVaultDescriptor(input.vaultId, nextName))
+        };
+
+  const nextRecord = await saveGoogleDriveRemoteEnvelope(accessToken, {
+    vaultId: input.vaultId,
+    vaultName: nextName,
+    envelope: nextEnvelope
+  });
+
+  return normalizeRemoteVaultRecord(nextRecord);
+}
+
 export async function loadGoogleDriveRemoteEnvelope(accessToken: string, vaultId: string) {
   const record = await getRemoteVaultRecord(accessToken, vaultId);
 

@@ -35,9 +35,10 @@ import {
   prepareGoogleDriveOAuth as prepareGoogleDriveOAuthViaApi,
   probeGoogleDriveConnection,
   pushGoogleDriveRemoteChanges,
+  renameGoogleDriveRemoteVault,
   saveGoogleDriveRemoteEnvelope
 } from "./googleDriveSync";
-import { getLocalVaultProfile, type LocalVaultProfile } from "./localVaults";
+import { getLocalVaultProfile, type LocalVaultProfile, updateLocalVaultProfile } from "./localVaults";
 import {
   db,
   resetResolvedAssetCache,
@@ -131,6 +132,7 @@ type ResolvedRemoteEnvelope = {
 type ResolveRemoteEnvelopeOptions = {
   passphraseOverride?: string | null;
   hydrateFromMetadata?: boolean;
+  syncVaultNameFromMetadata?: boolean;
 };
 
 type CreateOutgoingRemoteEnvelopeOptions = {
@@ -162,10 +164,40 @@ function buildRemoteVaultDescriptor(remote: RemoteSyncConfig): SyncVaultDescript
   return {
     localVaultId: remote.localVaultId ?? localVaultProfile?.id ?? null,
     vaultGuid: localVaultProfile?.vaultGuid ?? remote.vaultId ?? null,
-    name: remote.localVaultName ?? localVaultProfile?.name ?? null,
+    // Always prefer the latest local profile name (which can be updated from remote metadata during sync).
+    name: localVaultProfile?.name ?? remote.localVaultName ?? null,
     vaultKind: localVaultProfile?.vaultKind ?? "regular",
     schemaVersion: 1
   };
+}
+
+function normalizeSyncedVaultName(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim().slice(0, 120) : "";
+  return normalized || null;
+}
+
+function reconcileLocalVaultProfileName(
+  remote: Pick<RemoteSyncConfig, "localVaultId">,
+  vaultName: string | null | undefined
+) {
+  const localVaultId = remote.localVaultId?.trim() ?? "";
+  const normalizedName = normalizeSyncedVaultName(vaultName);
+
+  if (!localVaultId || !normalizedName) {
+    return null;
+  }
+
+  const localVaultProfile = getLocalVaultProfile(localVaultId);
+
+  if (!localVaultProfile || localVaultProfile.name === normalizedName) {
+    return normalizedName;
+  }
+
+  updateLocalVaultProfile(localVaultId, {
+    name: normalizedName
+  });
+
+  return normalizedName;
 }
 
 function buildEncryptionDescriptorFromSettings(settings: AppSettings): SyncEncryptionDescriptor {
@@ -222,6 +254,10 @@ async function resolveRemoteEnvelopeRecord(
   options?: ResolveRemoteEnvelopeOptions
 ): Promise<ResolvedRemoteEnvelope> {
   const metadata = envelope.metadata ?? createPlainSyncDescriptor(buildRemoteVaultDescriptor(remote));
+
+  if (options?.syncVaultNameFromMetadata ?? true) {
+    reconcileLocalVaultProfileName(remote, metadata.vault?.name ?? null);
+  }
 
   if (options?.hydrateFromMetadata ?? true) {
     await hydrateVaultEncryptionFromMetadata(metadata, database);
@@ -1436,6 +1472,23 @@ export async function deleteHostedVault(serverUrl: string, sessionToken: string,
   });
 }
 
+export async function renameHostedVault(
+  serverUrl: string,
+  sessionToken: string,
+  vaultId: string,
+  name: string
+) {
+  return requestJson<{
+    vault: HostedAccountVault | null;
+  }>(buildAccountUrl(serverUrl, `/v1/account/vaults/${encodeURIComponent(vaultId)}`), {
+    method: "PATCH",
+    headers: createBearerHeaders(sessionToken, true),
+    body: JSON.stringify({
+      name
+    })
+  });
+}
+
 export async function issueHostedVaultToken(
   serverUrl: string,
   sessionToken: string,
@@ -1518,11 +1571,37 @@ export async function deletePersonalServerVault(
   });
 }
 
+export async function renamePersonalServerVault(
+  serverUrl: string,
+  managementToken: string,
+  vaultId: string,
+  name: string
+) {
+  return requestJson<{
+    vault: SyncRemoteVault | null;
+  }>(buildPersonalUrl(serverUrl, `/v1/personal/vaults/${encodeURIComponent(vaultId)}`), {
+    method: "PATCH",
+    headers: createBearerHeaders(managementToken, true),
+    body: JSON.stringify({
+      name
+    })
+  });
+}
+
 export async function deleteGoogleDriveVault(sessionToken: string, vaultId: string) {
   await deleteGoogleDriveRemoteVault(sessionToken, vaultId);
   return {
     ok: true as const,
     vaultId
+  };
+}
+
+export async function renameGoogleDriveVault(sessionToken: string, vaultId: string, name: string) {
+  return {
+    vault: await renameGoogleDriveRemoteVault(sessionToken, {
+      vaultId,
+      vaultName: name
+    })
   };
 }
 
@@ -1592,7 +1671,10 @@ export async function importRemoteVaultIntoLocalVault(input: {
         token: input.syncToken,
         localVaultId: input.localVaultId
       },
-      database
+      database,
+      {
+        syncVaultNameFromMetadata: false
+      }
     )
   );
 
@@ -1637,7 +1719,10 @@ export async function primeRemoteVaultEncryptionMetadata(input: {
           token: input.syncToken,
           localVaultId: input.localVaultId
         },
-        database
+        database,
+        {
+          syncVaultNameFromMetadata: false
+        }
       )
     );
 
@@ -3028,6 +3113,8 @@ async function runGoogleDriveDeltaSyncCycle(
     settings = (await database.settings.get("app")) ?? settings;
   }
 
+  reconcileLocalVaultProfileName(remoteConfig, remoteFeed.metadata?.vault?.name ?? null);
+
   if (remoteFeed.mode === "snapshot") {
     if (remoteFeed.snapshot) {
       return runGoogleDriveSyncCycle(
@@ -3241,6 +3328,8 @@ async function runDeltaSyncCycle(
     await hydrateVaultEncryptionFromMetadata(remoteFeed.metadata, database);
     settings = (await database.settings.get("app")) ?? settings;
   }
+
+  reconcileLocalVaultProfileName(remoteConfig, remoteFeed.metadata?.vault?.name ?? null);
 
   if (remoteFeed.mode === "snapshot") {
     if (remoteFeed.snapshot) {
