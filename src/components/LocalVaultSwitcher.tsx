@@ -7,6 +7,7 @@ import "./LocalVaultSwitcher.css";
 export interface LocalVaultSwitcherItem {
   id: string;
   name: string;
+  displayName?: string;
   vaultKind: LocalVaultKind;
   statusLabel: string;
   statusTone: "default" | "success" | "warning" | "error";
@@ -122,6 +123,7 @@ export default function LocalVaultSwitcher({
   }
 
   const triggerProviderLabel = activeItem.providerLabel ?? t("sync.localOnlyShort");
+  const activeDisplayName = activeItem.displayName ?? activeItem.name;
 
   const resetCreateDraft = () => {
     setCreateVaultKind("regular");
@@ -209,9 +211,9 @@ export default function LocalVaultSwitcher({
             <VaultGlyph />
           </span>
           <span className="vault-switcher-trigger-copy">
-            <span className="vault-switcher-trigger-label">{label}</span>
-            <span className="vault-switcher-trigger-titleline">
-              <strong title={activeItem.name}>{activeItem.name}</strong>
+              <span className="vault-switcher-trigger-label">{label}</span>
+              <span className="vault-switcher-trigger-titleline">
+              <strong title={activeDisplayName}>{activeDisplayName}</strong>
               <span className={`vault-switcher-chip vault-switcher-trigger-provider is-provider-${activeItem.providerTone}`}>
                 {triggerProviderLabel}
               </span>
@@ -262,6 +264,7 @@ export default function LocalVaultSwitcher({
           <div className="vault-switcher-menu-list">
             {items.map((item) => {
               const isActive = item.id === activeVaultId;
+              const itemDisplayName = item.displayName ?? item.name;
 
               return (
                 <button
@@ -279,8 +282,8 @@ export default function LocalVaultSwitcher({
                     <VaultGlyph />
                   </span>
                   <span className="vault-switcher-item-copy">
-                    <span className="vault-switcher-item-titleline">
-                      <strong title={item.name}>{item.name}</strong>
+                      <span className="vault-switcher-item-titleline">
+                        <strong title={itemDisplayName}>{itemDisplayName}</strong>
                       {item.encryptionState !== "disabled" ? (
                         <span
                           className={`vault-switcher-lock-badge is-${item.encryptionState}`}

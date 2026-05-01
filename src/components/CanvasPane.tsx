@@ -28,10 +28,12 @@ import {
   DEFAULT_CANVAS_THEME,
   getCanvasRuntimeAppStateDefaults,
   getCanvasStrokeColorForBackground,
+  hasMeaningfulCanvasContent,
   normalizeCanvasHexColor,
   shouldMigrateLegacyCanvasStrokeColor,
   shouldAutoAdaptCanvasStrokeColor
 } from "../lib/canvas";
+import { getDisplayNoteTitle } from "../lib/displayNames";
 import {
   persistExcalidrawLibrary,
   readPersistedExcalidrawLibrary
@@ -152,10 +154,6 @@ const DEFAULT_CANVAS_BACKGROUND_ALIASES = new Set([
   "rgb(0, 0, 0)"
 ]);
 
-function isBlankCanvasContent(content: CanvasContent | null | undefined) {
-  return !(content?.elements ?? []).some((element) => !element.isDeleted);
-}
-
 function normalizeCanvasColorKey(color: unknown) {
   return typeof color === "string" ? color.trim().toLowerCase() : "";
 }
@@ -171,7 +169,7 @@ function isMissingOrDefaultCanvasBackground(background: unknown) {
 }
 
 function shouldUseDefaultCanvasBackground(content: CanvasContent | null | undefined) {
-  return isBlankCanvasContent(content) && isMissingOrDefaultCanvasBackground(content?.appState?.viewBackgroundColor);
+  return !hasMeaningfulCanvasContent(content) && isMissingOrDefaultCanvasBackground(content?.appState?.viewBackgroundColor);
 }
 
 function getInitialCanvasAppState(content: CanvasContent | null | undefined) {
@@ -737,7 +735,7 @@ export default function CanvasPane({
     }
 
     titleTimeoutRef.current = window.setTimeout(() => {
-      onTitleChange(value.trim() || t("canvas.untitled"));
+      onTitleChange(value.trim());
     }, 220);
   };
 
@@ -758,12 +756,10 @@ export default function CanvasPane({
       }
 
       if (latestTitleDraftRef.current !== latestStoredTitleRef.current) {
-        latestOnTitleChangeRef.current(
-          latestTitleDraftRef.current.trim() || t("canvas.untitled")
-        );
+        latestOnTitleChangeRef.current(latestTitleDraftRef.current.trim());
       }
     };
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     const stageShell = canvasStageShellRef.current;
@@ -888,7 +884,7 @@ export default function CanvasPane({
                     syncCanvasUiChrome();
                   });
                 }}
-                name={note.title}
+                name={getDisplayNoteTitle(note, language)}
                 langCode={language === "ru" ? "ru-RU" : "en"}
                 theme="light"
                 UIOptions={EXCALIDRAW_UI_OPTIONS}

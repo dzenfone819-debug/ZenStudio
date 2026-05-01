@@ -12,15 +12,13 @@ import {
   extractPlainText,
   extractReferencedAssetIds,
   getFolderCascade,
-  normalizeNoteContent,
-  getUntitledTitle
+  normalizeNoteContent
 } from "../lib/notes";
 import {
   buildCanvasExcerpt,
   createStarterCanvasContent,
   extractCanvasPlainText,
   extractCanvasReferencedFileIds,
-  getUntitledCanvasTitle,
   normalizeCanvasContent
 } from "../lib/canvas";
 import { normalizeTagLookup, normalizeTagName } from "../lib/tags";
@@ -1440,7 +1438,7 @@ export async function createNote(
   projectId?: string
 ) {
   const timestamp = now();
-  const content = createStarterContent(language);
+  const content: NoteContent = [];
   const folder = folderId ? await db.folders.get(folderId) : null;
   const resolvedProjectId = folder?.projectId ?? projectId ?? null;
 
@@ -1450,7 +1448,7 @@ export async function createNote(
 
   const note: Note = {
     id: crypto.randomUUID(),
-    title: getUntitledTitle(language),
+    title: "",
     contentType: "note",
     projectId: resolvedProjectId,
     folderId,
@@ -1498,7 +1496,7 @@ export async function createCanvas(
 
   const note: Note = {
     id: crypto.randomUUID(),
-    title: getUntitledCanvasTitle(language),
+    title: "",
     contentType: "canvas",
     projectId: resolvedProjectId,
     folderId,

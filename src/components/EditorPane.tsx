@@ -13,6 +13,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import EditorFormattingToolbar from "./EditorFormattingToolbar";
 import FolderPicker from "./FolderPicker";
 import TagInputField from "./TagInputField";
+import { getDisplayNoteTitle } from "../lib/displayNames";
 import { COLOR_PALETTE, DEFAULT_NOTE_COLOR } from "../lib/palette";
 import { editorBlockNoteSchema } from "../lib/blocknoteSchema";
 import {
@@ -120,7 +121,7 @@ export default function EditorPane({
   const editor = useCreateBlockNote(
     {
       schema: editorBlockNoteSchema,
-      initialContent: normalizedContent as any,
+      initialContent: normalizedContent.length > 0 ? (normalizedContent as any) : undefined,
       animations: true,
       dictionary: {
         ...editorDictionary,
@@ -188,7 +189,7 @@ export default function EditorPane({
     }
 
     titleTimeoutRef.current = window.setTimeout(() => {
-      onTitleChange(value.trim() || t("note.untitled"));
+      onTitleChange(value.trim());
     }, 220);
   };
 
@@ -208,7 +209,14 @@ export default function EditorPane({
   const getMarkdown = () => editor.blocksToMarkdownLossy(editor.document as any);
 
   const getMarkdownFilename = () => {
-    const safeTitle = (titleDraft.trim() || note.title || t("note.untitled"))
+    const safeTitle = getDisplayNoteTitle(
+      {
+        title: titleDraft.trim() || note.title,
+        plainText: note.plainText,
+        excerpt: note.excerpt
+      },
+      language
+    )
       .replace(/[\\/:*?"<>|]+/g, "-")
       .replace(/\s+/g, " ")
       .trim()
@@ -301,12 +309,10 @@ export default function EditorPane({
       }
 
       if (latestTitleDraftRef.current !== latestStoredTitleRef.current) {
-        latestOnTitleChangeRef.current(
-          latestTitleDraftRef.current.trim() || t("note.untitled")
-        );
+        latestOnTitleChangeRef.current(latestTitleDraftRef.current.trim());
       }
     };
-  }, [t]);
+  }, []);
 
   return (
     <section

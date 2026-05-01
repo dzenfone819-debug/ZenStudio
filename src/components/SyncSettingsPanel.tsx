@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { LocalVaultKind, LocalVaultProfile } from "../lib/localVaults";
+import { getDisplayVaultName } from "../lib/displayNames";
 import {
   connectGoogleDriveAccount,
   createHostedVault,
@@ -475,6 +476,12 @@ export default function SyncSettingsPanel({
     () => [...localVaults].sort((left, right) => left.createdAt - right.createdAt),
     [localVaults]
   );
+  const getVaultLabel = (vault: Pick<LocalVaultProfile, "id" | "name"> | null | undefined) =>
+    getDisplayVaultName(
+      vault ?? null,
+      settings.language,
+      vault ? sortedVaults.findIndex((entry) => entry.id === vault.id) : undefined
+    );
   const bindingsByVaultId = useMemo(
     () => new Map(syncBindings.map((binding) => [binding.localVaultId, binding])),
     [syncBindings]
@@ -506,6 +513,7 @@ export default function SyncSettingsPanel({
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [internalFeedback, setInternalFeedback] = useState<SyncFeedbackState>(null);
   const [vaultNameDraft, setVaultNameDraft] = useState("");
+  const [vaultNameError, setVaultNameError] = useState<string | null>(null);
   const [vaultKindDraft, setVaultKindDraft] = useState<LocalVaultKind>("regular");
   const [vaultPassphraseDraft, setVaultPassphraseDraft] = useState("");
   const [vaultPassphraseConfirmDraft, setVaultPassphraseConfirmDraft] = useState("");
@@ -1057,6 +1065,7 @@ export default function SyncSettingsPanel({
     setConfirmState(null);
     pendingVaultEncryptionContinuationRef.current = null;
     setVaultNameDraft("");
+    setVaultNameError(null);
     setVaultKindDraft("regular");
     setVaultPassphraseDraft("");
     setVaultPassphraseConfirmDraft("");
@@ -1085,8 +1094,11 @@ export default function SyncSettingsPanel({
     const normalizedName = vaultNameDraft.trim();
 
     if (!normalizedName) {
+      setVaultNameError(t("settings.createVaultNameRequired"));
       return;
     }
+
+    setVaultNameError(null);
 
     if (vaultKindDraft === "private") {
       if (!vaultPassphraseDraft.trim()) {
@@ -1131,9 +1143,11 @@ export default function SyncSettingsPanel({
     const normalizedName = vaultNameDraft.trim();
 
     if (!normalizedName) {
+      setVaultNameError(t("settings.renameVaultNameRequired"));
       return;
     }
 
+    setVaultNameError(null);
     onRenameLocalVault(panelModal.vault.id, normalizedName);
     setVaultNameDraft("");
     closeModal();
@@ -1307,20 +1321,20 @@ export default function SyncSettingsPanel({
         connection.provider === "selfHosted"
           ? (
               await createPersonalServerVault(connection.serverUrl, connection.managementToken, {
-                name: vault.name,
+                name: getVaultLabel(vault),
                 id: canonicalRemoteVaultId || undefined
               })
             ).vault
           : connection.provider === "googleDrive"
             ? (
                 await createGoogleDriveVault(connection.sessionToken, {
-                  name: vault.name,
+                  name: getVaultLabel(vault),
                   id: canonicalRemoteVaultId || undefined
                 })
               ).vault
           : (
               await createHostedVault(connection.serverUrl, connection.sessionToken, {
-                name: vault.name,
+                name: getVaultLabel(vault),
                 id: canonicalRemoteVaultId || undefined
               })
             ).vault;
@@ -1332,7 +1346,7 @@ export default function SyncSettingsPanel({
             connection.serverUrl,
             connection.managementToken,
             remoteVault.id,
-            `${vault.name} · ${connection.label}`
+            `${getVaultLabel(vault)} · ${connection.label}`
           )
         : connection.provider === "googleDrive"
           ? await issueGoogleDriveVaultToken(remoteVault.id)
@@ -1340,7 +1354,7 @@ export default function SyncSettingsPanel({
             connection.serverUrl,
             connection.sessionToken,
             remoteVault.id,
-            `${vault.name} · ${connection.label}`
+            `${getVaultLabel(vault)} · ${connection.label}`
           );
 
     await onBindVault({
@@ -1713,7 +1727,7 @@ export default function SyncSettingsPanel({
     setConfirmState({
       title: t("settings.localDeleteChoiceTitle"),
       description: t("settings.localDeleteChoiceDescription", {
-        vault: vault.name,
+        vault: getVaultLabel(vault),
         connection: connection.label
       }),
       details: [
@@ -1803,7 +1817,7 @@ export default function SyncSettingsPanel({
       setConfirmState({
         title: t("settings.rebindTitle"),
         description: t("settings.rebindDescription", {
-          vault: vault.name,
+          vault: getVaultLabel(vault),
           connection: connection.label
         }),
         confirmLabel: t("settings.rebindConfirm"),
@@ -1904,6 +1918,7 @@ export default function SyncSettingsPanel({
 
   const openCreateVaultModal = () => {
     setVaultNameDraft("");
+    setVaultNameError(null);
     setVaultKindDraft("regular");
     setVaultPassphraseDraft("");
     setVaultPassphraseConfirmDraft("");
@@ -1914,6 +1929,7 @@ export default function SyncSettingsPanel({
 
   const openRenameVaultModal = (vault: LocalVaultProfile) => {
     setVaultNameDraft(vault.name);
+    setVaultNameError(null);
     setPanelModal({
       kind: "renameVault",
       vault
@@ -2320,7 +2336,7 @@ export default function SyncSettingsPanel({
                               <LockGlyph />
                             </span>
                           ) : null}
-                          <strong>{vault.name}</strong>
+                          <strong>{getVaultLabel(vault)}</strong>
                         </div>
                         <span className="sync-settings-card-meta">
                           {bindingConnection
@@ -2960,7 +2976,7 @@ export default function SyncSettingsPanel({
                       ? t("settings.renameVaultTitle")
                       : panelModal.kind === "vaultEncryption"
                         ? t("settings.vaultEncryptionTitle", {
-                            vault: panelModal.vault.name
+                            vault: getVaultLabel(panelModal.vault)
                           })
                         : panelModal.kind === "addConnection"
                           ? t("settings.connectionCatalogTitle")
@@ -3008,10 +3024,18 @@ export default function SyncSettingsPanel({
                 <input
                   className="sync-settings-input"
                   value={vaultNameDraft}
-                  onChange={(event) => setVaultNameDraft(event.target.value)}
+                  onChange={(event) => {
+                    setVaultNameDraft(event.target.value);
+                    if (vaultNameError) {
+                      setVaultNameError(null);
+                    }
+                  }}
                   placeholder={t("sync.localVaultCreatePlaceholder")}
                   autoFocus
                 />
+                {vaultNameError ? (
+                  <span className="sync-settings-note-copy is-error">{vaultNameError}</span>
+                ) : null}
                 {panelModal.kind === "createVault" && vaultKindDraft === "private" ? (
                   <>
                     <input

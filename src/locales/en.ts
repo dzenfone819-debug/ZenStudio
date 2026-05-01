@@ -450,6 +450,7 @@ const en = {
     renameVaultTitle: "Rename vault",
     createVaultTypeLabel: "Vault type",
     createVaultNameRequired: "Enter a name for the new vault.",
+    renameVaultNameRequired: "Vault name is required.",
     vaultKindRegular: "Regular",
     vaultKindPrivate: "Private",
     createVaultDescription:

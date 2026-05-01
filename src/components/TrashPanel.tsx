@@ -1,4 +1,5 @@
 import type { AppLanguage, Note } from "../types";
+import { getDisplayNotePreview, getDisplayNoteTitle } from "../lib/displayNames";
 import { formatTimestamp } from "../lib/notes";
 import "./TrashPanel.css";
 
@@ -70,8 +71,8 @@ export default function TrashPanel({
             <article className="trash-card" key={note.id}>
               <div className="trash-card-head">
                 <div className="trash-card-copy">
-                  <h3>{note.title}</h3>
-                  <p>{note.excerpt || note.plainText || "..."}</p>
+                  <h3>{getDisplayNoteTitle(note, language)}</h3>
+                  <p>{getDisplayNotePreview(note, language)}</p>
                 </div>
                 <div className="trash-card-chip-stack">
                   <span className="trash-card-chip is-type">

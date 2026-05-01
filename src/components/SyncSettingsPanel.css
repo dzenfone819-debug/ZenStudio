@@ -1123,6 +1123,10 @@
   color: rgba(198, 205, 235, 0.76);
 }
 
+.sync-settings-note-copy.is-error {
+  color: #ff9cb2;
+}
+
 .sync-settings-encryption-stack {
   display: grid;
   gap: 8px;

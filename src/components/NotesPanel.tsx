@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { Note, NoteListView, Tag } from "../types";
 
+import { getDisplayNotePreview, getDisplayNoteTitle } from "../lib/displayNames";
 import { formatTimestamp } from "../lib/notes";
 
 interface NotesPanelProps {
@@ -110,7 +111,7 @@ export default function NotesPanel({
             >
               <div className="note-card-topline">
                 <div className="note-card-titlewrap">
-                  <span className="note-card-title">{note.title}</span>
+                  <span className="note-card-title">{getDisplayNoteTitle(note, language)}</span>
                   <span className="note-card-date">{formatTimestamp(note.updatedAt, language)}</span>
                 </div>
                 <div className="note-card-flags">
@@ -126,7 +127,7 @@ export default function NotesPanel({
                 </span>
                 <span className="note-card-stat">{note.plainText.length}</span>
               </div>
-              <p className="note-card-excerpt">{note.excerpt || "..."}</p>
+              <p className="note-card-excerpt">{getDisplayNotePreview(note, language)}</p>
               <div className="note-card-tags">
                 {note.tagIds.slice(0, 3).map((tagId) => {
                   const tag = tagMap.get(tagId);

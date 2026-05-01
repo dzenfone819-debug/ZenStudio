@@ -18,6 +18,12 @@ import OrbitalInspectorContextMenu, {
 } from "./OrbitalInspectorContextMenu";
 import "./OrbitalChrome.css";
 import {
+  getDisplayNoteTitle,
+  getDisplayProjectName,
+  getDisplayVaultName,
+  hasExplicitDisplayName
+} from "../lib/displayNames";
+import {
   COLOR_PALETTE,
   DEFAULT_FOLDER_COLOR,
   DEFAULT_NOTE_COLOR,
@@ -1344,7 +1350,8 @@ function buildAdaptiveVisibilitySet({
 
 function buildOrbitalLayout(
   data: OrbitalData,
-  visibleEntityIds: Set<string> | null
+  visibleEntityIds: Set<string> | null,
+  language: AppLanguage
 ): OrbitalLayout {
   const roots: OrbitalLayoutNode[] = [];
   const entityMap = new Map<string, OrbitalLayoutNode>();
@@ -1394,7 +1401,7 @@ function buildOrbitalLayout(
       const seed = hashString(entityId);
       const mass = child.folder?.mass ?? getNoteMass(child.note!);
       const kind: SceneNodeKind = child.folder ? "folder" : "note";
-      const label = child.folder?.folder.name ?? child.note?.title ?? "";
+      const label = child.folder?.folder.name ?? (child.note ? getDisplayNoteTitle(child.note, language) : "");
       const radius = child.folder
         ? clamp(14 + child.folder.mass * 1.5, 15, 40)
         : getOrbitalEntryRadius(child.note!);
@@ -1502,7 +1509,7 @@ function buildOrbitalLayout(
       entityId: coreEntityId,
       parentEntityId: null,
       kind: "core",
-      label: project.name,
+      label: getDisplayProjectName(project, language, data.projects.findIndex((entry) => entry.id === project.id)),
       x: project.x,
       y: project.y,
       radius: 58,
@@ -1822,7 +1829,7 @@ export default function OrbitalMapView({
   const [activeAssetFilters, setActiveAssetFilters] = useState<string[]>([]);
   const [activeInspectorDocumentKinds, setActiveInspectorDocumentKinds] = useState<
     InspectorDocumentKindFilter[]
-  >(["note", "canvas"]);
+  >([]);
   const [collapsedInspectorFolders, setCollapsedInspectorFolders] = useState<string[]>([]);
   const [inspectorMenu, setInspectorMenu] = useState<InspectorMenu>("overview");
   const [inspectorQuery, setInspectorQuery] = useState("");
@@ -1831,6 +1838,7 @@ export default function OrbitalMapView({
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [isEditingVaultTitle, setIsEditingVaultTitle] = useState(false);
   const [vaultNameDraft, setVaultNameDraft] = useState("");
+  const [vaultRenameError, setVaultRenameError] = useState<string | null>(null);
   const [inspectorRenameState, setInspectorRenameState] = useState<InspectorRenameState | null>(null);
   const [inspectorRenameDraft, setInspectorRenameDraft] = useState("");
   const [contextMenuState, setContextMenuState] = useState<InspectorContextMenuState | null>(null);
@@ -1865,6 +1873,7 @@ export default function OrbitalMapView({
   const suppressSceneBackgroundClickRef = useRef(false);
   const orbitInteractionTimeoutRef = useRef<number | null>(null);
   const orbitInteractionActiveRef = useRef(true);
+  const vaultRenameErrorTimeoutRef = useRef<number | null>(null);
   const suppressInspectorClickRef = useRef(false);
   const inspectorLongPressRef = useRef<{
     pointerId: number;
@@ -1947,6 +1956,10 @@ export default function OrbitalMapView({
   const visibleNotes = useMemo(() => [...orbitalData.noteById.values()].sort(noteSorter), [orbitalData.noteById]);
   const activeLocalVaultItem = useMemo(
     () => localVaultOptions.find((item) => item.id === activeLocalVaultId) ?? localVaultOptions[0] ?? null,
+    [activeLocalVaultId, localVaultOptions]
+  );
+  const activeLocalVaultIndex = useMemo(
+    () => localVaultOptions.findIndex((item) => item.id === activeLocalVaultId),
     [activeLocalVaultId, localVaultOptions]
   );
   const currentProjectId = activeProjectId ?? orbitalData.projects[0]?.id ?? null;
@@ -2091,7 +2104,13 @@ export default function OrbitalMapView({
     }
 
     orbitalData.projects.forEach((project) => {
-      if (project.name.toLowerCase().includes(normalizedFilterQuery)) {
+      const projectLabel = getDisplayProjectName(
+        project,
+        language,
+        orbitalData.projects.findIndex((entry) => entry.id === project.id)
+      );
+
+      if (projectLabel.toLowerCase().includes(normalizedFilterQuery)) {
         matches.add(getProjectEntityId(project.id));
       }
     });
@@ -2312,8 +2331,8 @@ export default function OrbitalMapView({
     selectedEntityId
   ]);
   const sceneLayout = useMemo(
-    () => buildOrbitalLayout(orbitalData, sceneVisibleEntityIds),
-    [orbitalData, sceneVisibleEntityIds]
+    () => buildOrbitalLayout(orbitalData, sceneVisibleEntityIds, language),
+    [language, orbitalData, sceneVisibleEntityIds]
   );
   const scene = useMemo(
     () => materializeOrbitalScene(sceneLayout, timeMs),
@@ -2534,6 +2553,10 @@ export default function OrbitalMapView({
     return () => {
       clearHoverPreviewCloseTimeout();
       clearInspectorLongPress();
+      if (vaultRenameErrorTimeoutRef.current) {
+        window.clearTimeout(vaultRenameErrorTimeoutRef.current);
+        vaultRenameErrorTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -2551,19 +2574,10 @@ export default function OrbitalMapView({
   }, [editingProjectId, orbitalData.projectById]);
 
   useEffect(() => {
-    if (!isEditingVaultTitle) {
-      return;
-    }
-
-    if (!activeLocalVaultItem) {
+    if (isEditingVaultTitle && !activeLocalVaultItem) {
       cancelVaultRename();
-      return;
     }
-
-    if (!vaultNameDraft) {
-      setVaultNameDraft(activeLocalVaultItem.name);
-    }
-  }, [activeLocalVaultItem, isEditingVaultTitle, vaultNameDraft]);
+  }, [activeLocalVaultItem, isEditingVaultTitle]);
 
   useEffect(() => {
     if (!inspectorRenameState) {
@@ -2804,12 +2818,20 @@ export default function OrbitalMapView({
     !anchorNode
       ? labels.core
       : anchorNode.kind === "core" && anchorNode.project
-        ? anchorNode.project.name
+        ? getDisplayProjectName(
+            anchorNode.project,
+            language,
+            orbitalData.projects.findIndex((entry) => entry.id === anchorNode.project!.id)
+          )
       : anchorNode.kind === "folder" && anchorNode.folder
         ? folderPathMap.get(anchorNode.folder.id) ?? anchorNode.folder.name
         : anchorNode.kind === "note" && anchorNode.note?.folderId
           ? folderPathMap.get(anchorNode.note.folderId) ?? labels.uncategorized
-          : currentProject?.name ?? labels.core;
+          : getDisplayProjectName(
+              currentProject,
+              language,
+              orbitalData.projects.findIndex((entry) => entry.id === currentProject?.id)
+            );
 
   useEffect(() => {
     timeRef.current = timeMs;
@@ -3377,12 +3399,11 @@ export default function OrbitalMapView({
 
   const toggleInspectorDocumentKind = (kind: InspectorDocumentKindFilter) => {
     setActiveInspectorDocumentKinds((current) => {
-      if (current.includes(kind)) {
-        const next = current.filter((entry) => entry !== kind);
-        return next.length === 0 ? ["note", "canvas"] : next;
+      if (current.length === 1 && current[0] === kind) {
+        return [];
       }
 
-      return [...current, kind];
+      return [kind];
     });
   };
 
@@ -3402,6 +3423,12 @@ export default function OrbitalMapView({
       return;
     }
 
+    if (vaultRenameErrorTimeoutRef.current) {
+      window.clearTimeout(vaultRenameErrorTimeoutRef.current);
+      vaultRenameErrorTimeoutRef.current = null;
+    }
+
+    setVaultRenameError(null);
     setIsEditingVaultTitle(true);
     setVaultNameDraft(activeLocalVaultItem.name);
   };
@@ -3414,6 +3441,18 @@ export default function OrbitalMapView({
   const cancelVaultRename = () => {
     setIsEditingVaultTitle(false);
     setVaultNameDraft("");
+  };
+
+  const showVaultRenameError = (message: string) => {
+    if (vaultRenameErrorTimeoutRef.current) {
+      window.clearTimeout(vaultRenameErrorTimeoutRef.current);
+    }
+
+    setVaultRenameError(message);
+    vaultRenameErrorTimeoutRef.current = window.setTimeout(() => {
+      setVaultRenameError(null);
+      vaultRenameErrorTimeoutRef.current = null;
+    }, 2600);
   };
 
   const submitProjectRename = async () => {
@@ -3429,12 +3468,6 @@ export default function OrbitalMapView({
     }
 
     const normalizedName = projectNameDraft.trim();
-
-    if (!normalizedName) {
-      setProjectNameDraft(project.name);
-      cancelProjectRename();
-      return;
-    }
 
     if (normalizedName === project.name) {
       cancelProjectRename();
@@ -3453,7 +3486,13 @@ export default function OrbitalMapView({
 
     const normalizedName = vaultNameDraft.trim();
 
-    if (!normalizedName || normalizedName === activeLocalVaultItem.name) {
+    if (!normalizedName) {
+      cancelVaultRename();
+      showVaultRenameError(t("settings.renameVaultNameRequired"));
+      return;
+    }
+
+    if (normalizedName === activeLocalVaultItem.name) {
       cancelVaultRename();
       return;
     }
@@ -3598,7 +3637,7 @@ export default function OrbitalMapView({
 
     const note = orbitalData.noteById.get(inspectorRenameState.id);
 
-    if (!note || normalizedName === (note.title.trim() || getNoteInspectorTitle(note))) {
+    if (!note || normalizedName === note.title.trim()) {
       cancelInspectorRename();
       return;
     }
@@ -3909,9 +3948,7 @@ export default function OrbitalMapView({
     id: note.id,
     entityId: `note:${note.id}`,
     kind: note.contentType === "canvas" ? "canvas" : "note",
-    label:
-      note.title.trim() ||
-      (note.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled")),
+    label: getDisplayNoteTitle(note, language),
     color: note.color || DEFAULT_NOTE_COLOR,
     note,
     searchText: [
@@ -3947,10 +3984,18 @@ export default function OrbitalMapView({
     id: project.id,
     entityId: getProjectEntityId(project.id),
     kind: "core",
-    label: project.name,
+    label: getDisplayProjectName(
+      project,
+      language,
+      orbitalData.projects.findIndex((entry) => entry.id === project.id)
+    ),
     color: project.color || DEFAULT_PROJECT_COLOR,
     project,
-    searchText: `${project.name} ${labels.system} ${labels.core}`.toLowerCase(),
+    searchText: `${getDisplayProjectName(
+      project,
+      language,
+      orbitalData.projects.findIndex((entry) => entry.id === project.id)
+    )} ${labels.system} ${labels.core}`.toLowerCase(),
     children: [
       ...(orbitalData.rootFoldersByProject.get(project.id) ?? []).map((branch) =>
         createHierarchyFolderItem(branch)
@@ -4010,7 +4055,10 @@ export default function OrbitalMapView({
       inspectorNotesMenu.filter((note) => {
         const noteKind = note.contentType === "canvas" ? "canvas" : "note";
 
-        if (!activeInspectorDocumentKindSet.has(noteKind)) {
+        if (
+          activeInspectorDocumentKindSet.size > 0 &&
+          !activeInspectorDocumentKindSet.has(noteKind)
+        ) {
           return false;
         }
 
@@ -4148,18 +4196,6 @@ export default function OrbitalMapView({
     { menu: "pinned" as const, label: labels.pinnedStat, count: vaultPinnedCount, iconKind: "note" as const }
   ];
   const vaultOverviewStats = [
-    {
-      id: "systems",
-      label: labels.projectsStat,
-      value: orbitalData.projects.length,
-      tone: "project" as const
-    },
-    {
-      id: "folders",
-      label: labels.foldersStat,
-      value: folders.length,
-      tone: "folder" as const
-    },
     {
       id: "notes",
       label: labels.notesStat,
@@ -4862,10 +4898,7 @@ export default function OrbitalMapView({
   }
 
   function getNoteInspectorTitle(note: Note) {
-    return (
-      note.title.trim() ||
-      (note.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled"))
-    );
+    return getDisplayNoteTitle(note, language);
   }
 
   function renderFolderDraftNode(depth: number) {
@@ -5151,6 +5184,12 @@ export default function OrbitalMapView({
     }
 
     if (editingProjectId === project.id) {
+      const displayName = getDisplayProjectName(
+        project,
+        language,
+        orbitalData.projects.findIndex((entry) => entry.id === project.id)
+      );
+
       return (
         <div className="orbital-inline-title-shell is-editing">
           <input
@@ -5173,27 +5212,35 @@ export default function OrbitalMapView({
               }
             }}
             className={`orbital-inline-title-input ${className}`}
-            aria-label={`${renameLabel}: ${project.name}`}
+            placeholder={labels.system}
+            aria-label={`${renameLabel}: ${displayName}`}
           />
         </div>
       );
     }
 
+    const displayName = getDisplayProjectName(
+      project,
+      language,
+      orbitalData.projects.findIndex((entry) => entry.id === project.id)
+    );
+    const isPlaceholder = !hasExplicitDisplayName(project.name);
+
     return (
       <div className="orbital-inline-title-shell">
         <button
           type="button"
-          className={`orbital-inline-title-button ${className}`}
+          className={`orbital-inline-title-button ${className} ${isPlaceholder ? "is-placeholder" : ""}`}
           onClick={() => beginProjectRename(project)}
-          title={project.name}
+          title={displayName}
         >
-          {project.name}
+          {displayName}
         </button>
         <button
           type="button"
           className="orbital-inline-title-edit"
           onClick={() => beginProjectRename(project)}
-          aria-label={`${renameLabel}: ${project.name}`}
+          aria-label={`${renameLabel}: ${displayName}`}
           title={renameLabel}
         >
           ✎
@@ -5210,53 +5257,82 @@ export default function OrbitalMapView({
     }
 
     if (isEditingVaultTitle) {
-      return (
-        <div className="orbital-inline-title-shell is-editing">
-          <input
-            autoFocus
-            value={vaultNameDraft}
-            onFocus={(event) => event.currentTarget.select()}
-            onChange={(event) => setVaultNameDraft(event.target.value)}
-            onBlur={() => {
-              void submitVaultRename();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
+      const displayName = getDisplayVaultName(
+        activeLocalVaultItem,
+        language,
+        activeLocalVaultIndex >= 0 ? activeLocalVaultIndex : undefined
+      );
 
-              if (event.key === "Escape") {
-                event.preventDefault();
-                cancelVaultRename();
-              }
-            }}
-            className={`orbital-inline-title-input ${className}`}
-            aria-label={`${renameLabel}: ${activeLocalVaultItem.name}`}
-          />
+      return (
+        <div className="orbital-inline-title-stack">
+          <div className="orbital-inline-title-shell is-editing">
+            <input
+              autoFocus
+              value={vaultNameDraft}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => {
+                setVaultNameDraft(event.target.value);
+                if (vaultRenameError) {
+                  setVaultRenameError(null);
+                }
+              }}
+              onBlur={() => {
+                void submitVaultRename();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelVaultRename();
+                }
+              }}
+              className={`orbital-inline-title-input ${className}`}
+              placeholder={t("sync.localVaultCreatePlaceholder")}
+              aria-label={`${renameLabel}: ${displayName}`}
+            />
+          </div>
+          {vaultRenameError ? (
+            <p className="orbital-draft-error orbital-inline-error">{vaultRenameError}</p>
+          ) : null}
         </div>
       );
     }
 
+    const displayName = getDisplayVaultName(
+      activeLocalVaultItem,
+      language,
+      activeLocalVaultIndex >= 0 ? activeLocalVaultIndex : undefined
+    );
+    const isPlaceholder = !hasExplicitDisplayName(activeLocalVaultItem.name);
+
     return (
-      <div className="orbital-inline-title-shell">
-        <button
-          type="button"
-          className={`orbital-inline-title-button ${className}`}
-          onClick={beginVaultRename}
-          title={activeLocalVaultItem.name}
-        >
-          {activeLocalVaultItem.name}
-        </button>
-        <button
-          type="button"
-          className="orbital-inline-title-edit"
-          onClick={beginVaultRename}
-          aria-label={`${renameLabel}: ${activeLocalVaultItem.name}`}
-          title={renameLabel}
-        >
-          ✎
-        </button>
+      <div className="orbital-inline-title-stack">
+        <div className="orbital-inline-title-shell">
+          <button
+            type="button"
+            className={`orbital-inline-title-button ${className} ${isPlaceholder ? "is-placeholder" : ""}`}
+            onClick={beginVaultRename}
+            title={displayName}
+          >
+            {displayName}
+          </button>
+          <button
+            type="button"
+            className="orbital-inline-title-edit"
+            onClick={beginVaultRename}
+            aria-label={`${renameLabel}: ${displayName}`}
+            title={renameLabel}
+          >
+            ✎
+          </button>
+        </div>
+        {vaultRenameError ? (
+          <p className="orbital-draft-error orbital-inline-error">{vaultRenameError}</p>
+        ) : null}
       </div>
     );
   }
@@ -5307,8 +5383,16 @@ export default function OrbitalMapView({
   const overviewAuraGradientId = `overviewTopologyAura-${currentProjectId ?? "default"}`;
   const vaultOverviewLineGradientId = `vaultOverviewTopologyLine-${activeLocalVaultId}`;
   const overviewTitle = isVaultOverview
-    ? activeLocalVaultItem?.name ?? labels.localVault
-    : currentProject?.name ?? labels.title;
+    ? getDisplayVaultName(
+        activeLocalVaultItem,
+        language,
+        activeLocalVaultIndex >= 0 ? activeLocalVaultIndex : undefined
+      )
+    : getDisplayProjectName(
+        currentProject,
+        language,
+        orbitalData.projects.findIndex((entry) => entry.id === currentProject?.id)
+      );
   const overviewKicker = isVaultOverview ? labels.vaultOverview : labels.overview;
   const overviewLinks = isVaultOverview ? vaultOverviewLinks : currentSystemOverviewLinks;
   const vaultPreviewProjects = useMemo(() => {
@@ -5560,9 +5644,11 @@ export default function OrbitalMapView({
                             textAnchor="middle"
                             className="topology-label orbital-overview-vault-label"
                           >
-                            {entry.project.name.length > 12
-                              ? `${entry.project.name.slice(0, 11)}…`
-                              : entry.project.name}
+                            {getDisplayProjectName(
+                              entry.project,
+                              language,
+                              orbitalData.projects.findIndex((project) => project.id === entry.project.id)
+                            )}
                           </text>
                         ) : null}
                       </g>

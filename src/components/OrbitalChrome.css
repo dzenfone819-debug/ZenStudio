@@ -460,6 +460,12 @@
   gap: 6px;
 }
 
+.orbital-inline-title-stack {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
 .orbital-inline-title-shell.is-editing {
   display: block;
 }
@@ -477,6 +483,11 @@
 
 .orbital-inline-title-button:hover {
   opacity: 0.94;
+}
+
+.orbital-inline-title-button.is-placeholder {
+  color: rgba(188, 196, 230, 0.74);
+  font-style: italic;
 }
 
 .orbital-inline-title-edit {
@@ -518,6 +529,14 @@
 
 .orbital-inline-title-input::placeholder {
   color: rgba(183, 176, 216, 0.6);
+}
+
+.orbital-inline-error,
+.orbital-draft-error {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: #ff9cb2;
 }
 
 .orbital-inspector-header-actions {

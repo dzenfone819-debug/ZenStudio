@@ -176,6 +176,10 @@ export function createStarterCanvasContent(): CanvasContent {
   };
 }
 
+export function hasMeaningfulCanvasContent(content: CanvasContent | null | undefined) {
+  return (content?.elements ?? []).some((element) => !element.isDeleted);
+}
+
 export function normalizeCanvasElements(elements: readonly CanvasSceneElement[] | null | undefined) {
   if (!elements || elements.length === 0) {
     return [];

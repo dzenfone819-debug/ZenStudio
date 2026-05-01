@@ -50,7 +50,7 @@ function createDefaultVaultProfile(): LocalVaultProfile {
   return {
     id: DEFAULT_LOCAL_VAULT_ID,
     vaultGuid: createVaultGuid(),
-    name: "Main vault",
+    name: "",
     vaultKind: "regular",
     createdAt: timestamp,
     updatedAt: timestamp
@@ -85,7 +85,7 @@ function normalizeRegistryState(value: unknown): LocalVaultRegistryState {
           const vaultGuid =
             typeof vault.vaultGuid === "string" ? sanitizeVaultGuid(vault.vaultGuid) : createVaultGuid();
 
-          if (!id || !name || !vaultGuid) {
+          if (!id || !vaultGuid) {
             return null;
           }
 
@@ -277,10 +277,6 @@ export function renameLocalVaultProfile(localVaultId: string, name: string) {
   const registry = getLocalVaultRegistry();
   const normalizedName = sanitizeLocalVaultName(name);
 
-  if (!normalizedName) {
-    throw new Error("LOCAL_VAULT_NAME_REQUIRED");
-  }
-
   const nextVaults = registry.vaults.map((vault) =>
     vault.id === localVaultId
       ? {
@@ -306,10 +302,6 @@ export function updateLocalVaultProfile(
     typeof patch.vaultGuid === "string" ? sanitizeVaultGuid(patch.vaultGuid) : null;
   const normalizedVaultKind =
     patch.vaultKind === undefined ? null : sanitizeVaultKind(patch.vaultKind);
-
-  if (normalizedName !== null && !normalizedName) {
-    throw new Error("LOCAL_VAULT_NAME_REQUIRED");
-  }
 
   if (
     normalizedVaultGuid &&

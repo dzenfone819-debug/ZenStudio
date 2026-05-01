@@ -170,6 +170,30 @@ export function extractPlainText(blocks: NoteContent) {
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
+export function hasMeaningfulNoteContent(blocks: NoteContent) {
+  let meaningful = false;
+
+  walkBlocks(blocks, (block) => {
+    if (meaningful) {
+      return;
+    }
+
+    if (FILE_BLOCK_TYPES.has(block.type ?? "")) {
+      meaningful = true;
+      return;
+    }
+
+    const parts: string[] = [];
+    collectText(block.content, parts);
+
+    if (parts.join(" ").replace(/\s+/g, " ").trim().length > 0) {
+      meaningful = true;
+    }
+  });
+
+  return meaningful;
+}
+
 export function buildExcerpt(blocks: NoteContent, maxLength = 180) {
   const plainText = extractPlainText(blocks);
 

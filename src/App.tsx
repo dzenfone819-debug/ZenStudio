@@ -73,6 +73,12 @@ import {
   updateLocalVaultProfile
 } from "./lib/localVaults";
 import {
+  getDisplayNoteTitle,
+  getDisplayProjectName,
+  getDisplayVaultName,
+  hasExplicitDisplayName
+} from "./lib/displayNames";
+import {
   connectGoogleDriveAccount,
   deleteHostedVault,
   deleteGoogleDriveVault,
@@ -99,6 +105,8 @@ import {
   upsertSyncBinding
 } from "./lib/syncRegistry";
 import { DEFAULT_NOTE_COLOR } from "./lib/palette";
+import { hasMeaningfulCanvasContent } from "./lib/canvas";
+import { hasMeaningfulNoteContent } from "./lib/notes";
 import i18n from "./i18n";
 import type {
   AppSettings,
@@ -188,6 +196,7 @@ export default function App() {
   const [isDocumentVisible, setIsDocumentVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState !== "hidden"
   );
+  const currentAppLanguage = (settings?.language ?? "en") as AppLanguage;
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const autoSyncTimerRef = useRef<number | null>(null);
   const syncTransportTimerRef = useRef<number | null>(null);
@@ -198,6 +207,7 @@ export default function App() {
   const previousOnlineRef = useRef(online);
   const previousVisibilityRef = useRef(isDocumentVisible);
   const previousOrbitalEditorNoteIdRef = useRef<string | null>(null);
+  const newDocumentDraftIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -672,13 +682,13 @@ export default function App() {
   ]);
   const localVaultSwitcherItems = useMemo(
     () =>
-      localVaults.map((vault) => {
+      localVaults.map((vault, index) => {
         const binding = syncBindingsByVaultId.get(vault.id) ?? null;
         const connection = binding ? syncConnectionsById.get(binding.connectionId) ?? null : null;
-
         return {
           id: vault.id,
           name: vault.name,
+          displayName: getDisplayVaultName(vault, currentAppLanguage, index),
           vaultKind: vault.vaultKind,
           statusLabel: !binding
             ? t("settings.statusUnbound")
@@ -714,7 +724,7 @@ export default function App() {
           encryptionState: vaultEncryptionById[vault.id]?.state ?? "disabled"
         };
       }),
-    [localVaults, syncBindingsByVaultId, syncConnectionsById, t, vaultEncryptionById]
+    [currentAppLanguage, localVaults, syncBindingsByVaultId, syncConnectionsById, t, vaultEncryptionById]
   );
   const activeSyncTransportChip = useMemo(
     () =>
@@ -1211,11 +1221,9 @@ export default function App() {
   ) => {
     const language = (settings?.language ?? "en") as AppLanguage;
     const note = await createNote(language, folderId, tagIds, projectId);
+    newDocumentDraftIdsRef.current.add(note.id);
     setSelectedNoteId(note.id);
     setSaveState("saved");
-    requestAutoSync({
-      delayMs: 1500
-    });
     return note;
   };
 
@@ -1226,22 +1234,14 @@ export default function App() {
   ) => {
     const language = (settings?.language ?? "en") as AppLanguage;
     const canvas = await createCanvas(language, folderId, tagIds, projectId);
+    newDocumentDraftIdsRef.current.add(canvas.id);
     setSelectedNoteId(canvas.id);
     setSaveState("saved");
-    requestAutoSync({
-      delayMs: 1500
-    });
     return canvas;
   };
 
   const handleCreateProjectNode = async (x: number, y: number) => {
-    const language = (settings?.language ?? "en") as AppLanguage;
-    const name =
-      language === "ru"
-        ? `Проект ${projects.length + 1}`
-        : `Project ${projects.length + 1}`;
-
-    const project = await createProject(name, x, y);
+    const project = await createProject("", x, y);
     requestAutoSync({
       delayMs: 1500
     });
@@ -1446,6 +1446,8 @@ export default function App() {
       await moveNoteToTrash(note.id);
     }
 
+    newDocumentDraftIdsRef.current.delete(note.id);
+
     requestAutoSync({
       delayMs: 1500
     });
@@ -1573,8 +1575,12 @@ export default function App() {
 
     const confirmed = await requestConfirmation({
       title: t("project.delete"),
-      message: t("project.deleteConfirm", {
-        name: project.name,
+        message: t("project.deleteConfirm", {
+          name: getDisplayProjectName(
+            project,
+            currentAppLanguage,
+            projects.findIndex((entry) => entry.id === project.id)
+          ),
         folderCount: deletedFolderIds.length,
         noteCount: deletedNoteIds.length,
         assetCount
@@ -2089,6 +2095,65 @@ export default function App() {
     setLocalVaults(listLocalVaultProfiles());
   };
 
+  const discardEmptyDocumentDraftIfNeeded = useCallback(
+    (noteId: string) => {
+      if (typeof window === "undefined" || !newDocumentDraftIdsRef.current.has(noteId)) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        void (async () => {
+          try {
+            const note = await db.notes.get(noteId);
+
+            if (!note) {
+              newDocumentDraftIdsRef.current.delete(noteId);
+              return;
+            }
+
+            const assetCount = await db.assets.where("noteId").equals(noteId).count();
+            const hasMeaningfulTitle = hasExplicitDisplayName(note.title);
+            const hasMeaningfulBody =
+              note.contentType === "canvas"
+                ? hasMeaningfulCanvasContent(note.canvasContent)
+                : hasMeaningfulNoteContent(note.content);
+
+            if (!hasMeaningfulTitle && !hasMeaningfulBody && assetCount === 0) {
+              await removeNote(noteId);
+              newDocumentDraftIdsRef.current.delete(noteId);
+
+              if (selectedNoteId === noteId) {
+                setSelectedNoteId(null);
+                await patchSettings({
+                  lastOpenedNoteId: null
+                });
+              }
+
+              requestAutoSync({
+                delayMs: 1500
+              });
+              return;
+            }
+
+            newDocumentDraftIdsRef.current.delete(noteId);
+          } catch {
+            newDocumentDraftIdsRef.current.delete(noteId);
+          }
+        })();
+      }, 40);
+    },
+    [requestAutoSync, selectedNoteId]
+  );
+
+  const handleCloseOrbitalEditor = useCallback(() => {
+    const closingNoteId = orbitalEditorNoteId;
+    setOrbitalEditorNoteId(null);
+
+    if (closingNoteId) {
+      discardEmptyDocumentDraftIfNeeded(closingNoteId);
+    }
+  }, [discardEmptyDocumentDraftIfNeeded, orbitalEditorNoteId]);
+
   const clearLocalVaultBindingState = async (localVaultId: string) => {
     const binding = syncBindingsByVaultId.get(localVaultId);
 
@@ -2131,7 +2196,11 @@ export default function App() {
       const confirmed = await requestConfirmation({
         title: t("sync.localVaultDelete"),
         message: t("sync.localVaultDeleteConfirm", {
-          name: targetVault.name
+          name: getDisplayVaultName(
+            targetVault,
+            currentAppLanguage,
+            localVaults.findIndex((vault) => vault.id === targetVault.id)
+          )
         }),
         confirmLabel: t("sync.localVaultDelete"),
         cancelLabel: t("dialog.cancel")
@@ -2540,8 +2609,13 @@ export default function App() {
   };
 
   const handleOpenOrbitalNote = async (noteId: string) => {
+    const previousNoteId = orbitalEditorNoteId;
     await handleSelectNote(noteId);
     setOrbitalEditorNoteId(noteId);
+
+    if (previousNoteId && previousNoteId !== noteId) {
+      discardEmptyDocumentDraftIfNeeded(previousNoteId);
+    }
   };
 
   const closeConfirmDialog = (result: boolean) => {
@@ -2595,8 +2669,9 @@ export default function App() {
         language={settings.language}
         editorOpen={Boolean(orbitalEditorEntry)}
         editorTitle={
-          orbitalEditorEntry?.title?.trim() ||
-          (orbitalEditorEntry?.contentType === "canvas" ? t("canvas.untitled") : t("note.untitled"))
+          orbitalEditorEntry
+            ? getDisplayNoteTitle(orbitalEditorEntry, currentAppLanguage)
+            : ""
         }
         editorMode={orbitalEditorEntry?.contentType ?? null}
         editorAccentColor={orbitalEditorEntry?.color || DEFAULT_NOTE_COLOR}
@@ -2758,7 +2833,7 @@ export default function App() {
         }
         showClose={false}
         onClose={() => undefined}
-        onCloseEditor={() => setOrbitalEditorNoteId(null)}
+        onCloseEditor={handleCloseOrbitalEditor}
         syncStatusChip={activeVaultSyncChip}
         syncTransportChip={activeSyncTransportChip}
         activeLocalVaultId={activeLocalVaultId}

@@ -452,6 +452,7 @@ const ru = {
     renameVaultTitle: "Переименовать vault",
     createVaultTypeLabel: "Тип vault",
     createVaultNameRequired: "Введи имя нового vault.",
+    renameVaultNameRequired: "У vault должно быть имя.",
     vaultKindRegular: "Обычный",
     vaultKindPrivate: "Приватный",
     createVaultDescription:
