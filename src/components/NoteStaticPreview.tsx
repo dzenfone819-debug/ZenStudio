@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactN
 
 import "./NoteStaticPreview.css";
 import { resolveEditorFontFamily } from "../lib/blocknoteSchema";
-import { normalizeNoteContent } from "../lib/notes";
+import { normalizeNoteContent, sortChecklistBlocksForDisplay } from "../lib/notes";
 import type { NoteContent, StoredBlock } from "../types";
 
 const DARK_TEXT_COLORS: Record<string, string> = {
@@ -462,6 +462,7 @@ function renderListGroup(
   const isBullet = type === "bulletListItem";
   const isCheck = type === "checkListItem";
   const ListTag = (isNumbered ? "ol" : "ul") as "ol" | "ul";
+  const orderedBlocks = isCheck ? sortChecklistBlocksForDisplay(visibleBlocks) : visibleBlocks;
 
   return (
     <ListTag
@@ -476,7 +477,7 @@ function renderListGroup(
         .filter(Boolean)
         .join(" ")}
     >
-      {visibleBlocks.map((block, index) => {
+      {orderedBlocks.map((block, index) => {
         const checked = Boolean(block.props?.checked);
         const hasText = hasInlineContent(block.content);
         const marker =
@@ -491,7 +492,10 @@ function renderListGroup(
           ) : null;
 
         return (
-          <li key={`${key}-item-${index}`} className="note-static-list-item">
+          <li
+            key={`${key}-item-${index}`}
+            className={`note-static-list-item ${checked ? "is-checked" : ""}`}
+          >
             {marker}
             <div className="note-static-list-body">
               {hasText ? (

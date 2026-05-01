@@ -51,9 +51,17 @@
 }
 
 .note-static-link {
-  color: color-mix(in srgb, var(--text) 84%, #8db7ff);
+  color: color-mix(
+    in srgb,
+    var(--text) 82%,
+    var(--selection-accent, var(--note-accent, #8db7ff)) 18%
+  );
   text-decoration: underline;
-  text-decoration-color: rgba(141, 183, 255, 0.42);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--selection-accent, var(--note-accent, #8db7ff)) 56%,
+    transparent
+  );
   text-underline-offset: 0.16em;
 }
 
@@ -117,7 +125,19 @@
   width: 0.9rem;
   height: 0.9rem;
   margin: 0;
-  accent-color: color-mix(in srgb, var(--text) 72%, #5fb3ff);
+  accent-color: color-mix(
+    in srgb,
+    var(--selection-accent, var(--note-accent, #5fb3ff)) 82%,
+    #ffffff 18%
+  );
+}
+
+.note-static-list-item.is-checked .note-static-list-text {
+  color: color-mix(
+    in srgb,
+    var(--text) 72%,
+    var(--selection-accent, var(--note-accent, #8db7ff)) 28%
+  );
 }
 
 .note-static-toggle-marker {

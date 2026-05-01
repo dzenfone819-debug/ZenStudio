@@ -19,6 +19,7 @@ import { editorBlockNoteSchema } from "../lib/blocknoteSchema";
 import {
   flattenFolderOptions,
   formatTimestamp,
+  normalizeChecklistOrdering,
   normalizeNoteContent
 } from "../lib/notes";
 import type { AppLanguage, Folder, Note, NoteContent, SaveState, Tag } from "../types";
@@ -89,6 +90,8 @@ export default function EditorPane({
   const contentTimeoutRef = useRef<number | null>(null);
   const markdownStatusTimeoutRef = useRef<number | null>(null);
   const markdownFileInputRef = useRef<HTMLInputElement | null>(null);
+  const isApplyingChecklistTransformRef = useRef(false);
+  const checklistStableOrderRef = useRef(new Map<string, number>());
   const latestTitleDraftRef = useRef(titleDraft);
   const latestStoredTitleRef = useRef(note.title);
   const latestEditorRef = useRef<ReturnType<typeof useCreateBlockNote> | null>(null);
@@ -110,6 +113,7 @@ export default function EditorPane({
 
   useEffect(() => {
     setPendingMarkdownImport(null);
+    checklistStableOrderRef.current = new Map();
   }, [note.id]);
 
   useEffect(() => {
@@ -170,14 +174,46 @@ export default function EditorPane({
   }, [onTitleChange]);
 
   const handleEditorChange = () => {
+    if (isApplyingChecklistTransformRef.current) {
+      isApplyingChecklistTransformRef.current = false;
+      return;
+    }
+
+    const nextDocument = editor.document as unknown as NoteContent;
+    const checklistNormalization = normalizeChecklistOrdering(nextDocument, (block, fallbackIndex) => {
+      const blockId = typeof block.id === "string" ? block.id : null;
+
+      if (!blockId) {
+        return fallbackIndex;
+      }
+
+      const knownOrder = checklistStableOrderRef.current.get(blockId);
+
+      if (typeof knownOrder === "number") {
+        return knownOrder;
+      }
+
+      const assignedOrder = checklistStableOrderRef.current.size;
+      checklistStableOrderRef.current.set(blockId, assignedOrder);
+      return assignedOrder;
+    });
+    const contentToPersist = checklistNormalization.changed
+      ? checklistNormalization.blocks
+      : nextDocument;
+
     if (contentTimeoutRef.current) {
       window.clearTimeout(contentTimeoutRef.current);
     }
 
-    onContentChange(editor.document as unknown as NoteContent, "saving");
+    if (checklistNormalization.changed) {
+      isApplyingChecklistTransformRef.current = true;
+      editor.replaceBlocks(editor.document as any, checklistNormalization.blocks as any);
+    }
+
+    onContentChange(contentToPersist, "saving");
 
     contentTimeoutRef.current = window.setTimeout(() => {
-      onContentChange(editor.document as unknown as NoteContent, "saved");
+      onContentChange(contentToPersist, "saved");
     }, 280);
   };
 

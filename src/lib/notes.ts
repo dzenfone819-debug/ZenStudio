@@ -122,6 +122,182 @@ export function normalizeNoteContent(blocks: NoteContent): NoteContent {
   return blocks.map((block) => normalizeStoredBlock(block));
 }
 
+function isCheckedChecklistBlock(block: StoredBlock) {
+  return block.type === "checkListItem" && Boolean(block.props?.checked);
+}
+
+type ChecklistStableOrderResolver = (block: StoredBlock, fallbackIndex: number) => number | null;
+
+function compareChecklistBlocks(
+  left: StoredBlock,
+  right: StoredBlock,
+  leftStableOrder: number | null,
+  rightStableOrder: number | null,
+  leftIndex: number,
+  rightIndex: number
+) {
+  const leftChecked = isCheckedChecklistBlock(left);
+  const rightChecked = isCheckedChecklistBlock(right);
+
+  if (leftChecked !== rightChecked) {
+    return Number(leftChecked) - Number(rightChecked);
+  }
+
+  if (
+    leftStableOrder !== null &&
+    rightStableOrder !== null &&
+    leftStableOrder !== rightStableOrder
+  ) {
+    return leftStableOrder - rightStableOrder;
+  }
+
+  if (leftStableOrder !== null && rightStableOrder === null) {
+    return -1;
+  }
+
+  if (leftStableOrder === null && rightStableOrder !== null) {
+    return 1;
+  }
+
+  return leftIndex - rightIndex;
+}
+
+function normalizeChecklistRun(
+  blocks: StoredBlock[],
+  getStableOrder?: ChecklistStableOrderResolver
+) {
+  const hasChecked = blocks.some((block) => isCheckedChecklistBlock(block));
+  const hasUnchecked = blocks.some((block) => !isCheckedChecklistBlock(block));
+
+  if (!hasChecked || !hasUnchecked) {
+    return {
+      blocks,
+      changed: false
+    };
+  }
+
+  const sorted = blocks
+    .map((block, index) => ({
+      block,
+      index,
+      stableOrder: getStableOrder?.(block, index) ?? null
+    }))
+    .sort((left, right) =>
+      compareChecklistBlocks(
+        left.block,
+        right.block,
+        left.stableOrder,
+        right.stableOrder,
+        left.index,
+        right.index
+      )
+    )
+    .map((entry) => entry.block);
+
+  if (sorted.every((block, index) => block === blocks[index])) {
+    return {
+      blocks,
+      changed: false
+    };
+  }
+
+  return {
+    blocks: sorted,
+    changed: true
+  };
+}
+
+function normalizeChecklistOrderingInternal(
+  blocks: StoredBlock[],
+  getStableOrder?: ChecklistStableOrderResolver
+) {
+  let changed = false;
+  const normalizedBlocks = blocks.map((block) => {
+    const childResult =
+      Array.isArray(block.children) && block.children.length > 0
+        ? normalizeChecklistOrderingInternal(block.children, getStableOrder)
+        : null;
+
+    if (childResult?.changed) {
+      changed = true;
+      return {
+        ...block,
+        children: childResult.blocks
+      };
+    }
+
+    return block;
+  });
+
+  const reordered: StoredBlock[] = [];
+
+  for (let index = 0; index < normalizedBlocks.length; ) {
+    const block = normalizedBlocks[index];
+
+    if (block.type !== "checkListItem") {
+      reordered.push(block);
+      index += 1;
+      continue;
+    }
+
+    const runStart = index;
+
+    while (index < normalizedBlocks.length && normalizedBlocks[index].type === "checkListItem") {
+      index += 1;
+    }
+
+    const runResult = normalizeChecklistRun(
+      normalizedBlocks.slice(runStart, index),
+      getStableOrder
+    );
+
+    if (runResult.changed) {
+      changed = true;
+    }
+
+    reordered.push(...runResult.blocks);
+  }
+
+  if (!changed && reordered.every((block, index) => block === blocks[index])) {
+    return {
+      blocks,
+      changed: false
+    };
+  }
+
+  return {
+    blocks: reordered,
+    changed
+  };
+}
+
+export function normalizeChecklistOrdering(
+  blocks: NoteContent,
+  getStableOrder?: ChecklistStableOrderResolver
+) {
+  return normalizeChecklistOrderingInternal(blocks, getStableOrder);
+}
+
+export function sortChecklistBlocksForDisplay(blocks: StoredBlock[]) {
+  if (blocks.length < 2 || blocks.some((block) => block.type !== "checkListItem")) {
+    return blocks;
+  }
+
+  const hasChecked = blocks.some((block) => isCheckedChecklistBlock(block));
+  const hasUnchecked = blocks.some((block) => !isCheckedChecklistBlock(block));
+
+  if (!hasChecked || !hasUnchecked) {
+    return blocks;
+  }
+
+  return [...blocks]
+    .map((block, index) => ({ block, index }))
+    .sort((left, right) =>
+      compareChecklistBlocks(left.block, right.block, null, null, left.index, right.index)
+    )
+    .map((entry) => entry.block);
+}
+
 function collectText(value: unknown, parts: string[]) {
   if (typeof value === "string") {
     parts.push(value);

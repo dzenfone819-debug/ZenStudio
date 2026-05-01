@@ -390,6 +390,29 @@
   line-height: var(--editor-copy-leading);
 }
 
+.editor-stage-shell .bn-editor a,
+.editor-stage-shell .bn-editor .bn-inline-content a {
+  color: color-mix(in srgb, var(--text) 80%, var(--editor-accent) 20%);
+  text-decoration-color: color-mix(in srgb, var(--editor-accent) 58%, rgba(255, 255, 255, 0.12));
+  text-underline-offset: 0.16em;
+  transition: color 160ms ease, text-decoration-color 160ms ease;
+}
+
+.editor-stage-shell .bn-editor a:hover,
+.editor-stage-shell .bn-editor .bn-inline-content a:hover {
+  color: color-mix(in srgb, var(--text) 72%, var(--editor-accent) 28%);
+  text-decoration-color: color-mix(in srgb, var(--editor-accent) 82%, rgba(255, 255, 255, 0.16));
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="checkListItem"] > div > input {
+  accent-color: color-mix(in srgb, var(--editor-accent) 82%, #ffffff 18%);
+}
+
+.editor-stage-shell .bn-editor .bn-block-content[data-content-type="checkListItem"][data-checked="true"] .bn-inline-content {
+  color: color-mix(in srgb, var(--text) 72%, var(--editor-accent) 28%);
+  text-decoration-color: color-mix(in srgb, var(--editor-accent) 72%, rgba(255, 255, 255, 0.18));
+}
+
 .editor-stage-shell .bn-editor .bn-inline-content code {
   padding: 0.12em 0.34em;
   border-radius: 0.55rem;
