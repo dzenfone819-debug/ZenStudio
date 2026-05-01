@@ -2936,6 +2936,7 @@ export default function App() {
           updated: t("orbit.updated"),
           empty: t("orbit.empty"),
           emptyCanvas: t("orbit.emptyCanvas"),
+          canvasPreviewHint: t("orbit.canvasPreviewHint"),
           hints: t("orbit.hints"),
           settings: t("orbit.settings"),
           trash: t("orbit.trash"),

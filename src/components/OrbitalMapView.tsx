@@ -148,6 +148,7 @@ interface OrbitalMapViewProps {
     updated: string;
     empty: string;
     emptyCanvas: string;
+    canvasPreviewHint: string;
     hints: string;
     settings: string;
     trash: string;
@@ -6520,7 +6521,8 @@ export default function OrbitalMapView({
                               canvas: labels.canvas,
                               elements: labels.elementsStat,
                               images: labels.assetsStat,
-                              emptyCanvas: labels.emptyCanvas
+                              emptyCanvas: labels.emptyCanvas,
+                              previewHint: labels.canvasPreviewHint
                             }}
                           />
                         </div>
@@ -7120,7 +7122,8 @@ export default function OrbitalMapView({
                 canvas: labels.canvas,
                 elements: labels.elementsStat,
                 images: labels.assetsStat,
-                emptyCanvas: labels.emptyCanvas
+                emptyCanvas: labels.emptyCanvas,
+                previewHint: labels.canvasPreviewHint
               }}
             />
           </div>

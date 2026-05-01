@@ -628,6 +628,7 @@ const en = {
     deletedAt: "Deleted",
     empty: "No data in this node yet.",
     emptyCanvas: "Canvas has no text yet.",
+    canvasPreviewHint: "Open the document to view the canvas.",
     hints: "Click a node to focus its system, drag to pan, wheel to zoom, double click a note or canvas to open it, Space to pause.",
     sync: "Sync",
     settings: "Settings",

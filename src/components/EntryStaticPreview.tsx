@@ -14,6 +14,7 @@ interface EntryStaticPreviewProps {
     elements: string;
     images: string;
     emptyCanvas: string;
+    previewHint: string;
   };
 }
 
