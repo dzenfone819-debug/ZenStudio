@@ -1887,6 +1887,14 @@
   stroke: none;
 }
 
+.orbital-overlay .orbital-tree-icon.is-subfolder svg {
+  transform: scale(0.96);
+}
+
+.orbital-overlay .orbital-tree-icon.is-subfolder .orbital-tree-icon-dot {
+  fill: color-mix(in srgb, var(--item-color) 66%, rgba(255, 255, 255, 0.18));
+}
+
 .orbital-overlay .orbital-menu-compact-item {
   gap: 10px;
 }

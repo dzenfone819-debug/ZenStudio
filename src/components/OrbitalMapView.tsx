@@ -39,7 +39,13 @@ type SceneNodeKind = "core" | "folder" | "note";
 type OrbitalChild = { folder?: FolderBranch; note?: Note };
 type InspectorMenu = "overview" | "notes" | "folders" | "tags" | "files" | "pinned" | "colors";
 type InspectorHierarchyItemKind = "core" | "folder" | "note" | "canvas";
-type InspectorCompactIconKind = InspectorHierarchyItemKind | "tag" | "file" | "color" | "core";
+type InspectorCompactIconKind =
+  | InspectorHierarchyItemKind
+  | "subfolder"
+  | "tag"
+  | "file"
+  | "color"
+  | "core";
 type InspectorDocumentKindFilter = "note" | "canvas";
 
 const PROJECT_DRAG_THRESHOLD_PX = 5;
@@ -285,6 +291,8 @@ interface OrbitalScene {
   entityMap: Map<string, OrbitalSceneNode>;
 }
 
+type OrbitalVisualTone = "primary" | "direct" | "secondary" | "muted";
+
 interface InspectorHierarchyItem {
   id: string;
   entityId: string;
@@ -515,17 +523,23 @@ function getNoteMass(note: Note) {
   return 1.08 + note.plainText.length / 240 + favoriteWeight;
 }
 
-function getOrbitalEntryRadius(note: Note) {
+function getOrbitalEntryRadius(note: Note, depth: number) {
   if (note.contentType === "canvas") {
     const metrics = getCanvasMetrics(note.canvasContent, { includePlainText: false });
+    const depthOffset = depth === 0 ? 1.8 : depth === 1 ? 0.6 : -0.3;
     return clamp(
-      10 + Math.min(metrics.activeElementCount / 6, 7.2) + (isEntryFavorite(note) ? 1.2 : 0),
-      10,
-      18
+      10 + Math.min(metrics.activeElementCount / 6, 7.2) + (isEntryFavorite(note) ? 1.2 : 0) + depthOffset,
+      9.6,
+      depth === 0 ? 20 : 17.4
     );
   }
 
-  return clamp(9 + Math.min(note.plainText.length / 180, 6.4) + (isEntryFavorite(note) ? 1.2 : 0), 9, 17);
+  const depthOffset = depth === 0 ? 1.5 : depth === 1 ? 0.45 : -0.2;
+  return clamp(
+    9 + Math.min(note.plainText.length / 180, 6.4) + (isEntryFavorite(note) ? 1.2 : 0) + depthOffset,
+    8.8,
+    depth === 0 ? 18.6 : 16.8
+  );
 }
 
 function truncateLabel(value: string, maxLength: number) {
@@ -599,6 +613,7 @@ type OrbitPlanningProfile = {
   laneGap: number;
   planeRatio: number;
   rotationRange: number;
+  wobbleRange: number;
   kindBandOffset: Record<OrbitalChildKind, number>;
   transitionGap: {
     folderToCanvas: number;
@@ -618,9 +633,10 @@ function getOrbitPlanningProfile(
   if (parentKind === "core") {
     return {
       innerPadding: 188,
-      laneGap: 24,
-      planeRatio: 0.66,
-      rotationRange: 12,
+      laneGap: 28,
+      planeRatio: 0.64,
+      rotationRange: 8,
+      wobbleRange: 0.022,
       kindBandOffset: {
         folder: 0,
         canvas: 42,
@@ -632,8 +648,8 @@ function getOrbitPlanningProfile(
         canvasToNote: 24
       },
       speedRange: {
-        min: 0.000022,
-        max: 0.000049
+        min: 0.000014,
+        max: 0.00003
       }
     };
   }
@@ -642,8 +658,9 @@ function getOrbitPlanningProfile(
     return {
       innerPadding: 126,
       laneGap: 18,
-      planeRatio: 0.78,
-      rotationRange: 8,
+      planeRatio: 0.76,
+      rotationRange: 5,
+      wobbleRange: 0.014,
       kindBandOffset: {
         folder: 0,
         canvas: 30,
@@ -655,17 +672,18 @@ function getOrbitPlanningProfile(
         canvasToNote: 18
       },
       speedRange: {
-        min: 0.000018,
-        max: 0.000041
+        min: 0.000006,
+        max: 0.000015
       }
     };
   }
 
   return {
     innerPadding: 108,
-    laneGap: 15,
-    planeRatio: 0.84,
-    rotationRange: 6,
+    laneGap: 14,
+    planeRatio: 0.82,
+    rotationRange: 3.5,
+    wobbleRange: 0.008,
     kindBandOffset: {
       folder: 0,
       canvas: 24,
@@ -677,8 +695,8 @@ function getOrbitPlanningProfile(
       canvasToNote: 14
     },
     speedRange: {
-      min: 0.000018,
-      max: 0.000041
+      min: 0.0000024,
+      max: 0.0000072
     }
   };
 }
@@ -709,6 +727,10 @@ function getOrbitTransitionGap(
 
 function getProjectEntityId(projectId: string) {
   return `project:${projectId}`;
+}
+
+function getFolderVisualKind(folder: Folder | undefined | null) {
+  return folder?.parentId ? "subfolder" : "folder";
 }
 
 function buildOrbitalData(projects: Project[], folders: Folder[], notes: Note[]): OrbitalData {
@@ -861,37 +883,94 @@ function collectFolderAncestryEntityIds(folderId: string, data: OrbitalData) {
   return chain;
 }
 
-function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalData) {
-  const related = new Set<string>();
-  const addProjectSystem = (projectId: string) => {
-    related.add(getProjectEntityId(projectId));
-    (data.rootFoldersByProject.get(projectId) ?? []).forEach((branch) => {
-      related.add(`folder:${branch.folder.id}`);
-    });
-    (data.looseNotesByProject.get(projectId) ?? []).forEach((note) => {
-      related.add(`note:${note.id}`);
-    });
-  };
+function buildVisualContextSets(
+  selectedEntityId: string | null,
+  currentProjectEntityId: string | null,
+  data: OrbitalData
+) {
+  const primary = new Set<string>();
+  const direct = new Set<string>();
+  const secondary = new Set<string>();
+
+  if (!selectedEntityId) {
+    if (currentProjectEntityId) {
+      primary.add(currentProjectEntityId);
+      const currentProjectId = currentProjectEntityId.slice("project:".length);
+
+      (data.rootFoldersByProject.get(currentProjectId) ?? []).forEach((branch) => {
+        direct.add(`folder:${branch.folder.id}`);
+      });
+
+      (data.looseNotesByProject.get(currentProjectId) ?? []).forEach((note) => {
+        direct.add(`note:${note.id}`);
+      });
+    }
+
+    return { primary, direct, secondary };
+  }
+
+  primary.add(selectedEntityId);
 
   if (selectedEntityId.startsWith("project:")) {
     const projectId = selectedEntityId.slice("project:".length);
-    if (!data.projectById.has(projectId)) {
-      return related;
-    }
-    addProjectSystem(projectId);
-    return related;
+
+    (data.rootFoldersByProject.get(projectId) ?? []).forEach((branch) => {
+      direct.add(`folder:${branch.folder.id}`);
+    });
+
+    (data.looseNotesByProject.get(projectId) ?? []).forEach((note) => {
+      direct.add(`note:${note.id}`);
+    });
+
+    data.folderById.forEach((folder) => {
+      const entityId = `folder:${folder.id}`;
+      if (folder.projectId === projectId && !direct.has(entityId)) {
+        secondary.add(entityId);
+      }
+    });
+
+    data.noteById.forEach((note) => {
+      const entityId = `note:${note.id}`;
+      if (note.projectId === projectId && !direct.has(entityId)) {
+        secondary.add(entityId);
+      }
+    });
+
+    return { primary, direct, secondary };
   }
 
   if (selectedEntityId.startsWith("folder:")) {
     const folderId = selectedEntityId.slice("folder:".length);
-    if (!data.folderById.has(folderId)) {
-      return related;
+    const folder = data.folderById.get(folderId);
+
+    if (!folder) {
+      return { primary, direct, secondary };
     }
 
-    collectFolderSubtreeEntityIds(folderId, data).forEach((entityId) => {
-      related.add(entityId);
+    const projectEntityId = getProjectEntityId(folder.projectId);
+    secondary.add(projectEntityId);
+
+    collectFolderAncestryEntityIds(folderId, data).forEach((entityId) => {
+      if (entityId !== selectedEntityId) {
+        secondary.add(entityId);
+      }
     });
-    return related;
+
+    (data.foldersByParent.get(folderId) ?? []).forEach((childFolder) => {
+      direct.add(`folder:${childFolder.id}`);
+    });
+
+    (data.notesByFolder.get(folderId) ?? []).forEach((note) => {
+      direct.add(`note:${note.id}`);
+    });
+
+    collectFolderSubtreeEntityIds(folderId, data).forEach((entityId) => {
+      if (entityId !== selectedEntityId && !direct.has(entityId)) {
+        secondary.add(entityId);
+      }
+    });
+
+    return { primary, direct, secondary };
   }
 
   if (selectedEntityId.startsWith("note:")) {
@@ -899,13 +978,26 @@ function buildSelectedSystemEntitySet(selectedEntityId: string, data: OrbitalDat
     const note = data.noteById.get(noteId);
 
     if (!note) {
-      return related;
+      return { primary, direct, secondary };
     }
 
-    related.add(`note:${note.id}`);
+    const projectEntityId = getProjectEntityId(note.projectId);
+    secondary.add(projectEntityId);
+
+    if (note.folderId) {
+      direct.add(`folder:${note.folderId}`);
+
+      collectFolderAncestryEntityIds(note.folderId, data).forEach((entityId) => {
+        if (!direct.has(entityId) && entityId !== selectedEntityId) {
+          secondary.add(entityId);
+        }
+      });
+    }
+
+    return { primary, direct, secondary };
   }
 
-  return related;
+  return { primary, direct, secondary };
 }
 
 function getEntityVisibilityChain(entityId: string, data: OrbitalData) {
@@ -1405,8 +1497,10 @@ function buildOrbitalLayout(
       const kind: SceneNodeKind = child.folder ? "folder" : "note";
       const label = child.folder?.folder.name ?? (child.note ? getDisplayNoteTitle(child.note, language) : "");
       const radius = child.folder
-        ? clamp(14 + child.folder.mass * 1.5, 15, 40)
-        : getOrbitalEntryRadius(child.note!);
+        ? depth === 0
+          ? clamp(16 + child.folder.mass * 1.65, 18, 44)
+          : clamp(12.5 + child.folder.mass * 1.24, 13.5, 33)
+        : getOrbitalEntryRadius(child.note!, depth);
       const color = child.folder?.folder.color ?? child.note?.color ?? DEFAULT_NOTE_COLOR;
 
       if (orderIndex === 0) {
@@ -1445,7 +1539,7 @@ function buildOrbitalLayout(
           speed,
           direction,
           baseAngle,
-          wobble: ((((seed >> 14) % 240) - 120) / 120) * 0.035
+          wobble: ((((seed >> 14) % 240) - 120) / 120) * profile.wobbleRange
         }
       });
 
@@ -1540,7 +1634,12 @@ function buildOrbitalLayout(
   };
 }
 
-function materializeOrbitalScene(layout: OrbitalLayout, timeMs: number): OrbitalScene {
+function materializeOrbitalScene(
+  layout: OrbitalLayout,
+  timeMs: number,
+  toneByEntityId?: Map<string, OrbitalVisualTone>,
+  motionCalmFactor = 1
+): OrbitalScene {
   const nodes: OrbitalSceneNode[] = [];
   const orbits: OrbitalSceneOrbit[] = [];
   const links: OrbitalSceneLink[] = [];
@@ -1557,9 +1656,18 @@ function materializeOrbitalScene(layout: OrbitalLayout, timeMs: number): Orbital
       | undefined;
 
     if (parent && layoutNode.orbit) {
+      const tone = toneByEntityId?.get(layoutNode.entityId) ?? "muted";
+      const motionFactor =
+        tone === "primary"
+          ? 1.06
+          : tone === "direct"
+            ? 0.82
+            : tone === "secondary"
+              ? 0.34
+              : 0.12;
       const angle =
         layoutNode.orbit.baseAngle +
-        timeMs * layoutNode.orbit.speed * layoutNode.orbit.direction +
+        timeMs * layoutNode.orbit.speed * layoutNode.orbit.direction * motionFactor * motionCalmFactor +
         layoutNode.orbit.wobble;
       const localX = Math.cos(angle) * layoutNode.orbit.rx;
       const localY = Math.sin(angle) * layoutNode.orbit.ry;
@@ -1796,6 +1904,11 @@ export default function OrbitalMapView({
   const [isDocumentVisible, setIsDocumentVisible] = useState(
     typeof document === "undefined" ? true : document.visibilityState !== "hidden"
   );
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    typeof window === "undefined"
+      ? false
+      : window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
   const [isMobilePreviewMode, setIsMobilePreviewMode] = useState(
     typeof window === "undefined"
       ? false
@@ -1926,6 +2039,24 @@ export default function OrbitalMapView({
 
     return () => {
       mediaQuery.removeEventListener("change", syncMobileMode);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncReducedMotion = () => {
+      setPrefersReducedMotion(mediaQuery.matches);
+    };
+
+    syncReducedMotion();
+    mediaQuery.addEventListener("change", syncReducedMotion);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncReducedMotion);
     };
   }, []);
   const folderPathMap = useMemo(() => buildFolderPathMap(folders), [folders]);
@@ -2101,25 +2232,44 @@ export default function OrbitalMapView({
     return counts;
   }, [folders, orbitalData.projects, visibleNotes]);
   const totalSceneBodyCount = Math.max(orbitalData.totalEntities - orbitalData.projects.length, 0);
-  const isSceneBudgetConstrained = totalSceneBodyCount > ORBITAL_SCENE_BODY_BUDGET;
-  const selectedPrimaryEntityIds = useMemo(() => {
-    if (selectedEntityId) {
-      return new Set<string>([selectedEntityId]);
-    }
+  const sceneBodyBudget = isMobilePreviewMode ? Math.min(54, ORBITAL_SCENE_BODY_BUDGET) : ORBITAL_SCENE_BODY_BUDGET;
+  const isSceneBudgetConstrained = totalSceneBodyCount > sceneBodyBudget;
+  const selectionVisualContext = useMemo(
+    () => buildVisualContextSets(selectedEntityId, currentProjectEntityId, orbitalData),
+    [currentProjectEntityId, orbitalData, selectedEntityId]
+  );
+  const ambientFavoriteEntityIds = useMemo(() => {
+    const filterActive =
+      normalizedFilterQuery.length > 0 ||
+      activeColorFilters.length > 0 ||
+      activeTagFilters.length > 0 ||
+      activeFolderFilters.length > 0 ||
+      activeNoteFilters.length > 0 ||
+      activeAssetFilters.length > 0;
 
-    return currentProjectEntityId
-      ? buildSelectedSystemEntitySet(currentProjectEntityId, orbitalData)
-      : new Set<string>();
-  }, [currentProjectEntityId, selectedEntityId, orbitalData]);
-  const selectedSecondaryEntityIds = useMemo(() => {
-    if (!selectedEntityId) {
+    if (selectedEntityId || filterActive) {
       return new Set<string>();
     }
 
-    const related = buildSelectedSystemEntitySet(selectedEntityId, orbitalData);
-    related.delete(selectedEntityId);
+    const related = new Set<string>();
+
+    orbitalData.noteById.forEach((note) => {
+      if (isEntryFavorite(note)) {
+        related.add(`note:${note.id}`);
+      }
+    });
+
     return related;
-  }, [selectedEntityId, orbitalData]);
+  }, [
+    activeAssetFilters.length,
+    activeColorFilters.length,
+    activeFolderFilters.length,
+    activeNoteFilters.length,
+    activeTagFilters.length,
+    normalizedFilterQuery.length,
+    orbitalData.noteById,
+    selectedEntityId
+  ]);
   const isPriorityFocusMode = false;
   const searchMatchedEntityIds = useMemo(() => {
     const matches = new Set<string>();
@@ -2328,6 +2478,59 @@ export default function OrbitalMapView({
 
     return matches;
   }, [filterPrimaryEntityIds, folderDescendantFilteredEntityIds]);
+  const sceneToneByEntityId = useMemo(() => {
+    const toneMap = new Map<string, OrbitalVisualTone>();
+
+    const applyTone = (entityId: string, tone: OrbitalVisualTone) => {
+      const current = toneMap.get(entityId);
+      const rank =
+        tone === "primary" ? 4 : tone === "direct" ? 3 : tone === "secondary" ? 2 : 1;
+      const currentRank =
+        current === "primary" ? 4 : current === "direct" ? 3 : current === "secondary" ? 2 : current === "muted" ? 1 : 0;
+
+      if (rank > currentRank) {
+        toneMap.set(entityId, tone);
+      }
+    };
+
+    orbitalData.projects.forEach((project) => {
+      applyTone(getProjectEntityId(project.id), "muted");
+    });
+    orbitalData.folderById.forEach((folder) => {
+      applyTone(`folder:${folder.id}`, "muted");
+    });
+    orbitalData.noteById.forEach((note) => {
+      applyTone(`note:${note.id}`, "muted");
+    });
+
+    const selectionActive = Boolean(selectedEntityId);
+    const filterActive = hasActiveFilter && !selectionActive;
+
+    if (selectionActive || !filterActive) {
+      selectionVisualContext.primary.forEach((entityId) => applyTone(entityId, "primary"));
+      selectionVisualContext.direct.forEach((entityId) => applyTone(entityId, "direct"));
+      selectionVisualContext.secondary.forEach((entityId) => applyTone(entityId, "secondary"));
+    }
+
+    if (filterActive) {
+      filterPrimaryEntityIds.forEach((entityId) => applyTone(entityId, "primary"));
+      filterSecondaryEntityIds.forEach((entityId) => applyTone(entityId, "secondary"));
+    }
+
+    ambientFavoriteEntityIds.forEach((entityId) => applyTone(entityId, "direct"));
+
+    return toneMap;
+  }, [
+    ambientFavoriteEntityIds,
+    filterPrimaryEntityIds,
+    filterSecondaryEntityIds,
+    hasActiveFilter,
+    orbitalData.folderById,
+    orbitalData.noteById,
+    orbitalData.projects,
+    selectedEntityId,
+    selectionVisualContext
+  ]);
   const sceneVisibleEntityIds = useMemo(() => {
     if (!isSceneBudgetConstrained) {
       return null;
@@ -2335,7 +2538,7 @@ export default function OrbitalMapView({
 
     return buildAdaptiveVisibilitySet({
       data: orbitalData,
-      budget: ORBITAL_SCENE_BODY_BUDGET,
+      budget: sceneBodyBudget,
       currentProjectId,
       priorityProjectId: isPriorityFocusMode
         ? selectedEntityId
@@ -2353,6 +2556,7 @@ export default function OrbitalMapView({
     isPriorityFocusMode,
     isSceneBudgetConstrained,
     orbitalData,
+    sceneBodyBudget,
     selectedEntityId
   ]);
   const sceneLayout = useMemo(
@@ -2360,9 +2564,16 @@ export default function OrbitalMapView({
     [language, orbitalData, sceneVisibleEntityIds]
   );
   const scene = useMemo(
-    () => materializeOrbitalScene(sceneLayout, timeMs),
-    [sceneLayout, timeMs]
+    () =>
+      materializeOrbitalScene(
+        sceneLayout,
+        timeMs,
+        sceneToneByEntityId,
+        isMobilePreviewMode ? 0.82 : 1
+      ),
+    [isMobilePreviewMode, sceneLayout, sceneToneByEntityId, timeMs]
   );
+  const getSceneTone = (entityId: string): OrbitalVisualTone => sceneToneByEntityId.get(entityId) ?? "muted";
   const selectedNode = selectedEntityId ? scene.entityMap.get(selectedEntityId) ?? null : null;
   const shouldShowHierarchyInspector =
     selectedNode?.kind === "folder" || selectedNode?.kind === "note";
@@ -2786,21 +2997,6 @@ export default function OrbitalMapView({
   const anchorNode = selectedNode || currentProjectNode || scene.nodes.find((node) => node.kind === "core");
   const visibleBodies = Math.max(scene.nodes.filter((node) => node.kind !== "core").length, 0);
   const hiddenBodies = Math.max(orbitalData.totalEntities - scene.nodes.length, 0);
-  const passivePinnedHighlightEntityIds = useMemo(() => {
-    if (selectedEntityId || hasActiveFilter) {
-      return new Set<string>();
-    }
-
-    const related = new Set<string>();
-
-    orbitalData.noteById.forEach((note) => {
-      if (isEntryFavorite(note)) {
-        related.add(`note:${note.id}`);
-      }
-    });
-
-    return related;
-  }, [hasActiveFilter, orbitalData.noteById, selectedEntityId]);
   const topFolders = useMemo(
     () => (currentProjectId ? (orbitalData.rootFoldersByProject.get(currentProjectId) ?? []).slice(0, 5).map((branch) => branch.folder) : []),
     [currentProjectId, orbitalData.rootFoldersByProject]
@@ -2825,12 +3021,19 @@ export default function OrbitalMapView({
     () =>
       Array.from({ length: 56 }, (_, index) => {
         const seed = hashString(`star-${index}`);
+        const tint = seed % 9;
         return {
           id: `star-${index}`,
           x: (seed % VIEWBOX.width) + VIEWBOX.minX,
           y: ((seed * 13) % VIEWBOX.height) + VIEWBOX.minY,
           r: 0.8 + ((seed % 10) / 10) * 2.2,
-          opacity: 0.12 + ((seed % 100) / 100) * 0.62
+          opacity: 0.1 + ((seed % 100) / 100) * 0.56,
+          color:
+            tint === 0
+              ? "rgba(255, 224, 168, 0.92)"
+              : tint <= 2
+                ? "rgba(132, 230, 255, 0.9)"
+                : "rgba(241, 236, 255, 0.88)"
         };
       }),
     []
@@ -2846,7 +3049,7 @@ export default function OrbitalMapView({
       ? ORBIT_IDLE_FRAME_MS_LARGE
       : ORBIT_IDLE_FRAME_MS;
   const isOrbitAnimationSuspended =
-    isPaused || editorOpen || activeModal !== null || !isDocumentVisible;
+    isPaused || editorOpen || activeModal !== null || !isDocumentVisible || prefersReducedMotion;
   const focusSystemLabel =
     !anchorNode
       ? labels.core
@@ -4647,6 +4850,22 @@ export default function OrbitalMapView({
       );
     }
 
+    if (kind === "subfolder") {
+      return (
+        <span
+          className="orbital-tree-icon is-subfolder"
+          style={style}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M4 8.3c0-1.4 1.1-2.6 2.6-2.6h3l1.4 1.6h5.4c1.4 0 2.6 1.2 2.6 2.6v5.5c0 1.4-1.2 2.6-2.6 2.6H6.6c-1.5 0-2.6-1.2-2.6-2.6V8.3Z" />
+            <path d="M7.2 9.9h8.1" className="orbital-tree-icon-accent" />
+            <circle cx="17.4" cy="7.3" r="1.65" className="orbital-tree-icon-dot" />
+          </svg>
+        </span>
+      );
+    }
+
     if (kind === "canvas") {
       return (
         <span
@@ -4737,6 +4956,14 @@ export default function OrbitalMapView({
         </svg>
       </span>
     );
+  }
+
+  function getInspectorItemIconKind(item: Pick<InspectorHierarchyItem, "kind" | "folder">) {
+    if (item.kind === "folder") {
+      return item.folder?.parentId ? "subfolder" : "folder";
+    }
+
+    return item.kind === "core" ? "core" : item.kind;
   }
 
   function renderInspectorCreateActionIcon(kind: "folder" | "subfolder" | "note" | "canvas") {
@@ -5222,7 +5449,7 @@ export default function OrbitalMapView({
               className="orbital-tree-item is-editing"
               ref={(node) => registerInspectorHierarchyItemRef(item.entityId, node)}
             >
-              {renderInspectorItemIcon(item.kind === "core" ? "core" : item.kind, item.color)}
+              {renderInspectorItemIcon(getInspectorItemIconKind(item), item.color)}
               <span className="orbital-tree-item-main">
                 {renderInspectorRenameField(contextMenuTarget!, "orbital-menu-inline-input")}
                 <span className="orbital-tree-kind">{kindLabel}</span>
@@ -5330,7 +5557,7 @@ export default function OrbitalMapView({
                 }
               }}
             >
-              {renderInspectorItemIcon(item.kind === "core" ? "core" : item.kind, item.color)}
+              {renderInspectorItemIcon(getInspectorItemIconKind(item), item.color)}
               <span className="orbital-tree-item-main">
                 <span className="orbital-tree-label">{item.label}</span>
                 <span className="orbital-tree-kind">{kindLabel}</span>
@@ -6907,7 +7134,11 @@ export default function OrbitalMapView({
           {!(!selectedNode || shouldShowHierarchyInspector) ? renderFolderDraftErrorMessage() : null}
         </aside>
 
-        <div className="orbital-scene-wrap" onWheel={handleWheel}>
+        <div
+          className="orbital-scene-wrap"
+          style={{ "--orbital-scene-accent": currentProject?.color ?? DEFAULT_PROJECT_COLOR } as CSSProperties}
+          onWheel={handleWheel}
+        >
           <div className="orbital-filter-dock">
             <div className="orbital-filter-shell">
               <div className="orbital-filter-topline">
@@ -6969,25 +7200,14 @@ export default function OrbitalMapView({
                   cy={star.y}
                   r={star.r}
                   opacity={star.opacity}
-                  fill="#f6f1ff"
+                  fill={star.color}
                 />
               ))}
             </g>
 
             <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
               {scene.links.map((link) => {
-                const linkSelected =
-                  link.entityId === selectedEntityId || link.parentEntityId === selectedEntityId;
-                const linkEmphasisPrimary = selectedPrimaryEntityIds.has(link.entityId);
-                const linkEmphasisRelated =
-                  !linkEmphasisPrimary && selectedSecondaryEntityIds.has(link.entityId);
-                const linkEmphasis = linkEmphasisPrimary || linkEmphasisRelated;
-                const linkPassiveHighlight = passivePinnedHighlightEntityIds.has(link.entityId);
-                const linkFilterPrimary = filterPrimaryEntityIds.has(link.entityId);
-                const linkFilterRelated =
-                  !linkFilterPrimary && filterSecondaryEntityIds.has(link.entityId);
-                const linkFilterMatch = linkFilterPrimary || linkFilterRelated;
-                const linkFilterMuted = hasActiveFilter && !linkFilterMatch && !linkSelected;
+                const linkTone = getSceneTone(link.entityId);
 
                 return (
                   <line
@@ -6997,23 +7217,16 @@ export default function OrbitalMapView({
                     x2={link.x2}
                     y2={link.y2}
                     style={{ "--path-color": link.color } as CSSProperties}
-                    className={`orbital-link orbital-link-${link.kind} orbital-link-depth-${Math.min(link.depth, 3)} ${linkEmphasis ? "is-emphasis" : "is-muted"} ${linkEmphasisRelated ? "is-related-emphasis" : ""} ${linkPassiveHighlight ? "is-passive-highlight" : ""} ${linkSelected ? "is-selected" : ""} ${linkFilterPrimary ? "is-filter-match" : ""} ${linkFilterRelated ? "is-filter-related" : ""} ${linkFilterMuted ? "is-filter-muted" : ""}`}
+                    className={`orbital-link orbital-link-${link.kind} orbital-link-depth-${Math.min(
+                      link.depth,
+                      3
+                    )} is-${linkTone}`}
                   />
                 );
               })}
 
               {scene.orbits.map((orbit) => {
-                const orbitSelected = orbit.entityId === selectedEntityId;
-                const orbitEmphasisPrimary = selectedPrimaryEntityIds.has(orbit.entityId);
-                const orbitEmphasisRelated =
-                  !orbitEmphasisPrimary && selectedSecondaryEntityIds.has(orbit.entityId);
-                const orbitEmphasis = orbitEmphasisPrimary || orbitEmphasisRelated;
-                const orbitPassiveHighlight = passivePinnedHighlightEntityIds.has(orbit.entityId);
-                const orbitFilterPrimary = filterPrimaryEntityIds.has(orbit.entityId);
-                const orbitFilterRelated =
-                  !orbitFilterPrimary && filterSecondaryEntityIds.has(orbit.entityId);
-                const orbitFilterMatch = orbitFilterPrimary || orbitFilterRelated;
-                const orbitFilterMuted = hasActiveFilter && !orbitFilterMatch && !orbitSelected;
+                const orbitTone = getSceneTone(orbit.entityId);
 
                 return (
                   <ellipse
@@ -7024,34 +7237,35 @@ export default function OrbitalMapView({
                     ry={orbit.ry}
                     transform={`rotate(${orbit.rotation} ${orbit.x} ${orbit.y})`}
                     style={{ "--path-color": orbit.color } as CSSProperties}
-                    className={`orbital-orbit orbital-orbit-depth-${Math.min(orbit.depth, 3)} orbital-orbit-${orbit.kind} ${orbitEmphasis ? "is-emphasis" : "is-muted"} ${orbitEmphasisRelated ? "is-related-emphasis" : ""} ${orbitPassiveHighlight ? "is-passive-highlight" : ""} ${orbitSelected ? "is-selected" : ""} ${orbitFilterPrimary ? "is-filter-match" : ""} ${orbitFilterRelated ? "is-filter-related" : ""} ${orbitFilterMuted ? "is-filter-muted" : ""}`}
+                    className={`orbital-orbit orbital-orbit-depth-${Math.min(
+                      orbit.depth,
+                      3
+                    )} orbital-orbit-${orbit.kind} is-${orbitTone}`}
                   />
                 );
               })}
 
               {scene.nodes.map((node) => {
+                const nodeTone = getSceneTone(node.entityId);
+                const isPrimaryTone = nodeTone === "primary";
                 const isSelected = node.entityId === selectedEntityId;
-                const isEmphasisPrimary = selectedPrimaryEntityIds.has(node.entityId);
-                const isEmphasisRelated =
-                  !isEmphasisPrimary && selectedSecondaryEntityIds.has(node.entityId);
-                const isEmphasis = isEmphasisPrimary || isEmphasisRelated;
-                const isPassiveHighlight = passivePinnedHighlightEntityIds.has(node.entityId);
-                const isFilterPrimary = filterPrimaryEntityIds.has(node.entityId);
-                const isFilterRelated =
-                  !isFilterPrimary && filterSecondaryEntityIds.has(node.entityId);
-                const isFilterMatch = isFilterPrimary || isFilterRelated;
-                const isFilterMuted = hasActiveFilter && !isFilterMatch && !isSelected;
+                const folderVisualKind = node.kind === "folder" ? getFolderVisualKind(node.folder) : null;
+                const isRootFolder = folderVisualKind === "folder";
+                const isSubfolder = folderVisualKind === "subfolder";
+                const isRootEntry = node.kind === "note" && !node.note?.folderId;
                 const labelText = truncateLabel(node.label, 24);
-                const labelWidth = estimateLabelWidth(labelText);
+                const labelWidth = estimateLabelWidth(labelText) + (node.kind === "core" ? 0 : 16);
                 const showLabel =
                   node.kind === "core" ||
                   isSelected ||
-                  isFilterPrimary ||
-                  isFilterRelated ||
-                  isEmphasis ||
-                  isPassiveHighlight ||
+                  nodeTone === "primary" ||
+                  nodeTone === "direct" ||
+                  (nodeTone === "secondary" && !isMobilePreviewMode) ||
                   (!isSceneBudgetConstrained &&
-                    (node.depth <= 1 || (node.kind === "folder" && node.radius >= 28)));
+                    (node.depth === 0 ||
+                      (isRootFolder && node.radius >= 24) ||
+                      (isRootEntry && node.radius >= 13.5) ||
+                      (isSubfolder && node.radius >= 30)));
 
                 return (
                   <g
@@ -7059,7 +7273,9 @@ export default function OrbitalMapView({
                     data-orbital-node="true"
                     className={`orbital-node orbital-node-${node.kind} ${
                       node.note?.contentType === "canvas" ? "is-canvas-entry" : ""
-                    } ${isSelected ? "is-selected" : ""} ${isEmphasis ? "is-emphasis" : "is-muted"} ${isEmphasisRelated ? "is-related-emphasis" : ""} ${isPassiveHighlight ? "is-passive-highlight" : ""} ${isFilterPrimary ? "is-filter-match" : ""} ${isFilterRelated ? "is-filter-related" : ""} ${isFilterMuted ? "is-filter-muted" : ""}`}
+                    } ${isRootFolder ? "is-root-folder" : ""} ${isSubfolder ? "is-subfolder" : ""} ${
+                      isRootEntry ? "is-root-entry" : ""
+                    } is-${nodeTone} ${isSelected ? "is-selected" : ""}`}
                     style={{ "--node-color": node.color } as CSSProperties}
                     transform={`translate(${node.x} ${node.y})`}
                     onPointerDown={(event) => {
@@ -7154,8 +7370,14 @@ export default function OrbitalMapView({
                         : undefined
                     }
                   >
+                    <title>{node.label}</title>
+                    <circle
+                      r={node.radius + (isMobilePreviewMode ? 13 : 7)}
+                      className="orbital-hit-area"
+                    />
                     {node.kind === "core" ? (
                       <>
+                        <circle r={node.radius * 1.72} className="orbital-core-halo" />
                         <circle r={node.radius * 2.24} className="orbital-core-corona" />
                         <g transform={`rotate(${coreFlareRotation})`}>
                           <polygon
@@ -7170,22 +7392,48 @@ export default function OrbitalMapView({
                         </g>
                         <circle r={node.radius * 1.28} className="orbital-node-aura" />
                         <circle r={node.radius} className="orbital-core-disc" />
+                        <circle r={node.radius * 0.82} className="orbital-core-rim" />
                         <circle r={node.radius * 0.58} className="orbital-core-pulse" />
                       </>
                     ) : null}
 
                     {node.kind === "folder" ? (
                       <>
-                        <circle r={node.radius * 1.38} className="orbital-node-aura" />
-                        <circle r={node.radius} className="orbital-folder-disc" />
-                        <circle r={node.radius * 0.42} className="orbital-folder-core" />
+                        <circle r={node.radius * (isRootFolder ? 1.46 : 1.28)} className="orbital-node-aura" />
+                        <circle r={node.radius} className={isRootFolder ? "orbital-folder-disc" : "orbital-subfolder-disc"} />
+                        {isRootFolder ? (
+                          <>
+                            <ellipse
+                              rx={node.radius * 0.88}
+                              ry={node.radius * 0.42}
+                              className="orbital-folder-band"
+                              transform="rotate(-14)"
+                            />
+                            <path
+                              d={`M ${-node.radius * 0.52} ${-node.radius * 0.08} C ${-node.radius * 0.18} ${-node.radius * 0.24}, ${node.radius * 0.18} ${-node.radius * 0.24}, ${node.radius * 0.54} ${-node.radius * 0.02}`}
+                              className="orbital-folder-equator"
+                            />
+                            <circle r={node.radius * 0.34} className="orbital-folder-core" />
+                          </>
+                        ) : (
+                          <>
+                            <circle r={node.radius * 0.72} className="orbital-subfolder-ring" />
+                            <circle
+                              cx={node.radius * 0.58}
+                              cy={-node.radius * 0.52}
+                              r={Math.max(2.4, node.radius * 0.14)}
+                              className="orbital-subfolder-moon"
+                            />
+                            <circle r={node.radius * 0.24} className="orbital-folder-core" />
+                          </>
+                        )}
                       </>
                     ) : null}
 
                     {node.kind === "note" ? (
                       node.note?.contentType === "canvas" ? (
                         <>
-                          <circle r={node.radius * 1.16} className="orbital-node-aura note-aura" />
+                          <circle r={node.radius * 1.18} className="orbital-node-aura note-aura" />
                           <rect
                             x={-node.radius * 1.04}
                             y={-node.radius * 0.86}
@@ -7201,6 +7449,10 @@ export default function OrbitalMapView({
                             height={node.radius}
                             rx={node.radius * 0.18}
                             className="orbital-canvas-core"
+                          />
+                          <path
+                            d={`M ${-node.radius * 0.62} ${-node.radius * 0.34} H ${node.radius * 0.62} M ${-node.radius * 0.62} ${node.radius * 0.02} H ${node.radius * 0.62}`}
+                            className="orbital-canvas-gridline"
                           />
                           <path
                             d={`M ${-node.radius * 0.44} ${-node.radius * 0.08} H ${node.radius * 0.44} M ${-node.radius * 0.44} ${node.radius * 0.18} H ${node.radius * 0.44}`}
@@ -7234,6 +7486,10 @@ export default function OrbitalMapView({
                             className="orbital-note-core"
                             transform="rotate(45)"
                           />
+                          <path
+                            d={`M ${-node.radius * 0.26} ${-node.radius * 0.88} L ${node.radius * 0.7} ${0.08 * node.radius}`}
+                            className="orbital-note-sheen"
+                          />
                           {isEntryFavorite(node) ? (
                             <circle
                               cx={-node.radius * 0.92}
@@ -7250,7 +7506,11 @@ export default function OrbitalMapView({
 
                     {showLabel ? (
                       <g
-                        className={`orbital-label-group orbital-label-group-${node.kind} ${isSelected ? "is-selected" : ""} ${isEmphasis ? "is-emphasis" : "is-muted"} ${isEmphasisRelated ? "is-related-emphasis" : ""} ${isPassiveHighlight ? "is-passive-highlight" : ""} ${isFilterPrimary ? "is-filter-match" : ""} ${isFilterRelated ? "is-filter-related" : ""} ${isFilterMuted ? "is-filter-muted" : ""}`}
+                        className={`orbital-label-group orbital-label-group-${node.kind} ${
+                          isRootFolder ? "is-root-folder" : ""
+                        } ${isSubfolder ? "is-subfolder" : ""} ${isRootEntry ? "is-root-entry" : ""} ${
+                          isSelected ? "is-selected" : ""
+                        } is-${nodeTone}`}
                         transform={`translate(0 ${node.radius + 24})`}
                       >
                         <rect
@@ -7261,7 +7521,42 @@ export default function OrbitalMapView({
                           rx={12}
                           className="orbital-label-badge"
                         />
-                        <text y={2} textAnchor="middle" className="orbital-label-text">
+                        {node.kind !== "core" ? (
+                          <g className="orbital-label-glyph" transform={`translate(${-labelWidth / 2 + 12} 0)`}>
+                            {node.kind === "folder" ? (
+                              isRootFolder ? (
+                                <>
+                                  <circle r="4.1" className="orbital-label-glyph-orb" />
+                                  <ellipse rx="5.6" ry="2.45" className="orbital-label-glyph-ring" transform="rotate(-14)" />
+                                </>
+                              ) : (
+                                <>
+                                  <circle r="3.4" className="orbital-label-glyph-orb" />
+                                  <circle r="4.8" className="orbital-label-glyph-ring orbital-label-glyph-ring-dashed" />
+                                  <circle cx="4.7" cy="-3.9" r="1.2" className="orbital-label-glyph-dot" />
+                                </>
+                              )
+                            ) : node.note?.contentType === "canvas" ? (
+                              <>
+                                <rect x="-4.7" y="-3.9" width="9.4" height="7.8" rx="2" className="orbital-label-glyph-rect" />
+                                <path d="M -2.7 -0.9 H 2.7 M -2.7 1.3 H 2.7" className="orbital-label-glyph-line" />
+                              </>
+                            ) : (
+                              <>
+                                <rect
+                                  x="-3.7"
+                                  y="-3.7"
+                                  width="7.4"
+                                  height="7.4"
+                                  rx="1.25"
+                                  transform="rotate(45)"
+                                  className="orbital-label-glyph-rect"
+                                />
+                              </>
+                            )}
+                          </g>
+                        ) : null}
+                        <text y={2} textAnchor="middle" className="orbital-label-text" dx={node.kind === "core" ? 0 : 8}>
                           {labelText}
                         </text>
                       </g>
