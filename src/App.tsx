@@ -2786,8 +2786,8 @@ export default function App() {
     return (
       <div className="boot-screen">
         <div className="boot-card">
-          <span className="panel-kicker">Zen Notes</span>
-          <strong>Booting local vault...</strong>
+          <span className="panel-kicker">{t("app.name")}</span>
+          <strong>{t("app.booting")}</strong>
         </div>
       </div>
     );
